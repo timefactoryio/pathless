@@ -71,14 +71,16 @@ func minify(html string) []byte {
 		return strings.TrimSpace(s)
 	})
 
-	// Minify JavaScript in <script> tags
+	// Minify JavaScript in <script> tags - preserve modern syntax
 	html = regexp.MustCompile(`<script>([\s\S]*?)</script>`).ReplaceAllStringFunc(html, func(s string) string {
-		s = regexp.MustCompile(`//[^\n]*\n`).ReplaceAllString(s, "\n")                    // Remove single-line comments
-		s = regexp.MustCompile(`/\*[\s\S]*?\*/`).ReplaceAllString(s, "")                  // Remove multi-line comments
-		s = regexp.MustCompile(`\s*([{}();,=+\-*/<>!&|?:])\s*`).ReplaceAllString(s, "$1") // Remove spaces around operators
-		s = regexp.MustCompile(`\n+`).ReplaceAllString(s, "\n")                           // Collapse newlines
-		s = regexp.MustCompile(`\t+`).ReplaceAllString(s, "")                             // Remove tabs
-		s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")                            // Collapse remaining whitespace
+		s = regexp.MustCompile(`//[^\n]*\n`).ReplaceAllString(s, "\n")   // Remove single-line comments
+		s = regexp.MustCompile(`/\*[\s\S]*?\*/`).ReplaceAllString(s, "") // Remove multi-line comments
+		s = regexp.MustCompile(`\n+`).ReplaceAllString(s, "\n")          // Collapse newlines
+		s = regexp.MustCompile(`\t+`).ReplaceAllString(s, "")            // Remove tabs
+
+		// Only collapse multiple spaces, don't remove necessary whitespace
+		s = regexp.MustCompile(`  +`).ReplaceAllString(s, " ")
+
 		return strings.TrimSpace(s)
 	})
 
@@ -86,11 +88,6 @@ func minify(html string) []byte {
 	html = regexp.MustCompile(`>\s+<`).ReplaceAllString(html, "><")
 	// Collapse multiple spaces/newlines to single space
 	html = regexp.MustCompile(`\s+`).ReplaceAllString(html, " ")
-	// Remove spaces around tag brackets
-	html = strings.ReplaceAll(html, " >", ">")
-	html = strings.ReplaceAll(html, "< ", "<")
-	// Remove optional quotes around simple attribute values
-	html = regexp.MustCompile(`=["']([a-zA-Z0-9\-_]+)["']`).ReplaceAllString(html, "=$1")
 	// Trim leading/trailing whitespace
 	html = strings.TrimSpace(html)
 
