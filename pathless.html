@@ -101,6 +101,48 @@
 			.l23 .p1 {
 				border-right: var(--b);
 			}
+			.keyboard {
+				position: absolute;
+				left: 50%;
+				bottom: 2em;
+				transform: translateX(-50%);
+				z-index: 1000;
+				display: none;
+				background: #111;
+				border-radius: 0.75em;
+				box-shadow: 0 0.25em 1.5em #000a;
+				padding: 1em;
+			}
+			.keyboard.visible {
+				display: block;
+			}
+			.grid {
+				display: grid;
+				grid-template-columns: repeat(3, 1fr);
+				grid-template-rows: repeat(4, 1fr);
+				gap: 0.5em;
+				width: 100%;
+			}
+			.key {
+				border: medium solid #444;
+				border-radius: 0.375em;
+				height: 4em;
+				width: 5em;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				font-weight: 600;
+				font-size: 1.3em;
+				color: white;
+			}
+			.key.pressed {
+				border-color: #fff;
+				background: #333;
+			}
+			.key:empty {
+				opacity: 0;
+				pointer-events: none;
+			}
 		</style>
 	</head>
 	<body>
@@ -108,6 +150,7 @@
 			<div class="p p0"></div>
 			<div class="p p1"></div>
 			<div class="p p2"></div>
+			<div class="keyboard"></div>
 		</div>
 		<script>
 			window.apiUrl = '{{.APIURL}}';
@@ -129,7 +172,7 @@
 					this.prev = null;
 					this.focus = 0;
 					this.keymap = new Map();
-					this.keyboard = false;
+					this.keyboard = document.querySelector('.keyboard');
 				}
 
 				get p() {
@@ -264,35 +307,38 @@
 							fn: h,
 							style: opt.style,
 							data: opt.data,
-							pressed: false,
 						});
 					} else {
 						const entry = this.keymap.get(k);
-						if (entry && entry.fn)
-							return entry.fn(event || k, entry.data);
+						if (entry?.fn) return entry.fn(event || k, entry.data);
 					}
 				}
 
-				async toggleKeyboard() {
-					const p = this.p;
-					if (!this.keyboard) {
-						if (!p.state.has('z')) p.state.set('z', {});
-						p.state.get('z').prevHtml = p.html;
-						const res = await this.get(
-							`${window.apiUrl}/frame`,
-							'z'
-						);
-						p.el.innerHTML = res.data;
-						this.keyboard = true;
-					} else {
-						const prevHtml = p.state.get('z')?.prevHtml;
-						if (prevHtml !== undefined) {
-							p.el.innerHTML = prevHtml;
-							p.state.delete('z');
-						}
-						this.keyboard = false;
+				showKeyboard() {
+					const keys = [
+						['Tab', '', ''],
+						['1', '2', '3'],
+						['q', 'w', 'e'],
+						['a', 's', 'd'],
+					];
+					this.keyboard.innerHTML = `<div class="grid"></div>`;
+					const grid = this.keyboard.querySelector('.grid');
+					keys.flat().forEach((k) => {
+						const entry = this.keymap.get(k);
+						const keyEl = document.createElement('div');
+						keyEl.className = 'key';
+						keyEl.dataset.key = k;
+						keyEl.textContent = k.toUpperCase();
+						if (entry?.style) keyEl.style.cssText = entry.style;
+						grid.appendChild(keyEl);
+					});
+				}
+
+				toggleKeyboard() {
+					this.keyboard.classList.toggle('visible');
+					if (this.keyboard.classList.contains('visible')) {
+						this.showKeyboard();
 					}
-					await this.render();
 				}
 			}
 
@@ -304,19 +350,17 @@
 			s.key('2', () => s.lay(1));
 			s.key('3', () => s.lay(2));
 			s.key('Tab', (e) => (e.preventDefault(), s.cycle()));
-			s.key('z', async () => {
-				await s.toggleKeyboard();
-			});
-			s.render();
+			s.key('z', () => s.toggleKeyboard());
 
 			document.addEventListener('keydown', (e) => {
-				const entry = s.keymap.get(e.key);
-				if (entry) entry.pressed = true;
 				s.key(e.key, null, {}, e);
+				const keyEl = s.keyboard.querySelector(`[data-key="${e.key}"]`);
+				if (keyEl) keyEl.classList.add('pressed');
 			});
+
 			document.addEventListener('keyup', (e) => {
-				const entry = s.keymap.get(e.key);
-				if (entry) entry.pressed = false;
+				const keyEl = s.keyboard.querySelector(`[data-key="${e.key}"]`);
+				if (keyEl) keyEl.classList.remove('pressed');
 			});
 
 			window.pathless = {
@@ -327,9 +371,13 @@
 				}),
 				update: (k, v) => s.set(k, v),
 				fetch: (url, opts) => s.get(url, opts?.key),
+				W: (h, opt = {}) => s.key('w', h, opt),
+				A: (h, opt = {}) => s.key('a', h, opt),
+				S: (h, opt = {}) => s.key('s', h, opt),
+				D: (h, opt = {}) => s.key('d', h, opt),
 				onKey: (k, h, opt = {}) => s.key(k, h, opt),
-				keybinds: () => s.keymap,
 			};
+			s.render();
 		</script>
 	</body>
 </html>
