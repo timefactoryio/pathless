@@ -111,9 +111,9 @@
 		</div>
 		<script>
 			window.apiUrl = '{{.APIURL}}';
-			const N = 3;
-			const L = [1, 2, 3];
-			const V = [0, 1, 3];
+			const N = 3; // panels
+			const L = [1, 2, 3]; // layout sizes
+			const V = [0, 1, 3]; // variant counts per layout
 
 			class State {
 				constructor() {
@@ -128,8 +128,7 @@
 					this.layout = [0, 0];
 					this.prev = null;
 					this.focus = 0;
-					this.keymap = new Map();
-					this.keyboard = false;
+					this.keys = new Map();
 				}
 
 				get p() {
@@ -258,65 +257,25 @@
 					this.display();
 				}
 
-				key(k, h, opt = {}, event) {
-					if (h) {
-						this.keymap.set(k, {
-							fn: h,
-							style: opt.style,
-							data: opt.data,
-							pressed: false,
-						});
-					} else {
-						const entry = this.keymap.get(k);
-						if (entry && entry.fn)
-							return entry.fn(event || k, entry.data);
-					}
-				}
-
-				async toggleKeyboard() {
-					const p = this.p;
-					if (!this.keyboard) {
-						if (!p.state.has('z')) p.state.set('z', {});
-						p.state.get('z').prevHtml = p.html;
-						const res = await this.get(
-							`${window.apiUrl}/frame`,
-							'z'
-						);
-						p.el.innerHTML = res.data;
-						this.keyboard = true;
-					} else {
-						const prevHtml = p.state.get('z')?.prevHtml;
-						if (prevHtml !== undefined) {
-							p.el.innerHTML = prevHtml;
-							p.state.delete('z');
-						}
-						this.keyboard = false;
-					}
-					await this.render();
+				key(k, h) {
+					const id = `${this.p.el.className}-${this.p.frame}`;
+					h ? this.keys.set(id, h) : this.keys.get(id)?.(k);
 				}
 			}
 
 			const s = new State();
-
-			s.key('e', () => s.nav(1), { style: 'border-color:blue' });
-			s.key('q', () => s.nav(-1), { style: 'border-color:red' });
-			s.key('1', () => s.full());
-			s.key('2', () => s.lay(1));
-			s.key('3', () => s.lay(2));
-			s.key('Tab', (e) => (e.preventDefault(), s.cycle()));
-			s.key('z', async () => {
-				await s.toggleKeyboard();
-			});
 			s.render();
 
 			document.addEventListener('keydown', (e) => {
-				const entry = s.keymap.get(e.key);
-				if (entry) entry.pressed = true;
-				s.key(e.key, null, {}, e);
-			});
-			document.addEventListener('keyup', (e) => {
-				const entry = s.keymap.get(e.key);
-				if (entry) entry.pressed = false;
+				const m = {
+					e: () => s.nav(1),
+					q: () => s.nav(-1),
+					1: () => s.full(),
+					2: () => s.lay(1),
+					3: () => s.lay(2),
+					Tab: () => (e.preventDefault(), s.cycle()),
+				};
+				(m[e.key] || (() => s.key(e.key)))();
 			});
 
 			window.pathless = {
@@ -327,8 +286,7 @@
 				}),
 				update: (k, v) => s.set(k, v),
 				fetch: (url, opts) => s.get(url, opts?.key),
-				onKey: (k, h, opt = {}) => s.key(k, h, opt),
-				keybinds: () => s.keymap,
+				onKey: (h) => s.key(null, h),
 			};
 		</script>
 	</body>
