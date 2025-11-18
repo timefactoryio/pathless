@@ -4,13 +4,17 @@ WORKDIR /src
 
 ARG TARGETARCH
 
+# Copy only the required files
+COPY go.mod .
+COPY main.go .
+COPY pathless.html .
+
 # Cache Go modules
 RUN --mount=type=cache,target=/go/pkg/mod \
     true
 
 # Build static binary
 RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=bind,source=.,target=/src \
     CGO_ENABLED=0 GOARCH=$TARGETARCH go build -ldflags="-s -w" -o /out/pathless .
 
 # Final stage

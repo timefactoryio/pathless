@@ -1,3 +1,3 @@
-module github.com/zachklingbeil/pathless
+module github.com/timefactoryio/pathless
 
-go 1.25.3
+go 1.25.4

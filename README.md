@@ -2,14 +2,16 @@
 
 Frictionless viewport allocator served within a pathless domain. 
 
+![layouts](./content/layout.gif)
+
 ## Overview
 
 Within **pathless**, the viewport is a closed system with limits defined by a perimeter border. **pathless** establishes an unobstructed interface with two universal components:
 
  - `panel`: space in the system
  - `frame`: object in space 
- - `state`: position of an object in space
 
+`frame`'s are a finite pool of simulataneously observable content, cached after first fetch. 
 
 ## Getting Started
 
@@ -22,20 +24,11 @@ Within **pathless**, the viewport is a closed system with limits defined by a pe
 | `q`   | previous frame |                                            |
 | `e`   | next frame     |                                            |
 
-## Installation
+When in a multipanel layout, press `1` to make the focused panel fullscreen, press `1` again to return to the previous layout. Press `2` to toggle between side-by-side (vertical split) and stacked (horizontal split). Press `3` to cycle through 50/25/25 layouts.
 
-![layouts](./content/layout.gif)
 ![nav](./content/nav.gif)
 
 ## Documentation
-
-`panel`'s
-
-`frame`'s are a finite pool of simulataneously observable content, cached after first fetch. state is managed panel -> frame -> state. 
-
-`state`
-
-When in a multipanel layout, press `1` to make the focused panel fullscreen, press `1` again to return to the previous layout. Press `2` to toggle between side-by-side (vertical split) and stacked (horizontal split). Press `3` to cycle through 50/25/25 layouts.
 
 The `window.pathless` object provides the API coordinating between `panels`, `frames`, and `state`.    
 
@@ -50,3 +43,39 @@ Event handler used to register `frame` keybinds, automatically scoped to the foc
 
 #### `pathless.update(key, value)`
 Key-value pair's used to persist state through layout changes and navigation, automatically scoped to the `frame` of the focused `panel`.
+
+### Architecture
+
+Pathless is a lightweight Go HTTP server that embeds a frictionless viewport allocator. The server processes, minifies, and compresses an HTML template once at startup, then serves it from memory with maximum efficiency. 
+
+**Server responsibilities:**
+- Client delivery
+- Redirect all non-root paths to `/`
+
+**Client responsibilities:**
+- Fetch frames from a configurable API endpoint
+- Manage multi-panel layouts with keyboard navigation
+- Cache frames and deduplicate requests
+- Provide state management for loaded frames
+
+## What It Does
+
+Pathless is a lightweight web server that:
+
+1. **Builds template** with Title, ApiUrl, and Favicon environment values
+2. **Minifies the HTML** by removing comments, whitespace, and newlines
+3. **Compresses with gzip** for optimal transfer size
+4. **Serves from memory** - All processing happens **once** during initialization. 
+
+### Client (JavaScript)
+
+```
+┌──────────┐    ┌──────────┐    ┌──────────┐
+│   One    │───▶│    Fx    │───▶│   Zero   │
+│Controller│    │  Layout  │    │  Cache   │
+└──────────┘    └──────────┘    └──────────┘
+     │               │                │
+     │               │                │
+  Keyboard      Panel State      HTTP Fetch
+  Events        Management       & Caching
+```
