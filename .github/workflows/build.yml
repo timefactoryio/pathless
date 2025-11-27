@@ -1,4 +1,4 @@
-name: Build
+name: Universal Build
 
 on:
   push:
