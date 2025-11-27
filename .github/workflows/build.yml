@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, x64]
     permissions:
       contents: read
       packages: write
@@ -63,7 +63,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
 
   manifest:
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux, x64]
     needs: build
     permissions:
       contents: read
