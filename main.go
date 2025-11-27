@@ -24,12 +24,9 @@ func init() {
 	}
 	if apiURL == "" {
 		apiURL = "http://localhost:1001"
-	} else if !strings.HasPrefix(apiURL, "http://") && !strings.HasPrefix(apiURL, "https://") {
-		apiURL = "https://" + apiURL
 	}
 
 	favicon := apiURL + "/img/favicon"
-
 	pathless, err := template.New("pathless").Parse(zero)
 	if err != nil {
 		panic("template parse error: " + err.Error())
@@ -77,21 +74,15 @@ func minify(html string) []byte {
 		s = regexp.MustCompile(`/\*[\s\S]*?\*/`).ReplaceAllString(s, "") // Remove multi-line comments
 		s = regexp.MustCompile(`\n+`).ReplaceAllString(s, "\n")          // Collapse newlines
 		s = regexp.MustCompile(`\t+`).ReplaceAllString(s, "")            // Remove tabs
-
 		// Only collapse multiple spaces, don't remove necessary whitespace
 		s = regexp.MustCompile(`  +`).ReplaceAllString(s, " ")
-
 		return strings.TrimSpace(s)
 	})
-
-	// Remove whitespace between HTML tags
+	// Remove whitespace between HTML tags, collapse multiple spaces/newlines to single space, trim leading/trailing whitespace
 	html = regexp.MustCompile(`>\s+<`).ReplaceAllString(html, "><")
-	// Collapse multiple spaces/newlines to single space
 	html = regexp.MustCompile(`\s+`).ReplaceAllString(html, " ")
-	// Trim leading/trailing whitespace
 	html = strings.TrimSpace(html)
 
-	// Gzip compress the minified HTML
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	if _, err := gz.Write([]byte(html)); err != nil {

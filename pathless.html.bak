@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>{{.Title}}</title>
+		<link rel="icon" type="image/" href="{{.Favicon}}" />
+		<style>
+			* {
+				box-sizing: border-box;
+				margin: 0;
+				padding: 0;
+				user-select: none;
+			}
+			html,
+			body {
+				height: 100vh;
+				overflow: hidden;
+				font-family: sans-serif;
+				background: #000;
+				color: #fff;
+				scrollbar-width: none;
+			}
+			*::-webkit-scrollbar {
+				display: none;
+			}
+			body {
+				border: 3px solid blue;
+				border-radius: 5px;
+			}
+			a {
+				color: inherit;
+				text-decoration: underline;
+			}
+
+			#app {
+				height: 100vh;
+				display: grid;
+			}
+			.p {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				padding: 1em;
+				overflow: hidden;
+			}
+			.p > * {
+				width: 100%;
+				height: 100%;
+			}
+
+			.l00 {
+				grid-template: 1fr / 1fr;
+			}
+			.l10 {
+				grid-template: 1fr / 1fr 1fr;
+			}
+			.l10 .p0 {
+				border-right: 3px solid blue;
+			}
+			.l11 {
+				grid-template: 1fr 1fr / 1fr;
+			}
+			.l11 .p0 {
+				border-bottom: 3px solid blue;
+			}
+			.l20,
+			.l21,
+			.l22,
+			.l23 {
+				grid-template: 1fr 1fr / 1fr 1fr;
+			}
+			.l20 .p0 {
+				grid-row: 1/3;
+				border-right: 3px solid blue;
+			}
+			.l20 .p1 {
+				border-bottom: 3px solid blue;
+			}
+			.l21 .p0 {
+				grid-column: 1/3;
+				border-bottom: 3px solid blue;
+			}
+			.l21 .p1 {
+				border-right: 3px solid blue;
+			}
+			.l22 .p0 {
+				grid-row: 1/3;
+				grid-column: 2;
+				border-left: 3px solid blue;
+			}
+			.l22 .p1 {
+				border-bottom: 3px solid blue;
+			}
+			.l23 .p0 {
+				grid-row: 2;
+				grid-column: 1/3;
+				border-top: 3px solid blue;
+			}
+			.l23 .p1 {
+				border-right: 3px solid blue;
+			}
+		</style>
+		<script>
+			window.apiUrl = '{{.APIURL}}';
+			const cache = new Map();
+			let totalFrames = null;
+			let panels = [];
+			let layout = [0, 0, null, null];
+			let focusIdx = 0;
+			const keyHandlers = new Map();
+
+			const activePanel = () => panels[focusIdx];
+			const panelCount = () => layout[0] + 1;
+			const panelState = () =>
+				activePanel().state.get(activePanel().frame) || {};
+
+			function setState(key, val) {
+				const p = activePanel();
+				if (!p.state.has(p.frame)) p.state.set(p.frame, {});
+				p.state.get(p.frame)[key] = val;
+			}
+
+			async function fetchData(url, opts = {}) {
+				const cacheKey = opts.cache
+					? `${url}:${JSON.stringify(opts.headers || {})}`
+					: null;
+
+				if (cacheKey && cache.has(cacheKey)) {
+					return cache.get(cacheKey);
+				}
+
+				const promise = (async () => {
+					const fetchOpts = {};
+					if (opts.headers) {
+						fetchOpts.headers = opts.headers;
+					}
+
+					const res = await fetch(url, fetchOpts);
+					if (!res.ok) throw new Error(`HTTP ${res.status}`);
+					const ct = res.headers.get('content-type') || '';
+					const data = ct.startsWith('image/')
+						? URL.createObjectURL(await res.blob())
+						: ct.includes('json')
+						? await res.json()
+						: await res.text();
+
+					const result = { data, headers: res.headers };
+					if (cacheKey) {
+						cache.set(cacheKey, result);
+					}
+
+					return result;
+				})();
+				if (cacheKey) {
+					cache.set(cacheKey, promise);
+				}
+				return promise;
+			}
+
+			async function fetchFrame(idx) {
+				try {
+					const res = await fetchData(`${window.apiUrl}/frame`, {
+						cache: true,
+						headers: { 'X-Frame': String(idx) },
+					});
+
+					if (idx === 0 && totalFrames === null) {
+						const frames = res.headers.get('X-Frames');
+						if (frames) {
+							totalFrames = parseInt(frames, 10);
+						}
+					}
+
+					return res.data;
+				} catch (err) {
+					return `<div>Error: ${err.message}</div>`;
+				}
+			}
+
+			async function render() {
+				for (let i = 0; i < panelCount(); i++) {
+					const panel = panels[i];
+					const html = await fetchFrame(panel.frame);
+
+					if (panel.html !== html) {
+						const temp = document.createElement('div');
+						temp.innerHTML = html;
+
+						['script', 'style'].forEach((tag) => {
+							temp.querySelectorAll(tag).forEach((old) => {
+								const newEl = document.createElement(tag);
+								[...old.attributes].forEach((attr) =>
+									newEl.setAttribute(attr.name, attr.value)
+								);
+								newEl.textContent = old.textContent;
+								old.replaceWith(newEl);
+							});
+						});
+
+						panel.el.replaceChildren(...temp.childNodes);
+						panel.html = html;
+					}
+				}
+				updateDisplay();
+			}
+
+			function updateDisplay() {
+				requestAnimationFrame(() => {
+					app.className = `l${layout[0]}${layout[1]}`;
+					panels.forEach((panel, idx) => {
+						panel.el.style.display =
+							layout[0] === 0
+								? idx === focusIdx
+									? 'flex'
+									: 'none'
+								: idx < panelCount()
+								? 'flex'
+								: 'none';
+					});
+				});
+			}
+
+			async function navigate(delta) {
+				const total = totalFrames || 1;
+				activePanel().frame =
+					(((activePanel().frame + delta) % total) + total) % total;
+				await render();
+			}
+
+			async function toggleFullscreen() {
+				if (layout[0] === 0 && layout[2] !== null) {
+					layout = [layout[2], layout[3], null, null];
+				} else if (layout[0] !== 0) {
+					layout = [0, 0, layout[0], layout[1]];
+				}
+				await render();
+			}
+
+			async function setLayout(layoutIdx) {
+				const maxVariants = [0, 1, 3];
+				layout[2] = null;
+				layout[3] = null;
+				focusIdx = Math.min(focusIdx, layoutIdx);
+				layout =
+					layout[0] === layoutIdx
+						? [
+								layoutIdx,
+								(layout[1] + 1) % (maxVariants[layoutIdx] + 1),
+								null,
+								null,
+						  ]
+						: [layoutIdx, 0, null, null];
+				await render();
+			}
+
+			function cycleFocus() {
+				focusIdx = (focusIdx + 1) % panelCount();
+				updateDisplay();
+			}
+
+			function handleKey(key, handler) {
+				const id = `${activePanel().el.className}-${
+					activePanel().frame
+				}`;
+				if (handler) {
+					keyHandlers.set(id, handler);
+				} else {
+					keyHandlers.get(id)?.(key);
+				}
+			}
+
+			document.addEventListener('DOMContentLoaded', () => {
+				panels = [...document.querySelectorAll('.p')].map((el) => ({
+					el,
+					frame: 0,
+					state: new Map(),
+					html: '',
+				}));
+
+				document.addEventListener('keydown', (e) => {
+					const keys = {
+						e: () => navigate(1),
+						q: () => navigate(-1),
+						1: () => toggleFullscreen(),
+						2: () => setLayout(1),
+						3: () => setLayout(2),
+						Tab: () => (e.preventDefault(), cycleFocus()),
+					};
+					(keys[e.key] || (() => handleKey(e.key)))();
+				});
+
+				window.pathless = {
+					ctx: () => ({
+						panel: activePanel().el,
+						frame: activePanel().el.firstElementChild,
+						state: panelState(),
+					}),
+					update: setState,
+					fetch: fetchData,
+					onKey: (handler) => handleKey(null, handler),
+				};
+
+				render();
+			});
+		</script>
+	</head>
+	<body>
+		<div id="app">
+			<div class="p p0"></div>
+			<div class="p p1"></div>
+			<div class="p p2"></div>
+		</div>
+	</body>
+</html>

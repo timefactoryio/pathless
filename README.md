@@ -1,6 +1,6 @@
 # pathless
 
-Frictionless viewport allocator served within a pathless domain. 
+Viewport allocator for a pathless domain. 
 
 ![layouts](./content/layout.gif)
 

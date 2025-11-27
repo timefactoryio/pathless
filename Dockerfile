@@ -4,10 +4,7 @@ WORKDIR /src
 
 ARG TARGETARCH
 
-# Copy only the required files
-COPY go.mod .
-COPY main.go .
-COPY pathless.html .
+COPY . .
 
 # Cache Go modules
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -20,5 +17,5 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # Final stage
 FROM scratch
 COPY --from=go_builder /out/pathless /pathless
-USER 10001
+USER 1000
 ENTRYPOINT ["/pathless"]
