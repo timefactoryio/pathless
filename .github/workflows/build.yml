@@ -41,7 +41,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            docker.io/${{ github.repository }}
+            docker.io/timefactory/${{ github.event.repository.name }}
             ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=dev,enable={{is_default_branch}}
