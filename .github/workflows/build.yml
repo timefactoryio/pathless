@@ -12,9 +12,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    strategy:
-      matrix:
-        platform: [amd64, arm64, arm/v7]
 
     steps:
       - name: Checkout repository
@@ -47,61 +44,15 @@ jobs:
             type=raw,value=dev,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-          flavor: |
-            suffix=-${{ matrix.platform }}
-            latest=false
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
-          platforms: linux/${{ matrix.platform }}
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
-
-  manifest:
-    runs-on: [self-hosted, linux, x64]
-    needs: build
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USER }}
-          password: ${{ secrets.DOCKER_TOKEN }}
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: |
-            docker.io/timefactory/${{ github.event.repository.name }}
-            ghcr.io/${{ github.repository }}
-          tags: |
-            type=raw,value=dev,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-          flavor: |
-            latest=auto
-
-      - name: Create and push manifest
-        run: |
-          for tag in ${{ steps.meta.outputs.tags }}; do
-            docker buildx imagetools create -t ${tag} \
-              ${tag}-amd64 \
-              ${tag}-arm64 \
-              ${tag}-arm-v7
-          done
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
