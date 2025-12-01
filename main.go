@@ -20,7 +20,7 @@ func init() {
 	apiURL := os.Getenv("API_URL")
 
 	if title == "" {
-		title = "hello_universe"
+		title = "hello.universe"
 	}
 	if apiURL == "" {
 		apiURL = "http://localhost:1001"
