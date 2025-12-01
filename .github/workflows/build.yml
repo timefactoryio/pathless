@@ -36,11 +36,20 @@ jobs:
         id: tagtype
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          MINOR="${VERSION%.*}"
+
           if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.0$ ]]; then
             echo "is_release=true" >> $GITHUB_OUTPUT
             echo "is_patch=false" >> $GITHUB_OUTPUT
           else
-            echo "is_release=false" >> $GITHUB_OUTPUT
+            # Check if release tag exists in registry
+            if docker manifest inspect docker.io/timefactory/${{ github.event.repository.name }}:${MINOR} > /dev/null 2>&1; then
+              echo "is_release=false" >> $GITHUB_OUTPUT
+            else
+              echo "is_release=true" >> $GITHUB_OUTPUT
+              echo "::notice::Release ${MINOR} missing, will create"
+            fi
             echo "is_patch=true" >> $GITHUB_OUTPUT
           fi
 
