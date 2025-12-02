@@ -2,7 +2,8 @@
 
 Viewport allocator for a pathless domain. 
 
-![layouts](./content/layout.gif)
+![layouts](https://raw.githubusercontent.com/timefactoryio/pathless/main/content/layout.gif)
+
 
 ## Overview
 
@@ -26,7 +27,7 @@ Within **pathless**, the viewport is a closed system with limits defined by a pe
 
 When in a multipanel layout, press `1` to make the focused panel fullscreen, press `1` again to return to the previous layout. Press `2` to toggle between side-by-side (vertical split) and stacked (horizontal split). Press `3` to cycle through 50/25/25 layouts.
 
-![nav](./content/nav.gif)
+![nav](https://raw.githubusercontent.com/timefactoryio/pathless/main/content/nav.gif)
 
 ## Documentation
 
