@@ -1,29 +1,33 @@
 # pathless
 
-Viewport allocator for a pathless domain. 
 
 ![layouts](https://raw.githubusercontent.com/timefactoryio/pathless/main/content/layout.gif)
 
+### **pathless** is a closed system. 
 
-## Overview
+### **pathless** is a viewport allocator
 
-Within **pathless**, the viewport is a closed system with limits defined by a perimeter border. **pathless** establishes an unobstructed interface with two universal components:
+| Key | Action         | Toggle |
+| --- | -------------- | ------ |
+| `q` | previous frame |        |
+| `e` | next frame     |        |
 
- - `panel`: space in the system
- - `frame`: object in space 
+
+establishes a universal interface with
+
+ - `space`: in the system
+ - `frame`: objects in space 
 
 `frame`'s are a finite pool of simulataneously observable content, cached after first fetch. 
 
 ## Getting Started
 
-| Key   | Action         | Toggle                                     |
-| ----- | -------------- | ------------------------------------------ |
-| `1`   | One panel      | fullscreen <-> previous layout             |
-| `2`   | Two panel      | horizontal <-> vertical                    |
-| `3`   | Three panel    | large panel left -> top -> right -> bottom |
-| `Tab` | Cycle focus    | panel zero -> one -> two                   |
-| `q`   | previous frame |                                            |
-| `e`   | next frame     |                                            |
+| Key   | Action      | Toggle                                     |
+| ----- | ----------- | ------------------------------------------ |
+| `1`   | One panel   | fullscreen <-> previous layout             |
+| `2`   | Two panel   | horizontal <-> vertical                    |
+| `3`   | Three panel | large panel left -> top -> right -> bottom |
+| `Tab` | Cycle focus | panel zero -> one -> two                   |
 
 When in a multipanel layout, press `1` to make the focused panel fullscreen, press `1` again to return to the previous layout. Press `2` to toggle between side-by-side (vertical split) and stacked (horizontal split). Press `3` to cycle through 50/25/25 layouts.
 
@@ -47,7 +51,7 @@ Key-value pair's used to persist state through layout changes and navigation, au
 
 ### Architecture
 
-Pathless is a lightweight Go HTTP server that embeds a frictionless viewport allocator. The server processes, minifies, and compresses an HTML template once at startup, then serves it from memory with maximum efficiency. 
+**pathless** builds, then minifies, then compresses HTML once at startup. then serves it from memory with maximum efficiency. 
 
 **Server responsibilities:**
 - Client delivery
