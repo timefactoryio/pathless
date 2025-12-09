@@ -1,16 +1,16 @@
 # pathless
 
-
 ![layouts](https://raw.githubusercontent.com/timefactoryio/pathless/main/content/layout.gif)
 
-### **pathless** is a closed system. 
+#### **pathless** is a closed system. 
 
-### **pathless** is a viewport allocator
+#### **pathless** is a viewport allocator
 
-| Key | Action         | Toggle |
-| --- | -------------- | ------ |
-| `q` | previous frame |        |
-| `e` | next frame     |        |
+| Key | Action         |
+| --- | -------------- |
+| `q` | previous frame |
+| `e` | next frame     |
+
 
 
 establishes a universal interface with

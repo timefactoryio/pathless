@@ -4,7 +4,6 @@
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>hello.universe</title>
-		<link rel="icon" type="image/" href="{{.Favicon}}" />
 		<style>
 			:root {
 				--b: medium solid blue;
@@ -33,19 +32,23 @@
 			}
 			a {
 				color: inherit;
-				text-decoration: underline;
+				text-decoration: none;
 			}
 			#app {
 				height: 100vh;
 				display: grid;
 			}
-			.s {
+			.space {
+				display: flex;
 				align-items: center;
 				justify-content: center;
 				padding: 1em;
 				overflow: hidden;
 			}
-			.s > * {
+			.space.hide {
+				display: none;
+			}
+			.space > * {
 				width: 100%;
 				height: 100%;
 			}
@@ -55,13 +58,13 @@
 			.l10 {
 				grid-template: 1fr / 1fr 1fr;
 			}
-			.l10 .s0 {
+			.l10 .zero {
 				border-right: var(--b);
 			}
 			.l11 {
 				grid-template: 1fr 1fr / 1fr;
 			}
-			.l11 .s0 {
+			.l11 .zero {
 				border-bottom: var(--b);
 			}
 			.l20,
@@ -70,34 +73,34 @@
 			.l23 {
 				grid-template: 1fr 1fr / 1fr 1fr;
 			}
-			.l20 .s0 {
+			.l20 .zero {
 				grid-row: 1/3;
 				border-right: var(--b);
 			}
-			.l20 .s1 {
+			.l20 .one {
 				border-bottom: var(--b);
 			}
-			.l21 .s0 {
+			.l21 .zero {
 				grid-column: 1/3;
 				border-bottom: var(--b);
 			}
-			.l21 .s1 {
+			.l21 .one {
 				border-right: var(--b);
 			}
-			.l22 .s0 {
+			.l22 .zero {
 				grid-row: 1/3;
 				grid-column: 2;
 				border-left: var(--b);
 			}
-			.l22 .s1 {
+			.l22 .one {
 				border-bottom: var(--b);
 			}
-			.l23 .s0 {
+			.l23 .zero {
 				grid-row: 2;
 				grid-column: 1/3;
 				border-top: var(--b);
 			}
-			.l23 .s1 {
+			.l23 .one {
 				border-right: var(--b);
 			}
 		</style>
@@ -105,178 +108,127 @@
 			window.apiUrl = '{{.APIURL}}';
 			class Universe {
 				constructor() {
-					this.cache = new Map();
-					this.total = null;
-					this.space = Array.from({ length: 3 }, (_, i) => ({
-						el: document.querySelector(`.s${i}`),
-						frame: 0,
-						state: new Map(),
-						html: '',
-					}));
+					this.space = [
+						{ el: document.querySelector('.zero') },
+						{ el: document.querySelector('.one') },
+						{ el: document.querySelector('.two') },
+					];
+					this.keybinds = {};
 					this.layout = [0, 0];
-					this.prev = null;
-					this.focus = 0;
-					this.keys = new Map();
+					this.prevLayout = [0, 0];
+					this.focused = 0;
+
+					this.onKey('1', () => this.toggleFullscreen());
+					this.onKey('2', () => this.setLayout(1));
+					this.onKey('3', () => this.setLayout(2));
+					this.onKey('Tab', () => this.cycleFocus());
+
+					window.addEventListener('keydown', (e) =>
+						this.handleKey(e, true, 'onDown')
+					);
+					window.addEventListener('keyup', (e) =>
+						this.handleKey(e, false, 'onUp')
+					);
+					window.addEventListener('render', () =>
+						this.updateDisplay()
+					);
 					this.render();
 				}
 
-				get s() {
-					return this.space[this.focus];
-				}
-				get count() {
-					return this.layout[0] + 1;
-				}
-
-				set(k, v) {
-					if (!this.s.state.has(this.s.frame))
-						this.s.state.set(this.s.frame, {});
-					this.s.state.get(this.s.frame)[k] = v;
-				}
-
-				async get(url, key) {
-					if (key !== undefined && this.cache.has(key))
-						return this.cache.get(key);
-					const r = await fetch(url);
-					if (!r.ok) throw new Error(`HTTP ${r.status}`);
-					const ct = r.headers.get('content-type') || '';
-					const data = ct.startsWith('image/')
-						? URL.createObjectURL(await r.blob())
-						: ct.includes('json')
-						? await r.json()
-						: await r.text();
-					const res = { data, headers: r.headers };
-					if (key !== undefined) this.cache.set(key, res);
-					return res;
-				}
-
-				async frame(i) {
-					const key = i === 0 || this.total !== null ? i : 0;
-					if (this.cache.has(key)) return this.cache.get(key).data;
-					try {
-						const r = await fetch(`${window.apiUrl}/frame`, {
-							headers: { 'X-Frame': String(key) },
-						});
-						if (!r.ok) throw new Error(`HTTP ${r.status}`);
-						const data = await r.text();
-						this.cache.set(key, { data, headers: r.headers });
-						if (key === 0)
-							this.total = parseInt(
-								r.headers.get('X-Frames') || '1',
-								10
-							);
-						return data;
-					} catch (e) {
-						return `<div>Error: ${e.message}</div>`;
+				handleKey(event, isPressed, callback) {
+					const key = event.key.toLowerCase();
+					const bind = this.keybinds[key];
+					if (bind) {
+						event.preventDefault();
+						bind.pressed = isPressed;
+						bind[callback]?.(event);
 					}
 				}
 
-				async render() {
-					for (let i = 0; i < this.count; i++) {
-						const s = this.space[i];
-						const html = await this.frame(s.frame);
-						if (s.html !== html) {
-							const tmp = document.createElement('div');
-							tmp.innerHTML = html;
-							['script', 'style'].forEach((tag) => {
-								tmp.querySelectorAll(tag).forEach((old) => {
-									const n = document.createElement(tag);
-									[...old.attributes].forEach((a) =>
-										n.setAttribute(a.name, a.value)
-									);
-									n.textContent = old.textContent;
-									old.replaceWith(n);
-								});
-							});
-							s.el.replaceChildren(...tmp.childNodes);
-							s.html = html;
-						}
-					}
-					this.display();
+				onKey(key, onDown, onUp) {
+					this.keybinds[key.toLowerCase()] = {
+						pressed: false,
+						onDown,
+						onUp,
+					};
+					return this;
 				}
 
-				display() {
-					requestAnimationFrame(() => {
-						app.className = `l${this.layout[0]}${this.layout[1]}`;
-						this.space.forEach((s, i) => {
-							s.el.style.display =
-								this.layout[0] === 0
-									? i === this.focus
-										? 'flex'
-										: 'none'
-									: i < this.count
-									? 'flex'
-									: 'none';
-						});
+				offKey(key) {
+					delete this.keybinds[key.toLowerCase()];
+					return this;
+				}
+
+				keyboard() {
+					return Object.entries(this.keybinds).map(
+						([key, { pressed }]) => ({
+							key,
+							pressed,
+						})
+					);
+				}
+
+				updateDisplay() {
+					app.className = 'l' + this.layout.join('');
+					const visible = this.layout[0] + 1;
+					this.space.forEach((space, index) => {
+						const shouldShow = this.layout[0]
+							? index < visible
+							: index === this.focused;
+						space.el.classList.toggle('hide', !shouldShow);
 					});
 				}
 
-				async nav(d) {
-					const t = this.total || 1;
-					this.s.frame = (((this.s.frame + d) % t) + t) % t;
-					await this.render();
+				render() {
+					window.dispatchEvent(new Event('render'));
 				}
 
-				async fullscreen() {
-					if (this.layout[0] === 0 && this.prev) {
-						this.layout = [...this.prev];
-						this.prev = null;
-					} else if (this.layout[0] !== 0) {
-						this.prev = [...this.layout];
+				toggleFullscreen() {
+					if (this.layout[0]) {
+						this.prevLayout = [...this.layout];
 						this.layout = [0, 0];
+					} else {
+						this.layout = [...this.prevLayout];
 					}
-					await this.render();
+					this.render();
 				}
 
-				async lay(i) {
-					this.prev = null;
-					this.focus = Math.min(this.focus, i);
+				setLayout(spaceCount) {
+					this.prevLayout = [...this.layout];
+					this.focused = Math.min(this.focused, spaceCount);
 					this.layout =
-						this.layout[0] === i
-							? [i, (this.layout[1] + 1) % [0, 2, 4][i]]
-							: [i, 0];
-					await this.render();
+						this.layout[0] === spaceCount
+							? [
+									spaceCount,
+									(this.layout[1] + 1) %
+										[0, 2, 4][spaceCount],
+							  ]
+							: [spaceCount, 0];
+					this.render();
 				}
 
-				cycle() {
-					this.focus = (this.focus + 1) % this.count;
-					this.display();
-				}
-
-				key(k, h) {
-					const id = `${this.s.el.className}-${this.s.frame}`;
-					h ? this.keys.set(id, h) : this.keys.get(id)?.(k);
+				cycleFocus() {
+					this.focused = (this.focused + 1) % (this.layout[0] + 1);
+					this.render();
 				}
 			}
 
 			document.addEventListener('DOMContentLoaded', () => {
 				const u = new Universe();
-				document.addEventListener('keydown', (e) => {
-					const m = {
-						e: () => u.nav(1),
-						q: () => u.nav(-1),
-						1: () => u.fullscreen(),
-						2: () => u.lay(1),
-						3: () => u.lay(2),
-						Tab: () => (e.preventDefault(), u.cycle()),
-					};
-					(m[e.key] || (() => u.key(e.key)))();
-				});
 				window.pathless = {
-					space: () => u.s.el,
-					frame: () => u.s.el.firstElementChild,
-					state: () => u.s.state.get(u.s.frame) || {},
-					update: (k, v) => u.set(k, v),
-					fetch: (url, opts) => u.get(url, opts?.key),
-					keybind: (h) => u.key(null, h),
+					space: (index) => u.space[index ?? u.focused].el,
+					onKey: (key, onDown, onUp) => u.onKey(key, onDown, onUp),
+					offKey: (key) => u.offKey(key),
+					keyboard: () => u.keyboard(),
 				};
 			});
 		</script>
 	</head>
 	<body>
 		<div id="app">
-			<div class="s s0"></div>
-			<div class="s s1"></div>
-			<div class="s s2"></div>
+			<div class="space zero"></div>
+			<div class="space one"></div>
+			<div class="space two"></div>
 		</div>
 	</body>
 </html>
