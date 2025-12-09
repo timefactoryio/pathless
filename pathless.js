@@ -36,10 +36,8 @@ class Source {
 		this.cache = new Map();
 		this.totalFrames = null;
 	}
-
 	async fetch(url) {
 		if (this.cache.has(url)) return this.cache.get(url);
-
 		const promise = fetch(url).then(async (response) => {
 			if (!response.ok) throw new Error(`HTTP ${response.status}`);
 			const ct = response.headers.get('content-type') || '';
@@ -53,10 +51,11 @@ class Source {
 			}
 			return { data, headers: response.headers };
 		});
-
 		this.cache.set(url, promise);
 		return promise;
 	}
+
+	// fetch: (url) => u.get(url),
 
 	async fetchFrame(index = 0) {
 		const frameUrl =

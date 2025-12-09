@@ -108,20 +108,26 @@
 			window.apiUrl = '{{.APIURL}}';
 			class Universe {
 				constructor() {
-					this.space = [
-						{ el: document.querySelector('.zero') },
-						{ el: document.querySelector('.one') },
-						{ el: document.querySelector('.two') },
-					];
+					this.space = Array.from(
+						document.querySelectorAll('.space')
+					).map((el) => ({
+						el,
+						frame: [0, null],
+						state: new Map(),
+					}));
+					this.frames = [];
 					this.keybinds = {};
 					this.layout = [0, 0];
 					this.prevLayout = [0, 0];
 					this.focused = 0;
+					this.cache = new Map();
 
 					this.onKey('1', () => this.toggleFullscreen());
 					this.onKey('2', () => this.setLayout(1));
 					this.onKey('3', () => this.setLayout(2));
 					this.onKey('Tab', () => this.cycleFocus());
+					this.onKey('q', () => this.nav(-1));
+					this.onKey('e', () => this.nav(1));
 
 					window.addEventListener('keydown', (e) =>
 						this.handleKey(e, true, 'onDown')
@@ -129,10 +135,17 @@
 					window.addEventListener('keyup', (e) =>
 						this.handleKey(e, false, 'onUp')
 					);
-					window.addEventListener('render', () =>
-						this.updateDisplay()
-					);
-					this.render();
+					this.init();
+				}
+
+				async init() {
+					try {
+						const res = await fetch(`${window.apiUrl}/frame`);
+						this.frames = res.ok ? await res.json() : [];
+					} catch (err) {
+						console.error('Error fetching frames:', err);
+						this.frames = [];
+					}
 				}
 
 				handleKey(event, isPressed, callback) {
@@ -168,19 +181,21 @@
 					);
 				}
 
-				updateDisplay() {
-					app.className = 'l' + this.layout.join('');
-					const visible = this.layout[0] + 1;
-					this.space.forEach((space, index) => {
-						const shouldShow = this.layout[0]
-							? index < visible
-							: index === this.focused;
-						space.el.classList.toggle('hide', !shouldShow);
-					});
+				setState(key, value) {
+					const space = this.space[this.focused];
+					const frameIndex = space.frame[0];
+					if (!space.state.has(frameIndex)) {
+						space.state.set(frameIndex, new Map());
+					}
+					space.state.get(frameIndex).set(key, value);
 				}
 
-				render() {
-					window.dispatchEvent(new Event('render'));
+				getState() {
+					const space = this.space[this.focused];
+					const frameIndex = space.frame[0];
+					return space.state.has(frameIndex)
+						? Object.fromEntries(space.state.get(frameIndex))
+						: {};
 				}
 
 				toggleFullscreen() {
@@ -190,7 +205,6 @@
 					} else {
 						this.layout = [...this.prevLayout];
 					}
-					this.render();
 				}
 
 				setLayout(spaceCount) {
@@ -204,12 +218,37 @@
 										[0, 2, 4][spaceCount],
 							  ]
 							: [spaceCount, 0];
-					this.render();
 				}
 
 				cycleFocus() {
 					this.focused = (this.focused + 1) % (this.layout[0] + 1);
-					this.render();
+				}
+
+				nav(direction) {
+					const space = this.space[this.focused];
+					const frameCount = this.frames.length;
+					space.frame[0] =
+						(space.frame[0] + direction + frameCount) % frameCount;
+				}
+
+				async fetch(url) {
+					if (this.cache.has(url)) return this.cache.get(url);
+					const promise = fetch(url).then(async (response) => {
+						if (!response.ok)
+							throw new Error(`HTTP ${response.status}`);
+						const ct = response.headers.get('content-type') || '';
+						let data;
+						if (ct.includes('json')) {
+							data = await response.json();
+						} else if (ct.startsWith('text/')) {
+							data = await response.text();
+						} else {
+							data = URL.createObjectURL(await response.blob());
+						}
+						return { data, headers: response.headers };
+					});
+					this.cache.set(url, promise);
+					return promise;
 				}
 			}
 
@@ -217,9 +256,13 @@
 				const u = new Universe();
 				window.pathless = {
 					space: (index) => u.space[index ?? u.focused].el,
+					frame: () => u.space[u.focused].el.firstElementChild,
 					onKey: (key, onDown, onUp) => u.onKey(key, onDown, onUp),
 					offKey: (key) => u.offKey(key),
 					keyboard: () => u.keyboard(),
+					update: (key, value) => u.setState(key, value),
+					state: () => u.getState(),
+					fetch: (url) => u.fetch(url),
 				};
 			});
 		</script>
