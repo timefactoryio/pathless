@@ -122,12 +122,15 @@
 					this.focused = 0;
 					this.cache = new Map();
 
-					this.onKey('1', () => this.toggleFullscreen(), null, true);
-					this.onKey('2', () => this.setLayout(1), null, true);
-					this.onKey('3', () => this.setLayout(2), null, true);
-					this.onKey('Tab', () => this.cycleFocus(), null, true);
-					this.onKey('q', () => this.nav(-1), null, true);
-					this.onKey('e', () => this.nav(1), null, true);
+					['1', '2', '3', 'tab', 'q', 'e'].forEach((key) => {
+						this.keybinds[key] = { pressed: false, global: true };
+					});
+					this.keybinds['1'].onDown = () => this.fullscreen();
+					this.keybinds['2'].onDown = () => this.setLayout(1);
+					this.keybinds['3'].onDown = () => this.setLayout(2);
+					this.keybinds['tab'].onDown = () => this.cycleFocus();
+					this.keybinds['q'].onDown = () => this.nav(-1);
+					this.keybinds['e'].onDown = () => this.nav(1);
 
 					window.addEventListener('keydown', (e) =>
 						this.handleKey(e, true, 'onDown')
@@ -142,65 +145,62 @@
 					try {
 						const res = await fetch(`${window.apiUrl}/frame`);
 						this.frames = res.ok ? await res.json() : [];
-					} catch (err) {
-						console.error('Error fetching frames:', err);
+					} catch {
 						this.frames = [];
 					}
 					this.sync();
 				}
 
-				handleKey(event, isPressed, callback) {
-					const key = event.key.toLowerCase();
-					const bind = this.keybinds[key];
+				handleKey(e, isPressed, callback) {
+					const bind = this.keybinds[e.key.toLowerCase()];
 					if (bind) {
-						event.preventDefault();
+						e.preventDefault();
 						bind.pressed = isPressed;
-						bind[callback]?.(event);
+						bind[callback]?.(e);
+
+						window.dispatchEvent(
+							new CustomEvent('keyboardchange', {
+								detail: {
+									key: e.key.toLowerCase(),
+									pressed: isPressed,
+								},
+							})
+						);
 					}
 				}
 
-				onKey(key, onDown, onUp, global = false) {
-					this.keybinds[key.toLowerCase()] = {
+				onKey(key, onDown, onUp) {
+					const k = key.toLowerCase();
+					this.keybinds[k] = {
 						pressed: false,
 						onDown,
 						onUp,
-						global,
+						global: false,
 					};
-					return this;
-				}
-
-				offKey(key) {
-					delete this.keybinds[key.toLowerCase()];
 					return this;
 				}
 
 				keyboard() {
 					return Object.entries(this.keybinds).map(
-						([key, { pressed }]) => ({
-							key,
-							pressed,
-						})
+						([key, { pressed }]) => ({ key, pressed })
 					);
 				}
 
 				setState(key, value) {
-					const space = this.space[this.focused];
-					const frameIndex = space.frame[0];
-					if (!space.state.has(frameIndex)) {
-						space.state.set(frameIndex, new Map());
-					}
-					space.state.get(frameIndex).set(key, value);
+					const s = this.space[this.focused];
+					if (!s.state.has(s.frame[0]))
+						s.state.set(s.frame[0], new Map());
+					s.state.get(s.frame[0]).set(key, value);
 				}
 
 				getState() {
-					const space = this.space[this.focused];
-					const frameIndex = space.frame[0];
-					return space.state.has(frameIndex)
-						? Object.fromEntries(space.state.get(frameIndex))
+					const s = this.space[this.focused];
+					return s.state.has(s.frame[0])
+						? Object.fromEntries(s.state.get(s.frame[0]))
 						: {};
 				}
 
-				toggleFullscreen() {
+				fullscreen() {
 					if (this.layout[0]) {
 						this.prevLayout = [...this.layout];
 						this.layout = [0, 0];
@@ -210,76 +210,68 @@
 					this.sync();
 				}
 
-				setLayout(spaceCount) {
-					this.prevLayout = [...this.layout];
-					this.focused = Math.min(this.focused, spaceCount);
+				setLayout(n) {
+					this.focused = Math.min(this.focused, n);
 					this.layout =
-						this.layout[0] === spaceCount
-							? [
-									spaceCount,
-									(this.layout[1] + 1) %
-										[0, 2, 4][spaceCount],
-							  ]
-							: [spaceCount, 0];
+						this.layout[0] === n
+							? [n, (this.layout[1] + 1) % [0, 2, 4][n]]
+							: [n, 0];
 					this.sync();
 				}
 
 				cycleFocus() {
+					Object.keys(this.keybinds).forEach((k) => {
+						if (!this.keybinds[k].global) delete this.keybinds[k];
+					});
 					this.focused = (this.focused + 1) % (this.layout[0] + 1);
-					Object.keys(this.keybinds).forEach((key) => {
-						if (!this.keybinds[key].global) {
-							delete this.keybinds[key];
-						}
-					});
-
-					const space = this.space[this.focused];
-					const scripts = space.el.querySelectorAll('script');
-					scripts.forEach((old) => {
-						const n = document.createElement('script');
-						[...old.attributes].forEach((a) =>
-							n.setAttribute(a.name, a.value)
-						);
-						n.textContent = old.textContent;
-						old.replaceWith(n);
-					});
+					this.sync(true);
 				}
 
-				nav(direction) {
-					const space = this.space[this.focused];
-					const frameCount = this.frames.length;
-					space.frame[0] =
-						(space.frame[0] + direction + frameCount) % frameCount;
+				nav(dir) {
+					const s = this.space[this.focused];
+					s.frame[0] =
+						(s.frame[0] + dir + this.frames.length) %
+						this.frames.length;
 					this.sync();
 				}
 
-				sync(force = false) {
-					const app = document.getElementById('app');
-					app.className = `l${this.layout[0]}${this.layout[1]}`;
+				exec(target, tags = ['script', 'style']) {
+					const el = target || this.space[this.focused].el;
+					const tagList = Array.isArray(tags) ? tags : [tags];
 
-					const visible = this.layout[0] + 1;
+					tagList.forEach((tag) => {
+						el.querySelectorAll(tag).forEach((old) => {
+							const n = document.createElement(tag);
+							[...old.attributes].forEach((a) =>
+								n.setAttribute(a.name, a.value)
+							);
+							n.textContent = old.textContent;
+							old.replaceWith(n);
+						});
+					});
+				}
+
+				sync(reexec = false) {
+					document.getElementById(
+						'app'
+					).className = `l${this.layout[0]}${this.layout[1]}`;
+
 					this.space.forEach((s, i) => {
-						const shouldShow =
+						const show =
 							this.layout[0] === 0
 								? i === this.focused
-								: i < visible;
-						s.el.classList.toggle('hide', !shouldShow);
+								: i < this.layout[0] + 1;
+						s.el.classList.toggle('hide', !show);
 
-						if (shouldShow) {
+						if (show) {
 							const html = this.frames[s.frame[0]];
 
-							if (html && html !== s.frame[1]) {
+							if (reexec && html === s.frame[1]) {
+								if (i === this.focused) this.exec();
+							} else if (html && html !== s.frame[1]) {
 								const tmp = document.createElement('div');
 								tmp.innerHTML = html;
-								['script', 'style'].forEach((tag) => {
-									tmp.querySelectorAll(tag).forEach((old) => {
-										const n = document.createElement(tag);
-										[...old.attributes].forEach((a) =>
-											n.setAttribute(a.name, a.value)
-										);
-										n.textContent = old.textContent;
-										old.replaceWith(n);
-									});
-								});
+								this.exec(tmp);
 								s.el.replaceChildren(...tmp.childNodes);
 								s.frame[1] = html;
 							}
@@ -289,19 +281,17 @@
 
 				async fetch(url) {
 					if (this.cache.has(url)) return this.cache.get(url);
-					const promise = fetch(url).then(async (response) => {
-						if (!response.ok)
-							throw new Error(`HTTP ${response.status}`);
-						const ct = response.headers.get('content-type') || '';
-						let data;
-						if (ct.includes('json')) {
-							data = await response.json();
-						} else if (ct.startsWith('text/')) {
-							data = await response.text();
-						} else {
-							data = URL.createObjectURL(await response.blob());
-						}
-						return { data, headers: response.headers };
+					const promise = fetch(url).then(async (r) => {
+						if (!r.ok) throw new Error(`HTTP ${r.status}`);
+						const ct = r.headers.get('content-type') || '';
+						return {
+							data: ct.includes('json')
+								? await r.json()
+								: ct.startsWith('text/')
+								? await r.text()
+								: URL.createObjectURL(await r.blob()),
+							headers: r.headers,
+						};
 					});
 					this.cache.set(url, promise);
 					return promise;
@@ -314,7 +304,6 @@
 					space: (index) => u.space[index ?? u.focused].el,
 					frame: () => u.space[u.focused].el.firstElementChild,
 					onKey: (key, onDown, onUp) => u.onKey(key, onDown, onUp),
-					offKey: (key) => u.offKey(key),
 					keyboard: () => u.keyboard(),
 					update: (key, value) => u.setState(key, value),
 					state: () => u.getState(),
