@@ -122,12 +122,12 @@
 					this.focused = 0;
 					this.cache = new Map();
 
-					this.onKey('1', () => this.toggleFullscreen());
-					this.onKey('2', () => this.setLayout(1));
-					this.onKey('3', () => this.setLayout(2));
-					this.onKey('Tab', () => this.cycleFocus());
-					this.onKey('q', () => this.nav(-1));
-					this.onKey('e', () => this.nav(1));
+					this.onKey('1', () => this.toggleFullscreen(), null, true);
+					this.onKey('2', () => this.setLayout(1), null, true);
+					this.onKey('3', () => this.setLayout(2), null, true);
+					this.onKey('Tab', () => this.cycleFocus(), null, true);
+					this.onKey('q', () => this.nav(-1), null, true);
+					this.onKey('e', () => this.nav(1), null, true);
 
 					window.addEventListener('keydown', (e) =>
 						this.handleKey(e, true, 'onDown')
@@ -146,6 +146,7 @@
 						console.error('Error fetching frames:', err);
 						this.frames = [];
 					}
+					this.sync();
 				}
 
 				handleKey(event, isPressed, callback) {
@@ -158,11 +159,12 @@
 					}
 				}
 
-				onKey(key, onDown, onUp) {
+				onKey(key, onDown, onUp, global = false) {
 					this.keybinds[key.toLowerCase()] = {
 						pressed: false,
 						onDown,
 						onUp,
+						global,
 					};
 					return this;
 				}
@@ -205,6 +207,7 @@
 					} else {
 						this.layout = [...this.prevLayout];
 					}
+					this.sync();
 				}
 
 				setLayout(spaceCount) {
@@ -218,10 +221,27 @@
 										[0, 2, 4][spaceCount],
 							  ]
 							: [spaceCount, 0];
+					this.sync();
 				}
 
 				cycleFocus() {
 					this.focused = (this.focused + 1) % (this.layout[0] + 1);
+					Object.keys(this.keybinds).forEach((key) => {
+						if (!this.keybinds[key].global) {
+							delete this.keybinds[key];
+						}
+					});
+
+					const space = this.space[this.focused];
+					const scripts = space.el.querySelectorAll('script');
+					scripts.forEach((old) => {
+						const n = document.createElement('script');
+						[...old.attributes].forEach((a) =>
+							n.setAttribute(a.name, a.value)
+						);
+						n.textContent = old.textContent;
+						old.replaceWith(n);
+					});
 				}
 
 				nav(direction) {
@@ -229,6 +249,42 @@
 					const frameCount = this.frames.length;
 					space.frame[0] =
 						(space.frame[0] + direction + frameCount) % frameCount;
+					this.sync();
+				}
+
+				sync(force = false) {
+					const app = document.getElementById('app');
+					app.className = `l${this.layout[0]}${this.layout[1]}`;
+
+					const visible = this.layout[0] + 1;
+					this.space.forEach((s, i) => {
+						const shouldShow =
+							this.layout[0] === 0
+								? i === this.focused
+								: i < visible;
+						s.el.classList.toggle('hide', !shouldShow);
+
+						if (shouldShow) {
+							const html = this.frames[s.frame[0]];
+
+							if (html && html !== s.frame[1]) {
+								const tmp = document.createElement('div');
+								tmp.innerHTML = html;
+								['script', 'style'].forEach((tag) => {
+									tmp.querySelectorAll(tag).forEach((old) => {
+										const n = document.createElement(tag);
+										[...old.attributes].forEach((a) =>
+											n.setAttribute(a.name, a.value)
+										);
+										n.textContent = old.textContent;
+										old.replaceWith(n);
+									});
+								});
+								s.el.replaceChildren(...tmp.childNodes);
+								s.frame[1] = html;
+							}
+						}
+					});
 				}
 
 				async fetch(url) {
