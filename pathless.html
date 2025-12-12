@@ -222,15 +222,13 @@
 					this.sync();
 				}
 
-				exec(target, tags = ['script', 'style']) {
+				exec(target) {
 					const el = target || this.space[this.focused].el;
-					const tagList = Array.isArray(tags) ? tags : [tags];
-					tagList.forEach((tag) => {
+					['script', 'style'].forEach((tag) => {
 						el.querySelectorAll(tag).forEach((old) => {
 							const n = document.createElement(tag);
-							[...old.attributes].forEach((a) =>
-								n.setAttribute(a.name, a.value)
-							);
+							for (const a of old.attributes)
+								n.setAttribute(a.name, a.value);
 							n.textContent = old.textContent;
 							old.replaceWith(n);
 						});
@@ -247,13 +245,11 @@
 						const html = this.frames[s.frame[0]];
 						s.el.classList.toggle('hide', !visible);
 						if (visible && html !== s.frame[1]) {
-							const tmp = document.createElement('div');
-							tmp.innerHTML = html;
-							this.exec(tmp);
-							s.el.replaceChildren(...tmp.childNodes);
+							s.el.innerHTML = html;
+							this.exec(s.el);
 							s.frame[1] = html;
 						} else if (visible && reexec && i === this.focused) {
-							this.exec();
+							this.exec(s.el);
 						}
 					});
 				}
