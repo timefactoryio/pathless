@@ -122,13 +122,15 @@
 					this.focused = 0;
 					this.cache = new Map();
 					this.keybinds = {};
+					this.keyboardVisible = false;
 
-					this.onKey('1', () => this.fullscreen(), null, true);
-					this.onKey('2', () => this.setLayout(1), null, true);
-					this.onKey('3', () => this.setLayout(2), null, true);
-					this.onKey('tab', () => this.cycleFocus(), null, true);
-					this.onKey('q', () => this.nav(-1), null, true);
-					this.onKey('e', () => this.nav(1), null, true);
+					this.onKey('tab', () => this.cycleFocus(), null, true, 0);
+					this.onKey('1', () => this.fullscreen(), null, true, 2);
+					this.onKey('2', () => this.setLayout(1), null, true, 3);
+					this.onKey('3', () => this.setLayout(2), null, true, 4);
+					this.onKey('q', () => this.nav(-1), null, true, 5);
+					this.onKey('e', () => this.nav(1), null, true, 7);
+					this.onKey('z', () => this.toggleKeyboard(), null, true);
 
 					window.addEventListener('keydown', (e) =>
 						this.handleKey(e, true, 'onDown')
@@ -145,6 +147,13 @@
 						this.frames = res.ok ? await res.json() : [];
 					} catch {
 						this.frames = [];
+					}
+
+					if (this.frames.length > 0) {
+						const overlay =
+							document.getElementById('keyboard-overlay');
+						overlay.innerHTML = this.frames[0];
+						this.exec(overlay);
 					}
 					this.sync();
 				}
@@ -163,12 +172,23 @@
 					);
 				}
 
-				onKey(key, onDown, onUp, global = false) {
-					this.keybinds[key.toLowerCase()] = {
+				onKey(key, onDown, onUp, global = false, index) {
+					const keyIndices = {
+						w: 6,
+						a: 8,
+						s: 9,
+						d: 10,
+					};
+					const finalIndex =
+						index !== undefined ? index : keyIndices[key];
+
+					this.keybinds[key] = {
 						onDown,
 						onUp,
 						global,
 						pressed: false,
+						data: [],
+						index: finalIndex,
 					};
 					return this;
 				}
@@ -221,6 +241,11 @@
 						this.frames.length;
 					this.sync();
 				}
+				toggleKeyboard() {
+					this.keyboardVisible = !this.keyboardVisible;
+					const overlay = document.getElementById('keyboard-overlay');
+					overlay.classList.toggle('visible', this.keyboardVisible);
+				}
 
 				exec(target) {
 					const el = target || this.space[this.focused].el;
@@ -252,6 +277,15 @@
 							this.exec(s.el);
 						}
 					});
+
+					// Emit framechange event for keyboard overlay updates
+					window.dispatchEvent(new CustomEvent('framechange'));
+
+					// Preserve overlay visibility
+					const overlay = document.getElementById('keyboard-overlay');
+					if (this.keyboardVisible && overlay) {
+						overlay.classList.add('visible');
+					}
 				}
 
 				async fetch(url) {
@@ -282,10 +316,11 @@
 					state: () => u.getState(),
 					fetch: (url) => u.fetch(url),
 					onKey: (key, onDown, onUp) => u.onKey(key, onDown, onUp),
-					keyboard: () =>
-						Object.entries(u.keybinds).map(
-							([key, { pressed }]) => ({ key, pressed })
-						),
+					keyboard: () => u.keybinds,
+					layout: () => ({
+						layout: u.layout,
+						prevLayout: u.prevLayout,
+					}),
 				};
 			});
 		</script>
@@ -296,5 +331,6 @@
 			<div class="space one"></div>
 			<div class="space two"></div>
 		</div>
+		<div id="keyboard-overlay"></div>
 	</body>
 </html>
