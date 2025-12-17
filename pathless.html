@@ -45,12 +45,20 @@
 				padding: 1em;
 				overflow: hidden;
 			}
-			.space.hide {
-				display: none;
-			}
 			.space > * {
 				width: 100%;
 				height: 100%;
+			}
+			.space.hide {
+				display: none;
+			}
+			.space.focused {
+				animation: flash 50ms;
+			}
+			@keyframes flash {
+				to {
+					border: medium solid white;
+				}
 			}
 			.l00 {
 				grid-template: 1fr / 1fr;
@@ -122,21 +130,15 @@
 					this.focused = 0;
 					this.cache = new Map();
 					this.keybinds = {};
-					this.overlay = [false, null];
-
-					this.onKey('1', () => this.fullscreen(), null, true);
-					this.onKey('2', () => this.setLayout(1), null, true);
-					this.onKey('3', () => this.setLayout(2), null, true);
-					this.onKey('tab', () => this.cycleFocus(), null, true);
-					this.onKey('q', () => this.nav(-1), null, true);
-					this.onKey('e', () => this.nav(1), null, true);
-					this.onKey('z', () => this.toggleOverlay(), null, true);
-
+					this.overlay = {
+						el: document.getElementById('overlay'),
+						visible: false,
+					};
 					window.addEventListener('keydown', (e) =>
-						this.handleKey(e, true, 'onDown')
+						this.handleKey(e, true)
 					);
 					window.addEventListener('keyup', (e) =>
-						this.handleKey(e, false, 'onUp')
+						this.handleKey(e, false)
 					);
 					this.init();
 				}
@@ -144,28 +146,20 @@
 				async init() {
 					try {
 						const res = await fetch(`${window.apiUrl}/frame`);
-						if (res.ok) {
-							const allFrames = await res.json();
-							this.overlay[1] = allFrames[0] || '';
-							this.frames = allFrames.slice(1);
-						} else {
-							this.overlay[1] = '';
-							this.frames = [];
-						}
+						this.frames = res.ok ? await res.json() : [];
 					} catch {
-						this.overlay[1] = '';
 						this.frames = [];
 					}
 					this.sync();
 				}
 
-				handleKey(e, pressed, callback) {
+				handleKey(e, pressed) {
 					const key = e.key.toLowerCase();
 					const bind = this.keybinds[key];
 					if (!bind) return;
 					e.preventDefault();
 					bind.pressed = pressed;
-					bind[callback]?.(e);
+					if (pressed) bind.fx?.(e);
 					window.dispatchEvent(
 						new CustomEvent('input', {
 							detail: { key, pressed },
@@ -173,10 +167,9 @@
 					);
 				}
 
-				onKey(key, onDown, onUp, global = false) {
+				onKey(key, fx, global = false) {
 					this.keybinds[key.toLowerCase()] = {
-						onDown,
-						onUp,
+						fx,
 						global,
 						pressed: false,
 					};
@@ -216,20 +209,25 @@
 					this.sync();
 				}
 
-				cycleFocus() {
+				refresh() {
 					Object.keys(this.keybinds).forEach((k) => {
 						if (!this.keybinds[k].global) delete this.keybinds[k];
 					});
-					const maxFocus = this.overlay[0] ? 1 : this.layout[0];
-					this.focused = (this.focused + 1) % (maxFocus + 1);
-					this.sync(true);
 				}
 
+				cycleFocus() {
+					this.refresh();
+					this.space.forEach((s) => s.el.classList.remove('focused'));
+					this.focused = (this.focused + 1) % (this.layout[0] + 1);
+					this.space[this.focused].el.classList.add('focused');
+					this.sync(true);
+				}
 				nav(dir) {
 					const s = this.space[this.focused];
 					s.frame[0] =
 						(s.frame[0] + dir + this.frames.length) %
 						this.frames.length;
+					this.refresh();
 					this.sync();
 				}
 
@@ -246,19 +244,13 @@
 					});
 				}
 
-				sync(reexec = true) {
+				sync(reexec = false) {
 					this.universe.className = `l${this.layout[0]}${this.layout[1]}`;
 					this.space.forEach((s, i) => {
 						const visible =
 							this.layout[0] === 0
 								? i === this.focused
 								: i < this.layout[0] + 1;
-
-						if (i === 2 && this.overlay[0]) {
-							s.el.classList.toggle('hide', !visible);
-							return;
-						}
-
 						const html = this.frames[s.frame[0]];
 						s.el.classList.toggle('hide', !visible);
 						if (visible && html !== s.frame[1]) {
@@ -288,41 +280,26 @@
 					this.cache.set(url, promise);
 					return promise;
 				}
-
-				toggleOverlay() {
-					this.overlay[0] = !this.overlay[0];
-					const spaceTwoEl = this.space[2].el;
-					if (this.overlay[0]) {
-						this.prevLayout = [...this.layout];
-						this.layout = [2, 0];
-						if (this.focused === 2) {
-							this.focused = 0;
-						}
-
-						spaceTwoEl.innerHTML = this.overlay[1];
-						this.exec(spaceTwoEl);
-						this.space[2].frame[1] = null;
-					} else {
-						this.layout = [...this.prevLayout];
-						this.space[2].frame[1] = null;
-					}
-					this.sync();
-				}
 			}
 
 			document.addEventListener('DOMContentLoaded', () => {
 				const u = new Universe();
+				u.onKey('tab', () => u.cycleFocus(), true);
+				u.onKey('1', () => u.fullscreen(), true);
+				u.onKey('2', () => u.setLayout(1), true);
+				u.onKey('3', () => u.setLayout(2), true);
+				u.onKey('q', () => u.nav(-1), true);
+				u.onKey('e', () => u.nav(1), true);
+
 				window.pathless = {
 					space: (index) => u.space[index ?? u.focused].el,
 					frame: () => u.space[u.focused].el.firstElementChild,
 					update: (key, value) => u.setState(key, value),
 					state: () => u.getState(),
 					fetch: (url) => u.fetch(url),
-					onKey: (key, onDown, onUp) => u.onKey(key, onDown, onUp),
-					keyboard: () =>
-						Object.entries(u.keybinds).map(
-							([key, { pressed }]) => ({ key, pressed })
-						),
+					onKey: (key, fx, global) => u.onKey(key, fx, global),
+					keyboard: () => u.keybinds,
+					layout: () => [u.layout, u.prevLayout],
 					overlay: () => u.overlay,
 				};
 			});
@@ -333,6 +310,7 @@
 			<div class="space zero"></div>
 			<div class="space one"></div>
 			<div class="space two"></div>
+			<div id="overlay"></div>
 		</div>
 	</body>
 </html>
