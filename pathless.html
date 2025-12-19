@@ -113,9 +113,9 @@
 			}
 		</style>
 		<script>
-			window.apiUrl = '{{.APIURL}}';
 			class Universe {
 				constructor() {
+					window.apiUrl = '{{.APIURL}}';
 					this.universe = document.getElementById('universe');
 					this.space = Array.from(
 						document.querySelectorAll('.space')
@@ -133,6 +133,7 @@
 					this.overlay = {
 						el: document.getElementById('overlay'),
 						visible: false,
+						html: null,
 					};
 					window.addEventListener('keydown', (e) =>
 						this.handleKey(e, true)
@@ -147,8 +148,16 @@
 					try {
 						const res = await fetch(`${window.apiUrl}/frame`);
 						this.frames = res.ok ? await res.json() : [];
+
+						const overlayRes = await fetch(
+							`${window.apiUrl}/keyboard`
+						);
+						this.overlay.html = overlayRes.ok
+							? await overlayRes.text()
+							: '';
 					} catch {
 						this.frames = [];
+						this.overlay.html = '';
 					}
 					this.sync();
 				}
@@ -222,6 +231,7 @@
 					this.space[this.focused].el.classList.add('focused');
 					this.sync(true);
 				}
+
 				nav(dir) {
 					const s = this.space[this.focused];
 					s.frame[0] =
@@ -261,6 +271,9 @@
 							this.exec(s.el);
 						}
 					});
+					if (this.overlay.initialized && window.keyboard) {
+						window.keyboard.sync(this.layout, this.prevLayout);
+					}
 				}
 
 				async fetch(url) {
@@ -280,6 +293,22 @@
 					this.cache.set(url, promise);
 					return promise;
 				}
+				toggleOverlay() {
+					this.overlay.visible = !this.overlay.visible;
+					if (
+						this.overlay.visible &&
+						this.overlay.html &&
+						!this.overlay.initialized
+					) {
+						this.overlay.el.innerHTML = this.overlay.html;
+						this.exec(this.overlay.el);
+						this.overlay.initialized = true;
+					}
+					this.overlay.el.classList.toggle(
+						'hidden',
+						!this.overlay.visible
+					);
+				}
 			}
 
 			document.addEventListener('DOMContentLoaded', () => {
@@ -290,6 +319,7 @@
 				u.onKey('3', () => u.setLayout(2), true);
 				u.onKey('q', () => u.nav(-1), true);
 				u.onKey('e', () => u.nav(1), true);
+				u.onKey('z', () => u.toggleOverlay(), true);
 
 				window.pathless = {
 					space: (index) => u.space[index ?? u.focused].el,
@@ -298,9 +328,12 @@
 					state: () => u.getState(),
 					fetch: (url) => u.fetch(url),
 					onKey: (key, fx, global) => u.onKey(key, fx, global),
-					keyboard: () => u.keybinds,
-					layout: () => [u.layout, u.prevLayout],
-					overlay: () => u.overlay,
+					keyboard: () => [
+						u.keybinds,
+						u.layout,
+						u.prevLayout,
+						u.overlay,
+					],
 				};
 			});
 		</script>
