@@ -45,20 +45,12 @@
 				padding: 1em;
 				overflow: hidden;
 			}
-			.space > * {
-				width: 100%;
-				height: 100%;
-			}
 			.space.hide {
 				display: none;
 			}
-			.space.focused {
-				animation: flash 50ms;
-			}
-			@keyframes flash {
-				to {
-					border: medium solid white;
-				}
+			.space > * {
+				width: 100%;
+				height: 100%;
 			}
 			.l00 {
 				grid-template: 1fr / 1fr;
@@ -66,13 +58,13 @@
 			.l10 {
 				grid-template: 1fr / 1fr 1fr;
 			}
-			.l10 .zero {
+			.l10 #zero {
 				border-right: var(--b);
 			}
 			.l11 {
 				grid-template: 1fr 1fr / 1fr;
 			}
-			.l11 .zero {
+			.l11 #zero {
 				border-bottom: var(--b);
 			}
 			.l20,
@@ -81,34 +73,34 @@
 			.l23 {
 				grid-template: 1fr 1fr / 1fr 1fr;
 			}
-			.l20 .zero {
+			.l20 #zero {
 				grid-row: 1/3;
 				border-right: var(--b);
 			}
-			.l20 .one {
+			.l20 #one {
 				border-bottom: var(--b);
 			}
-			.l21 .zero {
+			.l21 #zero {
 				grid-column: 1/3;
 				border-bottom: var(--b);
 			}
-			.l21 .one {
+			.l21 #one {
 				border-right: var(--b);
 			}
-			.l22 .zero {
+			.l22 #zero {
 				grid-row: 1/3;
 				grid-column: 2;
 				border-left: var(--b);
 			}
-			.l22 .one {
+			.l22 #one {
 				border-bottom: var(--b);
 			}
-			.l23 .zero {
+			.l23 #zero {
 				grid-row: 2;
 				grid-column: 1/3;
 				border-top: var(--b);
 			}
-			.l23 .one {
+			.l23 #one {
 				border-right: var(--b);
 			}
 		</style>
@@ -117,10 +109,8 @@
 				constructor() {
 					window.apiUrl = '{{.APIURL}}';
 					this.universe = document.getElementById('universe');
-					this.space = Array.from(
-						document.querySelectorAll('.space')
-					).map((el) => ({
-						el,
+					this.space = ['zero', 'one', 'two'].map((id) => ({
+						el: document.getElementById(id),
 						frame: [0, null],
 						state: new Map(),
 					}));
@@ -130,11 +120,7 @@
 					this.focused = 0;
 					this.cache = new Map();
 					this.keybinds = {};
-					this.overlay = {
-						el: document.getElementById('overlay'),
-						visible: false,
-						html: null,
-					};
+
 					window.addEventListener('keydown', (e) =>
 						this.handleKey(e, true)
 					);
@@ -146,9 +132,7 @@
 
 				async init() {
 					const res = await fetch(`${window.apiUrl}`);
-					const data = await res.json();
-					this.overlay.html = data[0];
-					this.frames = data.slice(1);
+					this.frames = await res.json();
 					this.sync();
 				}
 
@@ -199,24 +183,6 @@
 					this.sync();
 				}
 
-				toggleOverlay() {
-					this.overlay.visible = !this.overlay.visible;
-					this.overlay.el.classList.toggle(
-						'hidden',
-						!this.overlay.visible
-					);
-
-					if (
-						this.overlay.visible &&
-						this.overlay.html &&
-						!this.overlay.initialized
-					) {
-						this.overlay.el.innerHTML = this.overlay.html;
-						this.exec(this.overlay.el);
-						this.overlay.initialized = true;
-					}
-				}
-
 				setLayout(n) {
 					this.focused = Math.min(this.focused, n);
 					this.layout =
@@ -234,9 +200,7 @@
 
 				cycleFocus() {
 					this.refresh();
-					this.space.forEach((s) => s.el.classList.remove('focused'));
 					this.focused = (this.focused + 1) % (this.layout[0] + 1);
-					this.space[this.focused].el.classList.add('focused');
 					this.sync(true);
 				}
 
@@ -279,9 +243,6 @@
 							this.exec(s.el);
 						}
 					});
-					if (this.overlay.initialized && window.keyboard) {
-						window.keyboard.sync(this.layout, this.prevLayout);
-					}
 				}
 
 				async fetch(url) {
@@ -311,7 +272,6 @@
 				u.onKey('3', () => u.setLayout(2), true);
 				u.onKey('q', () => u.nav(-1), true);
 				u.onKey('e', () => u.nav(1), true);
-				u.onKey('z', () => u.toggleOverlay(), true);
 
 				window.pathless = {
 					space: (index) => u.space[index ?? u.focused].el,
@@ -320,17 +280,15 @@
 					state: () => u.getState(),
 					fetch: (url) => u.fetch(url),
 					onKey: (key, fx, global) => u.onKey(key, fx, global),
-					keyboard: () => [u.keybinds, u.layout, u.overlay],
 				};
 			});
 		</script>
 	</head>
 	<body>
 		<div id="universe">
-			<div class="space zero"></div>
-			<div class="space one"></div>
-			<div class="space two"></div>
-			<div id="overlay"></div>
+			<div class="space" id="zero"></div>
+			<div class="space" id="one"></div>
+			<div class="space" id="two"></div>
 		</div>
 	</body>
 </html>
