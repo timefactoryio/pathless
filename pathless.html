@@ -106,10 +106,11 @@
 		</style>
 		<script>
 			class Universe {
+				static ID = ['zero', 'one', 'two'];
 				constructor() {
 					window.apiUrl = '{{.APIURL}}';
 					this.universe = document.getElementById('universe');
-					this.space = ['zero', 'one', 'two'].map((id) => ({
+					this.space = Universe.ID.map((id) => ({
 						el: document.getElementById(id),
 						frame: [0, null],
 						state: new Map(),
@@ -168,18 +169,14 @@
 
 				getState() {
 					const s = this.space[this.focused];
-					return s.state.has(s.frame[0])
-						? Object.fromEntries(s.state.get(s.frame[0]))
-						: {};
+					const frameState = s.state.get(s.frame[0]);
+					return frameState ? Object.fromEntries(frameState) : {};
 				}
 
 				fullscreen() {
-					if (this.layout[0]) {
-						this.prevLayout = [...this.layout];
-						this.layout = [0, 0];
-					} else {
-						this.layout = [...this.prevLayout];
-					}
+					[this.layout, this.prevLayout] = this.layout[0]
+						? [[0, 0], this.layout]
+						: [this.prevLayout, this.prevLayout];
 					this.sync();
 				}
 
@@ -193,9 +190,9 @@
 				}
 
 				refresh() {
-					Object.keys(this.keybinds).forEach((k) => {
+					for (const k in this.keybinds) {
 						if (!this.keybinds[k].global) delete this.keybinds[k];
-					});
+					}
 				}
 
 				cycleFocus() {
@@ -213,8 +210,7 @@
 					this.sync();
 				}
 
-				exec(target) {
-					const el = target || this.space[this.focused].el;
+				exec(el = this.space[this.focused].el) {
 					['script', 'style'].forEach((tag) => {
 						el.querySelectorAll(tag).forEach((old) => {
 							const n = document.createElement(tag);
