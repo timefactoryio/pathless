@@ -106,9 +106,11 @@
 			}
 			#overlay {
 				position: fixed;
-				bottom: 0.7em;
-				right: 0.7em;
-				max-width: 35vw;
+				margin: 0.5em;
+				max-width: 26vw;
+				bottom: 0;
+				left: 37vw;
+				right: 37vw;
 				background: rgba(0, 0, 0, 1);
 				display: none;
 				align-items: center;
@@ -123,7 +125,6 @@
 				grid-template: repeat(3, 1fr) / repeat(3, 1fr);
 				gap: 0.5em;
 			}
-
 			.key {
 				width: 10em;
 				height: 5em;
@@ -369,34 +370,26 @@
 					this.updateOverlay();
 				}
 
-				getNextLayoutIndex(key) {
-					const n = parseInt(key);
-					if (n === 1) return 0;
-					return this.layout[0] === n - 1
-						? (this.layout[1] + 1) % Universe.LAYOUT_SVGS[n].length
-						: 0;
-				}
 				updateOverlay() {
 					if (!this.overlay?.classList.contains('show')) return;
-					const allKeyDivs = this.overlay.querySelectorAll('.key');
-					allKeyDivs.forEach((keyDiv) => {
-						const keyId = keyDiv.id;
-						if (keyId.startsWith('k')) {
-							const key = keyId.substring(1);
-							const span = keyDiv.querySelector('span');
-							if (span) {
-								const bind = this.keybinds[key];
-								if (['1', '2', '3'].includes(key) && bind) {
-									const nextIdx =
-										this.getNextLayoutIndex(key);
-									span.innerHTML =
-										Universe.LAYOUT_SVGS[parseInt(key)][
-											nextIdx
-										];
-								} else {
-									span.textContent = bind?.desc || '';
-								}
-							}
+					this.overlay.querySelectorAll('.key').forEach((keyDiv) => {
+						const key = keyDiv.id.substring(1);
+						const span = keyDiv.querySelector('span');
+						if (!span) return;
+
+						const bind = this.keybinds[key];
+						if (['1', '2', '3'].includes(key) && bind) {
+							const n = parseInt(key);
+							const nextIdx =
+								n === 1
+									? 0
+									: this.layout[0] === n - 1
+									? (this.layout[1] + 1) %
+									  Universe.LAYOUT_SVGS[n].length
+									: 0;
+							span.innerHTML = Universe.LAYOUT_SVGS[n][nextIdx];
+						} else {
+							span.textContent = bind?.desc || '';
 						}
 					});
 				}
@@ -433,18 +426,18 @@
 			<div class="space" id="zero"></div>
 			<div class="space" id="one"></div>
 			<div class="space" id="two"></div>
-			<div id="overlay">
-				<div class="keyboard">
-					<div class="key" id="k1"><kbd>1</kbd><span></span></div>
-					<div class="key" id="k2"><kbd>2</kbd><span></span></div>
-					<div class="key" id="k3"><kbd>3</kbd><span></span></div>
-					<div class="key" id="kq"><kbd>q</kbd><span></span></div>
-					<div class="key" id="kw"><kbd>w</kbd><span></span></div>
-					<div class="key" id="ke"><kbd>e</kbd><span></span></div>
-					<div class="key" id="ka"><kbd>a</kbd><span></span></div>
-					<div class="key" id="ks"><kbd>s</kbd><span></span></div>
-					<div class="key" id="kd"><kbd>d</kbd><span></span></div>
-				</div>
+		</div>
+		<div id="overlay">
+			<div class="keyboard">
+				<div class="key" id="k1"><kbd>1</kbd><span></span></div>
+				<div class="key" id="k2"><kbd>2</kbd><span></span></div>
+				<div class="key" id="k3"><kbd>3</kbd><span></span></div>
+				<div class="key" id="kq"><kbd>q</kbd><span></span></div>
+				<div class="key" id="kw"><kbd>w</kbd><span></span></div>
+				<div class="key" id="ke"><kbd>e</kbd><span></span></div>
+				<div class="key" id="ka"><kbd>a</kbd><span></span></div>
+				<div class="key" id="ks"><kbd>s</kbd><span></span></div>
+				<div class="key" id="kd"><kbd>d</kbd><span></span></div>
 			</div>
 		</div>
 	</body>
