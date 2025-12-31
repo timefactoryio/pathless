@@ -37,6 +37,7 @@
 			#universe {
 				height: 100vh;
 				display: grid;
+				position: relative;
 			}
 			.space {
 				display: flex;
@@ -103,10 +104,111 @@
 			.l23 #one {
 				border-right: var(--b);
 			}
+			#overlay {
+				position: fixed;
+				bottom: 0.7em;
+				right: 0.7em;
+				max-width: 35vw;
+				background: rgba(0, 0, 0, 1);
+				display: none;
+				align-items: center;
+				justify-content: center;
+				z-index: 999;
+			}
+			#overlay.show {
+				display: flex;
+			}
+			.keyboard {
+				display: grid;
+				grid-template: repeat(3, 1fr) / repeat(3, 1fr);
+				gap: 0.5em;
+			}
+
+			.key {
+				width: 10em;
+				height: 5em;
+				box-sizing: border-box;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				justify-content: center;
+				overflow: hidden;
+				border: medium solid #444;
+				border-radius: 3px;
+			}
+			.key.pressed {
+				border: medium solid white !important;
+				background: #444;
+			}
+			#kq {
+				border: medium solid red !important;
+			}
+			#ke {
+				border: var(--b) !important;
+			}
+			.key {
+				width: 10em;
+				height: 5em;
+				box-sizing: border-box;
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				justify-content: flex-start;
+				overflow: hidden;
+				border: medium solid #444;
+				border-radius: 3px;
+				font-weight: bold;
+			}
+			.key kbd {
+				font-size: 1.2em;
+				height: 2em;
+				min-height: 2em;
+				width: 100%;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				flex-shrink: 0;
+			}
+			.key span {
+				font-size: 0.9em;
+				color: #aaa;
+				flex: 1;
+				width: 100%;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				overflow: hidden;
+			}
+			.key span svg {
+				padding-bottom: 0.3em;
+				width: 100%;
+				height: 100%;
+				object-fit: contain;
+			}
 		</style>
 		<script>
 			class Universe {
 				static ID = ['zero', 'one', 'two'];
+				static LAYOUTS = {
+					0: 1,
+					1: 2,
+					2: 4,
+				};
+				static LAYOUT_SVGS = {
+					1: [
+						'<svg viewBox="0 0 880 596" style="width:100%;height:100%"><rect width="860" height="576" x="10" y="10" fill="none" stroke="#00f" stroke-width="30" rx="16"/></svg>',
+					],
+					2: [
+						'<svg viewBox="0 0 880 596" style="width:100%;height:100%"><rect width="860" height="576" x="10" y="10" fill="none" stroke="#00f" stroke-width="30" rx="16"/><path stroke="#00f" stroke-width="30" d="M440 10v576"/></svg>',
+						'<svg viewBox="0 0 880 596" style="width:100%;height:100%"><rect width="860" height="576" x="10" y="10" fill="none" stroke="#00f" stroke-width="30" rx="16"/><path stroke="#00f" stroke-width="30" d="M10 298h860"/></svg>',
+					],
+					3: [
+						'<svg viewBox="0 0 880 596" style="width:100%;height:100%"><rect width="860" height="576" x="10" y="10" fill="none" stroke="#00f" stroke-width="30" rx="16"/><path stroke="#00f" stroke-width="30" d="M440 10v576M440 298h430"/></svg>',
+						'<svg viewBox="0 0 880 596" style="width:100%;height:100%"><rect width="860" height="576" x="10" y="10" fill="none" stroke="#00f" stroke-width="30" rx="16"/><path stroke="#00f" stroke-width="30" d="M10 298h860M440 298v288"/></svg>',
+						'<svg viewBox="0 0 880 596" style="width:100%;height:100%"><rect width="860" height="576" x="10" y="10" fill="none" stroke="#00f" stroke-width="30" rx="16"/><path stroke="#00f" stroke-width="30" d="M440 10v576M10 298h430"/></svg>',
+						'<svg viewBox="0 0 880 596" style="width:100%;height:100%"><rect width="860" height="576" x="10" y="10" fill="none" stroke="#00f" stroke-width="30" rx="16"/><path stroke="#00f" stroke-width="30" d="M10 298h860M440 10v288"/></svg>',
+					],
+				};
 				constructor() {
 					window.apiUrl = '{{.APIURL}}';
 					this.universe = document.getElementById('universe');
@@ -121,6 +223,7 @@
 					this.focused = 0;
 					this.cache = new Map();
 					this.keybinds = {};
+					this.overlay = document.getElementById('overlay');
 
 					window.addEventListener('keydown', (e) =>
 						this.handleKey(e, true)
@@ -143,19 +246,20 @@
 					if (!bind) return;
 					e.preventDefault();
 					bind.pressed = pressed;
+
+					const keyDiv = this.overlay?.querySelector(`#k${key}`);
+					keyDiv?.classList.toggle('pressed', pressed);
+
 					if (pressed) bind.fx?.(e);
-					window.dispatchEvent(
-						new CustomEvent('input', {
-							detail: { key, pressed },
-						})
-					);
 				}
 
-				onKey(key, fx, global = false) {
+				onKey(key, fx, global = false, desc = null, svg = null) {
 					this.keybinds[key.toLowerCase()] = {
 						fx,
 						global,
 						pressed: false,
+						desc: desc || 'hello.universe',
+						svg,
 					};
 					return this;
 				}
@@ -184,7 +288,7 @@
 					this.focused = Math.min(this.focused, n);
 					this.layout =
 						this.layout[0] === n
-							? [n, (this.layout[1] + 1) % [0, 2, 4][n]]
+							? [n, (this.layout[1] + 1) % Universe.LAYOUTS[n]]
 							: [n, 0];
 					this.sync();
 				}
@@ -239,6 +343,7 @@
 							this.exec(s.el);
 						}
 					});
+					this.updateOverlay();
 				}
 
 				async fetch(url) {
@@ -258,16 +363,59 @@
 					this.cache.set(url, promise);
 					return promise;
 				}
+
+				toggleKeybindOverlay() {
+					this.overlay?.classList.toggle('show');
+					this.updateOverlay();
+				}
+
+				getNextLayoutIndex(key) {
+					const n = parseInt(key);
+					if (n === 1) return 0;
+					return this.layout[0] === n - 1
+						? (this.layout[1] + 1) % Universe.LAYOUT_SVGS[n].length
+						: 0;
+				}
+				updateOverlay() {
+					if (!this.overlay?.classList.contains('show')) return;
+					const allKeyDivs = this.overlay.querySelectorAll('.key');
+					allKeyDivs.forEach((keyDiv) => {
+						const keyId = keyDiv.id;
+						if (keyId.startsWith('k')) {
+							const key = keyId.substring(1);
+							const span = keyDiv.querySelector('span');
+							if (span) {
+								const bind = this.keybinds[key];
+								if (['1', '2', '3'].includes(key) && bind) {
+									const nextIdx =
+										this.getNextLayoutIndex(key);
+									span.innerHTML =
+										Universe.LAYOUT_SVGS[parseInt(key)][
+											nextIdx
+										];
+								} else {
+									span.textContent = bind?.desc || '';
+								}
+							}
+						}
+					});
+				}
 			}
 
 			document.addEventListener('DOMContentLoaded', () => {
 				const u = new Universe();
-				u.onKey('Tab', () => u.cycleFocus(), true);
+				u.onKey(
+					'tab',
+					() => u.cycleFocus(),
+					true,
+					'Cycle focused space'
+				);
 				u.onKey('1', () => u.fullscreen(), true);
 				u.onKey('2', () => u.setLayout(1), true);
 				u.onKey('3', () => u.setLayout(2), true);
-				u.onKey('q', () => u.nav(-1), true);
-				u.onKey('e', () => u.nav(1), true);
+				u.onKey('q', () => u.nav(-1), true, 'back');
+				u.onKey('e', () => u.nav(1), true, 'next');
+				u.onKey('z', () => u.toggleKeybindOverlay(), true);
 
 				window.pathless = {
 					space: (index) => u.space[index ?? u.focused].el,
@@ -275,7 +423,7 @@
 					update: (key, value) => u.setState(key, value),
 					state: () => u.getState(),
 					fetch: (url) => u.fetch(url),
-					onKey: (key, fx, global) => u.onKey(key, fx, global),
+					onKey: (key, fx, desc) => u.onKey(key, fx, false, desc),
 				};
 			});
 		</script>
@@ -285,6 +433,19 @@
 			<div class="space" id="zero"></div>
 			<div class="space" id="one"></div>
 			<div class="space" id="two"></div>
+			<div id="overlay">
+				<div class="keyboard">
+					<div class="key" id="k1"><kbd>1</kbd><span></span></div>
+					<div class="key" id="k2"><kbd>2</kbd><span></span></div>
+					<div class="key" id="k3"><kbd>3</kbd><span></span></div>
+					<div class="key" id="kq"><kbd>q</kbd><span></span></div>
+					<div class="key" id="kw"><kbd>w</kbd><span></span></div>
+					<div class="key" id="ke"><kbd>e</kbd><span></span></div>
+					<div class="key" id="ka"><kbd>a</kbd><span></span></div>
+					<div class="key" id="ks"><kbd>s</kbd><span></span></div>
+					<div class="key" id="kd"><kbd>d</kbd><span></span></div>
+				</div>
+			</div>
 		</div>
 	</body>
 </html>
