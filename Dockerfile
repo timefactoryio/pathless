@@ -4,7 +4,10 @@ WORKDIR /src
 
 ARG TARGETARCH
 
-COPY . .
+# Copy only the required files
+COPY go.mod .
+COPY main.go .
+COPY pathless.html .
 
 # Cache Go modules
 RUN --mount=type=cache,target=/go/pkg/mod \
