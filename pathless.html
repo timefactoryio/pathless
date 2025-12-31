@@ -113,22 +113,16 @@
 				right: 37vw;
 				background: rgba(0, 0, 0, 1);
 				display: none;
-				align-items: center;
-				justify-content: center;
+				grid-template: repeat(3, 1fr) / repeat(3, 1fr);
+				gap: 0.5em;
 				z-index: 999;
 			}
 			#overlay.show {
-				display: flex;
-			}
-			.keyboard {
 				display: grid;
-				grid-template: repeat(3, 1fr) / repeat(3, 1fr);
-				gap: 0.5em;
 			}
 			.key {
 				width: 10em;
 				height: 5em;
-				box-sizing: border-box;
 				display: flex;
 				flex-direction: column;
 				align-items: center;
@@ -183,26 +177,6 @@
 		<script>
 			class Universe {
 				static ID = ['zero', 'one', 'two'];
-				static LAYOUTS = {
-					0: 1,
-					1: 2,
-					2: 4,
-				};
-				static LAYOUT_SVGS = {
-					1: [
-						'<svg viewBox="0 0 880 596" style="width:100%;height:100%"><rect width="860" height="576" x="10" y="10" fill="none" stroke="#00f" stroke-width="30" rx="16"/></svg>',
-					],
-					2: [
-						'<svg viewBox="0 0 880 596" style="width:100%;height:100%"><rect width="860" height="576" x="10" y="10" fill="none" stroke="#00f" stroke-width="30" rx="16"/><path stroke="#00f" stroke-width="30" d="M440 10v576"/></svg>',
-						'<svg viewBox="0 0 880 596" style="width:100%;height:100%"><rect width="860" height="576" x="10" y="10" fill="none" stroke="#00f" stroke-width="30" rx="16"/><path stroke="#00f" stroke-width="30" d="M10 298h860"/></svg>',
-					],
-					3: [
-						'<svg viewBox="0 0 880 596" style="width:100%;height:100%"><rect width="860" height="576" x="10" y="10" fill="none" stroke="#00f" stroke-width="30" rx="16"/><path stroke="#00f" stroke-width="30" d="M440 10v576M440 298h430"/></svg>',
-						'<svg viewBox="0 0 880 596" style="width:100%;height:100%"><rect width="860" height="576" x="10" y="10" fill="none" stroke="#00f" stroke-width="30" rx="16"/><path stroke="#00f" stroke-width="30" d="M10 298h860M440 298v288"/></svg>',
-						'<svg viewBox="0 0 880 596" style="width:100%;height:100%"><rect width="860" height="576" x="10" y="10" fill="none" stroke="#00f" stroke-width="30" rx="16"/><path stroke="#00f" stroke-width="30" d="M440 10v576M10 298h430"/></svg>',
-						'<svg viewBox="0 0 880 596" style="width:100%;height:100%"><rect width="860" height="576" x="10" y="10" fill="none" stroke="#00f" stroke-width="30" rx="16"/><path stroke="#00f" stroke-width="30" d="M10 298h860M440 10v288"/></svg>',
-					],
-				};
 				constructor() {
 					window.apiUrl = '{{.APIURL}}';
 					this.universe = document.getElementById('universe');
@@ -212,13 +186,24 @@
 						state: new Map(),
 					}));
 					this.frames = [];
+					this.layouts = [];
 					this.layout = [0, 0];
 					this.prevLayout = [0, 0];
 					this.focused = 0;
 					this.cache = new Map();
 					this.keybinds = {};
-					this.overlay = document.getElementById('overlay');
-
+					this.overlay = {
+						el: document.getElementById('overlay'),
+						keys: Array.from(
+							document
+								.getElementById('overlay')
+								.querySelectorAll('.key')
+						).map((keyDiv) => ({
+							key: keyDiv.id.substring(1),
+							el: keyDiv,
+							span: keyDiv.querySelector('span'),
+						})),
+					};
 					window.addEventListener('keydown', (e) =>
 						this.handleKey(e, true)
 					);
@@ -230,7 +215,9 @@
 
 				async init() {
 					const res = await fetch(`${window.apiUrl}`);
-					this.frames = await res.json();
+					const data = await res.json();
+					this.frames = data.frames;
+					this.layouts = data.layouts;
 					this.sync();
 				}
 
@@ -241,8 +228,8 @@
 					e.preventDefault();
 					bind.pressed = pressed;
 
-					const keyDiv = this.overlay?.querySelector(`#k${key}`);
-					keyDiv?.classList.toggle('pressed', pressed);
+					const keyObj = this.overlay.keys.find((k) => k.key === key);
+					keyObj?.el.classList.toggle('pressed', pressed);
 
 					if (pressed) bind.fx?.(e);
 				}
@@ -252,7 +239,7 @@
 						fx,
 						global,
 						pressed: false,
-						desc: desc || 'hello.universe',
+						desc: desc,
 						svg,
 					};
 					return this;
@@ -280,10 +267,12 @@
 
 				setLayout(n) {
 					this.focused = Math.min(this.focused, n);
-					this.layout =
+					this.layout = [
+						n,
 						this.layout[0] === n
-							? [n, (this.layout[1] + 1) % Universe.LAYOUTS[n]]
-							: [n, 0];
+							? (this.layout[1] + 1) % this.layouts[n].svgs.length
+							: 0,
+					];
 					this.sync();
 				}
 
@@ -359,28 +348,26 @@
 				}
 
 				toggleKeybindOverlay() {
-					this.overlay?.classList.toggle('show');
+					this.overlay.el.classList.toggle('show');
 					this.updateOverlay();
 				}
 
 				updateOverlay() {
-					if (!this.overlay?.classList.contains('show')) return;
-					this.overlay.querySelectorAll('.key').forEach((keyDiv) => {
-						const key = keyDiv.id.substring(1);
-						const span = keyDiv.querySelector('span');
+					if (!this.overlay.el.classList.contains('show')) return;
+					this.overlay.keys.forEach(({ key, span }) => {
 						if (!span) return;
-
 						const bind = this.keybinds[key];
 						if (['1', '2', '3'].includes(key) && bind) {
 							const n = parseInt(key);
+							const layout = this.layouts[n - 1];
+							if (!layout) return;
 							const nextIdx =
 								n === 1
 									? 0
 									: this.layout[0] === n - 1
-									? (this.layout[1] + 1) %
-									  Universe.LAYOUT_SVGS[n].length
+									? (this.layout[1] + 1) % layout.svgs.length
 									: 0;
-							span.innerHTML = Universe.LAYOUT_SVGS[n][nextIdx];
+							span.innerHTML = layout.svgs[nextIdx];
 						} else {
 							span.textContent = bind?.desc || '';
 						}
@@ -390,12 +377,7 @@
 
 			document.addEventListener('DOMContentLoaded', () => {
 				const u = new Universe();
-				u.onKey(
-					'tab',
-					() => u.cycleFocus(),
-					true,
-					'Cycle focused space'
-				);
+				u.onKey('tab', () => u.cycleFocus(), true);
 				u.onKey('1', () => u.fullscreen(), true);
 				u.onKey('2', () => u.setLayout(1), true);
 				u.onKey('3', () => u.setLayout(2), true);
@@ -421,17 +403,15 @@
 			<div class="space" id="two"></div>
 		</div>
 		<div id="overlay">
-			<div class="keyboard">
-				<div class="key" id="k1"><kbd>1</kbd><span></span></div>
-				<div class="key" id="k2"><kbd>2</kbd><span></span></div>
-				<div class="key" id="k3"><kbd>3</kbd><span></span></div>
-				<div class="key" id="kq"><kbd>q</kbd><span></span></div>
-				<div class="key" id="kw"><kbd>w</kbd><span></span></div>
-				<div class="key" id="ke"><kbd>e</kbd><span></span></div>
-				<div class="key" id="ka"><kbd>a</kbd><span></span></div>
-				<div class="key" id="ks"><kbd>s</kbd><span></span></div>
-				<div class="key" id="kd"><kbd>d</kbd><span></span></div>
-			</div>
+			<div class="key" id="k1"><kbd>1</kbd><span></span></div>
+			<div class="key" id="k2"><kbd>2</kbd><span></span></div>
+			<div class="key" id="k3"><kbd>3</kbd><span></span></div>
+			<div class="key" id="kq"><kbd>q</kbd><span></span></div>
+			<div class="key" id="kw"><kbd>w</kbd><span></span></div>
+			<div class="key" id="ke"><kbd>e</kbd><span></span></div>
+			<div class="key" id="ka"><kbd>a</kbd><span></span></div>
+			<div class="key" id="ks"><kbd>s</kbd><span></span></div>
+			<div class="key" id="kd"><kbd>d</kbd><span></span></div>
 		</div>
 	</body>
 </html>
