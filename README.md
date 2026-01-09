@@ -31,8 +31,6 @@ establishes a universal interface with
 
 When in a multipanel layout, press `1` to make the focused panel fullscreen, press `1` again to return to the previous layout. Press `2` to toggle between side-by-side (vertical split) and stacked (horizontal split). Press `3` to cycle through 50/25/25 layouts.
 
-![nav](https://raw.githubusercontent.com/timefactoryio/pathless/main/content/nav.gif)
-
 ## Documentation
 
 The `window.pathless` object provides the API coordinating between `panels`, `frames`, and `state`.    
