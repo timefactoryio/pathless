@@ -176,11 +176,11 @@
 		</style>
 		<script>
 			class Universe {
-				static ID = ['zero', 'one', 'two'];
 				constructor() {
 					window.apiUrl = '{{.APIURL}}';
 					this.universe = document.getElementById('universe');
-					this.space = Universe.ID.map((id) => ({
+					const overlayEl = document.getElementById('overlay');
+					this.space = ['zero', 'one', 'two'].map((id) => ({
 						el: document.getElementById(id),
 						frame: [0, null],
 						state: new Map(),
@@ -191,19 +191,20 @@
 					this.prevLayout = [0, 0];
 					this.focused = 0;
 					this.cache = new Map();
-					this.keybinds = {};
+					this.keybinds = new Map();
 					this.overlay = {
-						el: document.getElementById('overlay'),
-						keys: Array.from(
-							document
-								.getElementById('overlay')
-								.querySelectorAll('.key')
-						).map((keyDiv) => ({
-							key: keyDiv.id.substring(1),
-							el: keyDiv,
-							span: keyDiv.querySelector('span'),
-						})),
+						el: overlayEl,
+						keys: [...overlayEl.querySelectorAll('.key')].map(
+							(keyDiv) => ({
+								key: keyDiv.id.slice(1),
+								el: keyDiv,
+								span: keyDiv.querySelector('span'),
+							})
+						),
 					};
+					this.overlayMap = new Map(
+						this.overlay.keys.map((k) => [k.key, k])
+					);
 					window.addEventListener('keydown', (e) =>
 						this.handleKey(e, true)
 					);
@@ -214,45 +215,52 @@
 				}
 
 				async init() {
-					const res = await fetch(`${window.apiUrl}`);
-					const data = await res.json();
-					this.frames = data.frames;
-					this.layouts = data.layouts;
+					const { frames, layouts } = await fetch(
+						`${window.apiUrl}`
+					).then((r) => r.json());
+					this.frames = frames;
+					this.layouts = layouts;
+
+					this.onKey('tab', () => this.cycleFocus(), true);
+					this.onKey('1', () => this.fullscreen(), true);
+					this.onKey('2', () => this.setLayout(1), true);
+					this.onKey('3', () => this.setLayout(2), true);
+					this.onKey('q', () => this.nav(-1), true, 'back');
+					this.onKey('e', () => this.nav(1), true, 'next');
+					this.onKey('z', () => this.toggleOverlay(), true);
 					this.sync();
 				}
 
 				handleKey(e, pressed) {
 					const key = e.key.toLowerCase();
-					const bind = this.keybinds[key];
+					const bind = this.keybinds.get(key);
 					if (!bind) return;
 					e.preventDefault();
 					bind.pressed = pressed;
-
-					const keyObj = this.overlay.keys.find((k) => k.key === key);
+					const keyObj = this.overlayMap.get(key);
 					keyObj?.el.classList.toggle('pressed', pressed);
-
 					if (pressed) bind.fx?.(e);
 				}
 
 				onKey(key, fx, global = false, desc = null, svg = null) {
-					this.keybinds[key.toLowerCase()] = {
+					this.keybinds.set(key.toLowerCase(), {
 						fx,
 						global,
 						pressed: false,
 						desc: desc,
 						svg,
-					};
+					});
 					return this;
 				}
 
-				setState(key, value) {
+				write(key, value) {
 					const s = this.space[this.focused];
 					if (!s.state.has(s.frame[0]))
 						s.state.set(s.frame[0], new Map());
 					s.state.get(s.frame[0]).set(key, value);
 				}
 
-				getState() {
+				read() {
 					const s = this.space[this.focused];
 					const frameState = s.state.get(s.frame[0]);
 					return frameState ? Object.fromEntries(frameState) : {};
@@ -276,16 +284,9 @@
 					this.sync();
 				}
 
-				refresh() {
-					for (const k in this.keybinds) {
-						if (!this.keybinds[k].global) delete this.keybinds[k];
-					}
-				}
-
 				cycleFocus() {
-					this.refresh();
 					this.focused = (this.focused + 1) % (this.layout[0] + 1);
-					this.sync(true);
+					this.sync();
 				}
 
 				nav(dir) {
@@ -293,37 +294,78 @@
 					s.frame[0] =
 						(s.frame[0] + dir + this.frames.length) %
 						this.frames.length;
-					this.refresh();
 					this.sync();
 				}
 
-				exec(el = this.space[this.focused].el) {
-					['script', 'style'].forEach((tag) => {
-						el.querySelectorAll(tag).forEach((old) => {
-							const n = document.createElement(tag);
+				toggleOverlay() {
+					this.overlay.el.classList.toggle('show');
+					this.updateOverlay();
+				}
+
+				updateOverlay() {
+					if (!this.overlay.el.classList.contains('show')) return;
+					this.overlay.keys.forEach(({ key, span }) => {
+						if (!span) return;
+						const bind = this.keybinds.get(key);
+						if (['1', '2', '3'].includes(key) && bind) {
+							const n = parseInt(key);
+							const layout = this.layouts[n - 1];
+							if (!layout) return;
+							const nextIdx =
+								n === 1
+									? 0
+									: this.layout[0] === n - 1
+									? (this.layout[1] + 1) % layout.svgs.length
+									: 0;
+							span.innerHTML = layout.svgs[nextIdx];
+						} else {
+							span.textContent = bind?.desc || '';
+						}
+					});
+				}
+
+				exec(space) {
+					for (const [key, bind] of this.keybinds) {
+						if (!bind.global) {
+							const keyObj = this.overlayMap.get(key);
+							if (keyObj) {
+								keyObj.el.classList.remove('pressed');
+								if (keyObj.span) keyObj.span.textContent = '';
+							}
+							this.keybinds.delete(key);
+						}
+					}
+					const html = this.frames[space.frame[0]];
+					space.el.innerHTML = html;
+					space.frame[1] = html;
+					space.el
+						.querySelectorAll('script, style')
+						.forEach((old) => {
+							const n = document.createElement(
+								old.tagName.toLowerCase()
+							);
 							for (const a of old.attributes)
 								n.setAttribute(a.name, a.value);
 							n.textContent = old.textContent;
 							old.replaceWith(n);
 						});
-					});
 				}
 
-				sync(reexec = false) {
+				sync() {
 					this.universe.className = `l${this.layout[0]}${this.layout[1]}`;
+					const isFullscreen = this.layout[0] === 0;
+					const visibleCount = isFullscreen ? 1 : this.layout[0] + 1;
 					this.space.forEach((s, i) => {
-						const visible =
-							this.layout[0] === 0
-								? i === this.focused
-								: i < this.layout[0] + 1;
-						const html = this.frames[s.frame[0]];
+						const visible = isFullscreen
+							? i === this.focused
+							: i < visibleCount;
+
 						s.el.classList.toggle('hide', !visible);
-						if (visible && html !== s.frame[1]) {
-							s.el.innerHTML = html;
-							this.exec(s.el);
-							s.frame[1] = html;
-						} else if (visible && reexec && i === this.focused) {
-							this.exec(s.el);
+						if (visible) {
+							const html = this.frames[s.frame[0]];
+							if (html !== s.frame[1] || i === this.focused) {
+								this.exec(s);
+							}
 						}
 					});
 					this.updateOverlay();
@@ -341,50 +383,15 @@
 					this.cache.set(url, promise);
 					return promise;
 				}
-
-				toggleKeybindOverlay() {
-					this.overlay.el.classList.toggle('show');
-					this.updateOverlay();
-				}
-
-				updateOverlay() {
-					if (!this.overlay.el.classList.contains('show')) return;
-					this.overlay.keys.forEach(({ key, span }) => {
-						if (!span) return;
-						const bind = this.keybinds[key];
-						if (['1', '2', '3'].includes(key) && bind) {
-							const n = parseInt(key);
-							const layout = this.layouts[n - 1];
-							if (!layout) return;
-							const nextIdx =
-								n === 1
-									? 0
-									: this.layout[0] === n - 1
-									? (this.layout[1] + 1) % layout.svgs.length
-									: 0;
-							span.innerHTML = layout.svgs[nextIdx];
-						} else {
-							span.textContent = bind?.desc || '';
-						}
-					});
-				}
 			}
 
 			document.addEventListener('DOMContentLoaded', () => {
 				const u = new Universe();
-				u.onKey('tab', () => u.cycleFocus(), true);
-				u.onKey('1', () => u.fullscreen(), true);
-				u.onKey('2', () => u.setLayout(1), true);
-				u.onKey('3', () => u.setLayout(2), true);
-				u.onKey('q', () => u.nav(-1), true, 'back');
-				u.onKey('e', () => u.nav(1), true, 'next');
-				u.onKey('z', () => u.toggleKeybindOverlay(), true);
-
 				window.pathless = {
 					space: (index) => u.space[index ?? u.focused].el,
 					frame: () => u.space[u.focused].el.firstElementChild,
-					update: (key, value) => u.setState(key, value),
-					state: () => u.getState(),
+					write: (key, value) => u.write(key, value),
+					read: () => u.read(),
 					fetch: (url) => u.fetch(url),
 					onKey: (key, fx, desc) => u.onKey(key, fx, false, desc),
 				};
