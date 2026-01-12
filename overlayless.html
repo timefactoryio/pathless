@@ -105,109 +105,12 @@
 			.l23 #one {
 				border-right: var(--b);
 			}
-			#overlay {
-				position: fixed;
-				margin: 0.5em;
-				max-width: 26vw;
-				bottom: 0;
-				left: 37vw;
-				right: 37vw;
-				background: rgba(0, 0, 0, 1);
-				display: none;
-				grid-template: repeat(3, 1fr) / repeat(3, 1fr);
-				gap: 0.5em;
-				z-index: 999;
-			}
-			#overlay.show {
-				display: grid;
-			}
-			.key {
-				width: 10em;
-				height: 5em;
-				display: flex;
-				flex-direction: column;
-				align-items: center;
-				justify-content: center;
-				overflow: hidden;
-				border: medium solid #444;
-				border-radius: 3px;
-				font-weight: bold;
-			}
-			#kq {
-				border-color: red;
-			}
-			#ke {
-				border-color: blue;
-			}
-			.key.pressed,
-			#kq.pressed,
-			#ke.pressed {
-				border-color: white;
-			}
-			#kq span,
-			#ke span {
-				font-size: 1em;
-			}
-			.key kbd {
-				font-size: 1.2em;
-				height: 2em;
-				min-height: 2em;
-				width: 100%;
-				display: flex;
-				align-items: center;
-				justify-content: center;
-				flex-shrink: 0;
-				color: #aaa;
-			}
-			.key span {
-				font-size: 1.5em;
-				flex: 1;
-				width: 100%;
-				display: flex;
-				align-items: center;
-				justify-content: center;
-				overflow: hidden;
-			}
-			.key span svg {
-				padding-bottom: 0.2em;
-				width: 100%;
-				height: 100%;
-				object-fit: contain;
-			}
-			.kbd-hint {
-				border: 2px solid blue;
-				padding: 0.3em 0.6em;
-				border-radius: 3px;
-				font-weight: bold;
-				margin-left: 0.3em;
-			}
-			.hint {
-				position: absolute;
-				bottom: 3em;
-				left: 50%;
-				transform: translateX(-50%);
-				color: #ffffff;
-				font-size: clamp(1rem, 2vw, 1.5rem);
-				pointer-events: none;
-			}
 		</style>
 		<script>
 			class Universe {
 				constructor() {
 					window.apiUrl = '{{.APIURL}}';
 					this.universe = document.getElementById('universe');
-					this.overlay = {
-						el: document.getElementById('overlay'),
-						keys: [
-							...document
-								.getElementById('overlay')
-								.querySelectorAll('.key'),
-						].map((keyDiv) => ({
-							key: keyDiv.id.slice(1),
-							el: keyDiv,
-							span: keyDiv.querySelector('span'),
-						})),
-					};
 					this.space = ['zero', 'one', 'two'].map((id) => ({
 						el: document.getElementById(id),
 						frame: [0, null],
@@ -221,17 +124,17 @@
 					this.cache = new Map();
 					this.keybinds = new Map();
 
-					window.addEventListener('keydown', (e) =>
-						this.handleKey(e, true)
-					);
-					window.addEventListener('keyup', (e) =>
-						this.handleKey(e, false)
-					);
+					const handleKey = (pressed) => (e) =>
+						this.handleKey(e, pressed);
+					window.addEventListener('keydown', handleKey(true));
+					window.addEventListener('keyup', handleKey(false));
 					this.init();
 				}
 
 				async init() {
-					const { frames, layouts } = await this.fetch(window.apiUrl);
+					const { frames, layouts } = await fetch(
+						`${window.apiUrl}`
+					).then((r) => r.json());
 					this.frames = frames;
 					this.layouts = layouts;
 
@@ -241,13 +144,11 @@
 					this.onKey('3', () => this.setLayout(2), true);
 					this.onKey('q', () => this.nav(-1), true, 'back');
 					this.onKey('e', () => this.nav(1), true, 'next');
-					this.onKey('z', () => this.toggleOverlay(), true);
 					this.sync();
 				}
 
 				handleKey(e, pressed) {
-					const key = e.key.toLowerCase();
-					const bind = this.keybinds.get(key);
+					const bind = this.keybinds.get(e.key.toLowerCase());
 					if (!bind) return;
 					e.preventDefault();
 					bind.pressed = pressed;
@@ -256,17 +157,11 @@
 				}
 
 				onKey(key, fx, global = false, desc = null) {
-					key = key.toLowerCase();
-					const overlayKey = this.overlay.keys.find(
-						(k) => k.key === key
-					);
-					this.keybinds.set(key, {
+					this.keybinds.set(key.toLowerCase(), {
 						fx,
 						global,
 						pressed: false,
 						desc,
-						el: overlayKey?.el,
-						span: overlayKey?.span,
 					});
 					return this;
 				}
@@ -279,8 +174,9 @@
 				}
 
 				read() {
-					const s = this.space[this.focused];
-					const frameState = s.state.get(s.frame[0]);
+					const frameState = this.space[this.focused].state.get(
+						this.space[this.focused].frame[0]
+					);
 					return frameState ? Object.fromEntries(frameState) : {};
 				}
 
@@ -288,17 +184,6 @@
 					[this.layout, this.prevLayout] = this.layout[0]
 						? [[0, 0], this.layout]
 						: [this.prevLayout, this.prevLayout];
-					this.sync();
-				}
-
-				setLayout(n) {
-					this.focused = Math.min(this.focused, n);
-					this.layout = [
-						n,
-						this.layout[0] === n
-							? (this.layout[1] + 1) % this.layouts[n].svgs.length
-							: 0,
-					];
 					this.sync();
 				}
 
@@ -315,95 +200,55 @@
 					this.sync();
 				}
 
-				toggleOverlay() {
-					this.overlay.el.classList.toggle('show');
-					this.sync();
-				}
-
-				updateOverlay() {
-					if (!this.overlay.el.classList.contains('show')) return;
-					for (const [key, bind] of this.keybinds) {
-						if (!bind.span) continue;
-						if (['1', '2', '3'].includes(key)) {
-							const n = parseInt(key);
-							const layout = this.layouts[n - 1];
-							if (!layout) continue;
-							const nextIdx =
-								n === 1
-									? 0
-									: this.layout[0] === n - 1
-									? (this.layout[1] + 1) % layout.svgs.length
-									: 0;
-							bind.span.innerHTML = layout.svgs[nextIdx];
-						} else {
-							bind.span.textContent = bind.desc || '';
-						}
-					}
-				}
-
-				updateHint() {
-					const shouldShow =
-						this.focused === 0 &&
-						this.space[0].frame[0] === 0 &&
-						this.layout[0] === 0 &&
-						!this.overlay.el.classList.contains('show');
-
-					const existing = this.space[0].el.querySelector('.hint');
-					if (shouldShow && !existing) {
-						const hint = document.createElement('div');
-						hint.className = 'hint';
-						hint.innerHTML = 'Press <kbd class="kbd-hint">Z</kbd>';
-						this.space[0].el.appendChild(hint);
-					} else if (!shouldShow && existing) {
-						existing.remove();
-					}
-				}
-
 				exec(space) {
 					for (const [key, bind] of this.keybinds) {
-						if (!bind.global) {
-							if (bind.el) {
-								bind.el.classList.remove('pressed');
-								if (bind.span) bind.span.textContent = '';
-							}
-							this.keybinds.delete(key);
-						}
+						if (!bind.global) this.keybinds.delete(key);
 					}
-					const html = this.frames[space.frame[0]];
-					space.el.innerHTML = html;
-					space.frame[1] = html;
+					space.frame[1] = space.el.innerHTML =
+						this.frames[space.frame[0]];
 					space.el
 						.querySelectorAll('script, style')
 						.forEach((old) => {
 							const n = document.createElement(
 								old.tagName.toLowerCase()
 							);
-							for (const a of old.attributes)
-								n.setAttribute(a.name, a.value);
+							Array.from(old.attributes).forEach((a) =>
+								n.setAttribute(a.name, a.value)
+							);
 							n.textContent = old.textContent;
 							old.replaceWith(n);
 						});
 				}
 
+				setLayout(n) {
+					this.focused = Math.min(this.focused, n);
+					this.layout = [
+						n,
+						this.layout[0] === n
+							? (this.layout[1] + 1) % this.layouts[n].svgs.length
+							: 0,
+					];
+					this.sync();
+				}
+
 				sync() {
 					this.universe.className = `l${this.layout[0]}${this.layout[1]}`;
-					const isFullscreen = this.layout[0] === 0;
-					const visibleCount = isFullscreen ? 1 : this.layout[0] + 1;
-					this.space.forEach((s, i) => {
-						const visible = isFullscreen
-							? i === this.focused
-							: i < visibleCount;
+					const visibleCount = this.layout[0] + 1;
+
+					for (let i = 0; i < this.space.length; i++) {
+						const s = this.space[i];
+						const visible =
+							this.layout[0] === 0
+								? i === this.focused
+								: i < visibleCount;
 
 						s.el.classList.toggle('hide', !visible);
 						if (visible) {
 							const html = this.frames[s.frame[0]];
-							if (html !== s.frame[1] || i === this.focused) {
+							if (html !== s.frame[1] || i === this.focused)
 								this.exec(s);
-							}
 						}
-					});
-					this.updateOverlay();
-					this.updateHint();
+					}
 				}
 
 				async fetch(url) {
@@ -438,17 +283,6 @@
 			<div class="space" id="zero"></div>
 			<div class="space" id="one"></div>
 			<div class="space" id="two"></div>
-		</div>
-		<div id="overlay">
-			<div class="key" id="k1"><kbd>1</kbd><span></span></div>
-			<div class="key" id="k2"><kbd>2</kbd><span></span></div>
-			<div class="key" id="k3"><kbd>3</kbd><span></span></div>
-			<div class="key" id="kq"><kbd>q</kbd><span></span></div>
-			<div class="key" id="kw"><kbd>w</kbd><span></span></div>
-			<div class="key" id="ke"><kbd>e</kbd><span></span></div>
-			<div class="key" id="ka"><kbd>a</kbd><span></span></div>
-			<div class="key" id="ks"><kbd>s</kbd><span></span></div>
-			<div class="key" id="kd"><kbd>d</kbd><span></span></div>
 		</div>
 	</body>
 </html>
