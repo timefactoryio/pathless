@@ -45,6 +45,7 @@
 				justify-content: center;
 				padding: 1em;
 				overflow: hidden;
+				position: relative;
 			}
 			.space.hide {
 				display: none;
@@ -173,13 +174,43 @@
 				height: 100%;
 				object-fit: contain;
 			}
+			.kbd-hint {
+				border: 2px solid blue;
+				padding: 0.3em 0.6em;
+				border-radius: 3px;
+				font-weight: bold;
+				margin-left: 0.3em;
+			}
+			.hint {
+				position: absolute;
+				bottom: 3em;
+				left: 50%;
+				transform: translateX(-50%);
+				color: #ffffff;
+				font-size: clamp(1rem, 2vw, 1.5rem);
+				pointer-events: none;
+			}
 		</style>
 		<script>
 			class Universe {
 				constructor() {
 					window.apiUrl = '{{.APIURL}}';
 					this.universe = document.getElementById('universe');
-					const overlayEl = document.getElementById('overlay');
+					this.overlay = {
+						el: document.getElementById('overlay'),
+						keys: [
+							...document
+								.getElementById('overlay')
+								.querySelectorAll('.key'),
+						].map((keyDiv) => ({
+							key: keyDiv.id.slice(1),
+							el: keyDiv,
+							span: keyDiv.querySelector('span'),
+						})),
+					};
+					this.overlayMap = new Map(
+						this.overlay.keys.map((k) => [k.key, k])
+					);
 					this.space = ['zero', 'one', 'two'].map((id) => ({
 						el: document.getElementById(id),
 						frame: [0, null],
@@ -192,19 +223,7 @@
 					this.focused = 0;
 					this.cache = new Map();
 					this.keybinds = new Map();
-					this.overlay = {
-						el: overlayEl,
-						keys: [...overlayEl.querySelectorAll('.key')].map(
-							(keyDiv) => ({
-								key: keyDiv.id.slice(1),
-								el: keyDiv,
-								span: keyDiv.querySelector('span'),
-							})
-						),
-					};
-					this.overlayMap = new Map(
-						this.overlay.keys.map((k) => [k.key, k])
-					);
+
 					window.addEventListener('keydown', (e) =>
 						this.handleKey(e, true)
 					);
@@ -242,13 +261,12 @@
 					if (pressed) bind.fx?.(e);
 				}
 
-				onKey(key, fx, global = false, desc = null, svg = null) {
+				onKey(key, fx, global = false, desc = null) {
 					this.keybinds.set(key.toLowerCase(), {
 						fx,
 						global,
 						pressed: false,
-						desc: desc,
-						svg,
+						desc,
 					});
 					return this;
 				}
@@ -299,7 +317,7 @@
 
 				toggleOverlay() {
 					this.overlay.el.classList.toggle('show');
-					this.updateOverlay();
+					this.sync();
 				}
 
 				updateOverlay() {
@@ -322,6 +340,24 @@
 							span.textContent = bind?.desc || '';
 						}
 					});
+				}
+
+				updateHint() {
+					const shouldShow =
+						this.focused === 0 &&
+						this.space[0].frame[0] === 0 &&
+						this.layout[0] === 0 &&
+						!this.overlay.el.classList.contains('show');
+
+					const existing = this.space[0].el.querySelector('.hint');
+					if (shouldShow && !existing) {
+						const hint = document.createElement('div');
+						hint.className = 'hint';
+						hint.innerHTML = 'Press <kbd class="kbd-hint">Z</kbd>';
+						this.space[0].el.appendChild(hint);
+					} else if (!shouldShow && existing) {
+						existing.remove();
+					}
 				}
 
 				exec(space) {
@@ -369,6 +405,7 @@
 						}
 					});
 					this.updateOverlay();
+					this.updateHint();
 				}
 
 				async fetch(url) {
