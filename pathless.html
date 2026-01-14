@@ -107,19 +107,24 @@
 			}
 			#overlay {
 				position: fixed;
-				margin: 0.5em;
-				max-width: 26vw;
 				bottom: 0;
-				left: 37vw;
-				right: 37vw;
-				background: rgba(0, 0, 0, 1);
+				left: 0;
+				right: 0;
 				display: none;
-				grid-template: repeat(3, 1fr) / repeat(3, 1fr);
-				gap: 0.5em;
+				align-items: center;
+				justify-content: center;
+				padding: 0.5em;
 				z-index: 999;
 			}
 			#overlay.show {
+				display: flex;
+			}
+			#overlay > .grid {
+				background: rgba(0, 0, 0, 1);
 				display: grid;
+				grid-template: repeat(3, 1fr) / repeat(3, 1fr);
+				gap: 0.5em;
+				max-width: 26vw;
 			}
 			.key {
 				width: 10em;
@@ -133,19 +138,19 @@
 				border-radius: 3px;
 				font-weight: bold;
 			}
-			#kq {
+			.key.q {
 				border-color: red;
 			}
-			#ke {
+			.key.e {
 				border-color: blue;
 			}
 			.key.pressed,
-			#kq.pressed,
-			#ke.pressed {
+			.key.q.pressed,
+			.key.e.pressed {
 				border-color: white;
 			}
-			#kq span,
-			#ke span {
+			.key.q span,
+			.key.e span {
 				font-size: 1em;
 			}
 			.key kbd {
@@ -196,17 +201,21 @@
 				constructor() {
 					window.apiUrl = '{{.APIURL}}';
 					this.universe = document.getElementById('universe');
-					this.overlay = {
-						el: document.getElementById('overlay'),
-						keys: [
-							...document
-								.getElementById('overlay')
-								.querySelectorAll('.key'),
-						].map((keyDiv) => ({
-							key: keyDiv.id.slice(1),
-							el: keyDiv,
-							span: keyDiv.querySelector('span'),
-						})),
+					this.overlay = document.getElementById('overlay');
+					this.grid = {
+						el: this.overlay.querySelector('.grid'),
+						keys: [...this.overlay.querySelectorAll('.key')].map(
+							(keyDiv) => {
+								const key = keyDiv.classList[1];
+								const kbd = keyDiv.querySelector('kbd');
+								kbd.textContent = key;
+								return {
+									key,
+									el: keyDiv,
+									span: keyDiv.querySelector('span'),
+								};
+							}
+						),
 					};
 					this.space = ['zero', 'one', 'two'].map((id) => ({
 						el: document.getElementById(id),
@@ -257,7 +266,7 @@
 
 				onKey(key, fx, global = false, desc = null) {
 					key = key.toLowerCase();
-					const overlayKey = this.overlay.keys.find(
+					const overlayKey = this.grid.keys.find(
 						(k) => k.key === key
 					);
 					this.keybinds.set(key, {
@@ -316,12 +325,11 @@
 				}
 
 				toggleOverlay() {
-					this.overlay.el.classList.toggle('show');
+					this.overlay.classList.toggle('show');
 					this.sync();
 				}
-
 				updateOverlay() {
-					if (!this.overlay.el.classList.contains('show')) return;
+					if (!this.overlay.classList.contains('show')) return;
 					for (const [key, bind] of this.keybinds) {
 						if (!bind.span) continue;
 						if (['1', '2', '3'].includes(key)) {
@@ -346,7 +354,7 @@
 						this.focused === 0 &&
 						this.space[0].frame[0] === 0 &&
 						this.layout[0] === 0 &&
-						!this.overlay.el.classList.contains('show');
+						!this.overlay.classList.contains('show');
 
 					const existing = this.space[0].el.querySelector('.hint');
 					if (shouldShow && !existing) {
@@ -440,15 +448,17 @@
 			<div class="space" id="two"></div>
 		</div>
 		<div id="overlay">
-			<div class="key" id="k1"><kbd>1</kbd><span></span></div>
-			<div class="key" id="k2"><kbd>2</kbd><span></span></div>
-			<div class="key" id="k3"><kbd>3</kbd><span></span></div>
-			<div class="key" id="kq"><kbd>q</kbd><span></span></div>
-			<div class="key" id="kw"><kbd>w</kbd><span></span></div>
-			<div class="key" id="ke"><kbd>e</kbd><span></span></div>
-			<div class="key" id="ka"><kbd>a</kbd><span></span></div>
-			<div class="key" id="ks"><kbd>s</kbd><span></span></div>
-			<div class="key" id="kd"><kbd>d</kbd><span></span></div>
+			<div class="grid">
+				<div class="key 1"><kbd></kbd><span></span></div>
+				<div class="key 2"><kbd></kbd><span></span></div>
+				<div class="key 3"><kbd></kbd><span></span></div>
+				<div class="key q"><kbd></kbd><span></span></div>
+				<div class="key w"><kbd></kbd><span></span></div>
+				<div class="key e"><kbd></kbd><span></span></div>
+				<div class="key a"><kbd></kbd><span></span></div>
+				<div class="key s"><kbd></kbd><span></span></div>
+				<div class="key d"><kbd></kbd><span></span></div>
+			</div>
 		</div>
 	</body>
 </html>
