@@ -16,7 +16,7 @@ establishes a universal interface with
  - `space`: in the system
  - `frame`: objects in space 
 
-`frame`'s are a finite pool of simulataneously observable content, cached after first fetch. 
+`frame`'s are a finite pool of simulataneously observable content. 
 
 ## Getting Started
 
