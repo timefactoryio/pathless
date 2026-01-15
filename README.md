@@ -11,8 +11,6 @@
 | `q` | previous frame |
 | `e` | next frame     |
 
-
-
 establishes a universal interface with
 
  - `space`: in the system
