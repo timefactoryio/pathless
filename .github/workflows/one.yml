@@ -46,7 +46,9 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: docker.io/timefactory/${{ github.event.repository.name }}:dev
+          tags: |
+            docker.io/timefactory/${{ github.event.repository.name }}:dev
+            docker.io/timefactory/${{ github.event.repository.name }}:demo
 
       - name: Build and push Docker image (minor/major)
         if: inputs.version_bump == 'minor' || inputs.version_bump == 'major'
