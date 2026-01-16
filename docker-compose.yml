@@ -1,0 +1,10 @@
+services:
+  pathless:
+    image: timefactory/pathless
+    container_name: pathless
+    pull_policy: always
+    ports:
+      - 127.0.0.1:1000:1000
+    # environment:
+    #   - API_URL=http://localhost:1001 #default
+    # use https in production (e.g. https://demo.timefactory.io)

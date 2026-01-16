@@ -305,7 +305,8 @@
 					this.layout = [
 						n,
 						this.layout[0] === n
-							? (this.layout[1] + 1) % this.layouts[n].svgs.length
+							? (this.layout[1] + 1) %
+							  this.layouts[n].variants.length
 							: 0,
 					];
 					this.sync();
@@ -328,6 +329,7 @@
 					this.overlay.classList.toggle('show');
 					this.sync();
 				}
+
 				updateOverlay() {
 					if (!this.overlay.classList.contains('show')) return;
 					for (const [key, bind] of this.keybinds) {
@@ -340,9 +342,10 @@
 								n === 1
 									? 0
 									: this.layout[0] === n - 1
-									? (this.layout[1] + 1) % layout.svgs.length
+									? (this.layout[1] + 1) %
+									  layout.variants.length
 									: 0;
-							bind.span.innerHTML = layout.svgs[nextIdx];
+							bind.span.innerHTML = layout.variants[nextIdx].svg;
 						} else {
 							bind.span.textContent = bind.desc || '';
 						}
@@ -394,15 +397,16 @@
 				}
 
 				sync() {
-					this.universe.className = `l${this.layout[0]}${this.layout[1]}`;
+					const l = this.layouts[this.layout[0]];
+					this.universe.className = l.variants[this.layout[1]].class;
 					const isFullscreen = this.layout[0] === 0;
-					const visibleCount = isFullscreen ? 1 : this.layout[0] + 1;
+
 					this.space.forEach((s, i) => {
 						const visible = isFullscreen
 							? i === this.focused
-							: i < visibleCount;
-
+							: i < l.visible;
 						s.el.classList.toggle('hide', !visible);
+
 						if (visible) {
 							const html = this.frames[s.frame[0]];
 							if (html !== s.frame[1] || i === this.focused) {
@@ -410,10 +414,10 @@
 							}
 						}
 					});
+
 					this.updateOverlay();
 					this.updateHint();
 				}
-
 				async fetch(url) {
 					if (this.cache.has(url)) return this.cache.get(url);
 					const promise = fetch(url).then(async (r) => {
