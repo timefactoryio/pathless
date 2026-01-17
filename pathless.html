@@ -373,10 +373,8 @@
 				exec(space) {
 					for (const [key, bind] of this.keybinds) {
 						if (!bind.global) {
-							if (bind.el) {
-								bind.el.classList.remove('pressed');
-								if (bind.span) bind.span.textContent = '';
-							}
+							bind.el?.classList.remove('pressed');
+							bind.span && (bind.span.textContent = '');
 							this.keybinds.delete(key);
 						}
 					}
@@ -389,35 +387,38 @@
 							const n = document.createElement(
 								old.tagName.toLowerCase()
 							);
-							for (const a of old.attributes)
-								n.setAttribute(a.name, a.value);
+							[...old.attributes].forEach((a) =>
+								n.setAttribute(a.name, a.value)
+							);
 							n.textContent = old.textContent;
 							old.replaceWith(n);
 						});
 				}
 
 				sync() {
-					const l = this.layouts[this.layout[0]];
-					this.universe.className = l.variants[this.layout[1]].class;
-					const isFullscreen = this.layout[0] === 0;
+					const layout = this.layouts[this.layout[0]];
+					this.universe.className =
+						layout.variants[this.layout[1]].class;
 
 					this.space.forEach((s, i) => {
-						const visible = isFullscreen
-							? i === this.focused
-							: i < l.visible;
+						const visible =
+							this.layout[0] === 0
+								? i === this.focused
+								: i < layout.visible;
 						s.el.classList.toggle('hide', !visible);
 
-						if (visible) {
-							const html = this.frames[s.frame[0]];
-							if (html !== s.frame[1] || i === this.focused) {
-								this.exec(s);
-							}
+						const needsExec =
+							this.frames[s.frame[0]] !== s.frame[1] ||
+							i === this.focused;
+						if (visible && needsExec) {
+							this.exec(s);
 						}
 					});
 
 					this.updateOverlay();
 					this.updateHint();
 				}
+
 				async fetch(url) {
 					if (this.cache.has(url)) return this.cache.get(url);
 					const promise = fetch(url).then(async (r) => {
