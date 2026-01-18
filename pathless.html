@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 	<head>
 		<meta charset="UTF-8" />
@@ -214,7 +214,7 @@
 									el: keyDiv,
 									span: keyDiv.querySelector('span'),
 								};
-							}
+							},
 						),
 					};
 					this.space = ['zero', 'one', 'two'].map((id) => ({
@@ -231,10 +231,10 @@
 					this.keybinds = new Map();
 
 					window.addEventListener('keydown', (e) =>
-						this.handleKey(e, true)
+						this.handleKey(e, true),
 					);
 					window.addEventListener('keyup', (e) =>
-						this.handleKey(e, false)
+						this.handleKey(e, false),
 					);
 					this.init();
 				}
@@ -267,7 +267,7 @@
 				onKey(key, fx, global = false, desc = null) {
 					key = key.toLowerCase();
 					const overlayKey = this.grid.keys.find(
-						(k) => k.key === key
+						(k) => k.key === key,
 					);
 					this.keybinds.set(key, {
 						fx,
@@ -306,7 +306,7 @@
 						n,
 						this.layout[0] === n
 							? (this.layout[1] + 1) %
-							  this.layouts[n].variants.length
+								this.layouts[n].variants.length
 							: 0,
 					];
 					this.sync();
@@ -330,22 +330,30 @@
 					this.sync();
 				}
 
+				getNextLayoutVariant(layoutIndex) {
+					const layout = this.layouts[layoutIndex];
+					if (!layout) return null;
+
+					if (layoutIndex === 0) return layout.variants[0];
+					const isCurrentLayout = this.layout[0] === layoutIndex;
+					const nextIdx = isCurrentLayout
+						? (this.layout[1] + 1) % layout.variants.length
+						: 0;
+
+					return layout.variants[nextIdx];
+				}
+
 				updateOverlay() {
 					if (!this.overlay.classList.contains('show')) return;
 					for (const [key, bind] of this.keybinds) {
 						if (!bind.span) continue;
 						if (['1', '2', '3'].includes(key)) {
-							const n = parseInt(key);
-							const layout = this.layouts[n - 1];
-							if (!layout) continue;
-							const nextIdx =
-								n === 1
-									? 0
-									: this.layout[0] === n - 1
-									? (this.layout[1] + 1) %
-									  layout.variants.length
-									: 0;
-							bind.span.innerHTML = layout.variants[nextIdx].svg;
+							const layoutIndex = parseInt(key) - 1;
+							const variant =
+								this.getNextLayoutVariant(layoutIndex);
+							if (variant) {
+								bind.span.innerHTML = variant.svg;
+							}
 						} else {
 							bind.span.textContent = bind.desc || '';
 						}
@@ -370,28 +378,32 @@
 					}
 				}
 
-				exec(space) {
+				cleanupKeybinds() {
 					for (const [key, bind] of this.keybinds) {
 						if (!bind.global) {
 							bind.el?.classList.remove('pressed');
-							bind.span && (bind.span.textContent = '');
+							if (bind.span) bind.span.textContent = '';
 							this.keybinds.delete(key);
 						}
 					}
+				}
+
+				exec(space) {
+					this.cleanupKeybinds();
 					const html = this.frames[space.frame[0]];
 					space.el.innerHTML = html;
 					space.frame[1] = html;
 					space.el
 						.querySelectorAll('script, style')
 						.forEach((old) => {
-							const n = document.createElement(
-								old.tagName.toLowerCase()
+							const fresh = document.createElement(
+								old.tagName.toLowerCase(),
 							);
-							[...old.attributes].forEach((a) =>
-								n.setAttribute(a.name, a.value)
+							[...old.attributes].forEach((attr) =>
+								fresh.setAttribute(attr.name, attr.value),
 							);
-							n.textContent = old.textContent;
-							old.replaceWith(n);
+							fresh.textContent = old.textContent;
+							old.replaceWith(fresh);
 						});
 				}
 
@@ -434,15 +446,10 @@
 			}
 
 			document.addEventListener('DOMContentLoaded', () => {
-				const u = new Universe();
-				window.pathless = {
-					space: (index) => u.space[index ?? u.focused].el,
-					frame: () => u.space[u.focused].el.firstElementChild,
-					write: (key, value) => u.write(key, value),
-					read: () => u.read(),
-					fetch: (url) => u.fetch(url),
-					onKey: (key, fx, desc) => u.onKey(key, fx, false, desc),
-				};
+				const u = (window.pathless = new Universe());
+				window.space = (i) => u.space[i ?? u.focused].el;
+				window.frame = () => u.space[u.focused].el.firstElementChild;
+				window.onKey = (key, fx, desc) => u.onKey(key, fx, false, desc);
 			});
 		</script>
 	</head>
