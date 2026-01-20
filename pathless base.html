@@ -6,7 +6,7 @@
 		<title>hello.universe</title>
 		<style>
 			:root {
-				--b: 1px solid blue;
+				--b: medium solid blue;
 			}
 			* {
 				box-sizing: border-box;
@@ -37,18 +37,7 @@
 			#universe {
 				height: 100vh;
 				display: grid;
-			}
-			.control-panel {
-				height: 25vh;
-				border-top: var(--b);
-				display: none;
-				align-items: center;
-				justify-content: center;
-				overflow: hidden;
-			}
-			.control-panel > * {
-				max-width: 100%;
-				max-height: 100%;
+				position: relative;
 			}
 			.space {
 				display: flex;
@@ -56,6 +45,7 @@
 				justify-content: center;
 				padding: 1em;
 				overflow: hidden;
+				position: relative;
 			}
 			.space.hide {
 				display: none;
@@ -65,7 +55,7 @@
 				height: 100%;
 			}
 			.l00 {
-				display: flex;
+				grid-template: 1fr / 1fr;
 			}
 			.l10 {
 				grid-template: 1fr / 1fr 1fr;
@@ -121,8 +111,6 @@
 				constructor() {
 					window.apiUrl = '{{.APIURL}}';
 					this.universe = document.getElementById('universe');
-					this.controlPanel =
-						document.querySelector('.control-panel');
 					this.space = ['zero', 'one', 'two'].map((id) => ({
 						el: document.getElementById(id),
 						frame: [0, null],
@@ -146,32 +134,22 @@
 				}
 
 				async init() {
-					const { frames, layouts, keyboard } = await this.fetch(
-						window.apiUrl,
-					);
+					const { frames, layouts } = await this.fetch(window.apiUrl);
 					this.frames = frames;
 					this.layouts = layouts;
-					for (const space of this.space) {
-						for (let j = 0; j < frames.length; j++) {
-							space.state.set(j, new Map());
-						}
-					}
-					this.controlPanel.innerHTML = keyboard;
+
+					this.onKey('tab', () => this.cycleFocus(), true);
+					this.onKey('1', () => this.fullscreen(), true);
+					this.onKey('2', () => this.setLayout(1), true);
+					this.onKey('3', () => this.setLayout(2), true);
+					this.onKey('q', () => this.nav(-1), true, 'back');
+					this.onKey('e', () => this.nav(1), true, 'next');
 					this.sync();
 				}
 
-				write(key, value) {
-					const s = this.space[this.focused];
-					s.state.get(s.frame[0]).set(key, value);
-				}
-
-				read() {
-					const s = this.space[this.focused];
-					return Object.fromEntries(s.state.get(s.frame[0]));
-				}
-
 				handleKey(e, pressed) {
-					const bind = this.keybinds.get(e.key.toLowerCase());
+					const key = e.key.toLowerCase();
+					const bind = this.keybinds.get(key);
 					if (!bind) return;
 					e.preventDefault();
 					bind.pressed = pressed;
@@ -190,21 +168,35 @@
 					return this;
 				}
 
+				write(key, value) {
+					const s = this.space[this.focused];
+					if (!s.state.has(s.frame[0]))
+						s.state.set(s.frame[0], new Map());
+					s.state.get(s.frame[0]).set(key, value);
+				}
+
+				read() {
+					const s = this.space[this.focused];
+					const frameState = s.state.get(s.frame[0]);
+					return frameState ? Object.fromEntries(frameState) : {};
+				}
+
+				fullscreen() {
+					[this.layout, this.prevLayout] = this.layout[0]
+						? [[0, 0], this.layout]
+						: [this.prevLayout, this.prevLayout];
+					this.sync();
+				}
+
 				setLayout(n) {
-					if (n === 0) {
-						[this.layout, this.prevLayout] = this.layout[0]
-							? [[0, 0], this.layout]
-							: [this.prevLayout, this.prevLayout];
-					} else {
-						this.focused = Math.min(this.focused, n);
-						this.layout = [
-							n,
-							this.layout[0] === n
-								? (this.layout[1] + 1) %
-									this.layouts[n].variants.length
-								: 0,
-						];
-					}
+					this.focused = Math.min(this.focused, n);
+					this.layout = [
+						n,
+						this.layout[0] === n
+							? (this.layout[1] + 1) %
+								this.layouts[n].variants.length
+							: 0,
+					];
 					this.sync();
 				}
 
@@ -221,7 +213,7 @@
 					this.sync();
 				}
 
-				cleanup() {
+				cleanupKeybinds() {
 					for (const [key, bind] of this.keybinds) {
 						if (!bind.global) {
 							bind.el?.classList.remove('pressed');
@@ -232,7 +224,7 @@
 				}
 
 				exec(space) {
-					this.cleanup();
+					this.cleanupKeybinds();
 					const html = this.frames[space.frame[0]];
 					space.el.innerHTML = html;
 					space.frame[1] = html;
@@ -283,24 +275,10 @@
 					this.cache.set(url, promise);
 					return promise;
 				}
-
-				togglePanel() {
-					const visible = this.controlPanel.style.display === 'flex';
-					this.universe.style.height = visible ? '100vh' : '75vh';
-					this.controlPanel.style.display = visible ? 'none' : 'flex';
-					this.sync();
-				}
 			}
 
 			document.addEventListener('DOMContentLoaded', () => {
 				const u = (window.pathless = new Universe());
-				u.onKey('tab', () => u.cycleFocus(), true);
-				u.onKey('1', () => u.setLayout(0), true);
-				u.onKey('2', () => u.setLayout(1), true);
-				u.onKey('3', () => u.setLayout(2), true);
-				u.onKey('q', () => u.nav(-1), true, 'back');
-				u.onKey('e', () => u.nav(1), true, 'next');
-				u.onKey('z', () => u.togglePanel(), true, 'toggle panel');
 				window.space = (i) => u.space[i ?? u.focused].el;
 				window.frame = () => u.space[u.focused].el.firstElementChild;
 				window.onKey = (key, fx, desc) => u.onKey(key, fx, false, desc);
@@ -313,6 +291,5 @@
 			<div class="space" id="one"></div>
 			<div class="space" id="two"></div>
 		</div>
-		<div class="control-panel"></div>
 	</body>
 </html>
