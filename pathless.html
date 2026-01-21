@@ -38,6 +38,10 @@
 				height: 100vh;
 				display: grid;
 			}
+			#universe > * {
+				width: 100%;
+				height: 100%;
+			}
 			.control-panel {
 				height: 25vh;
 				border-top: var(--b);
@@ -46,23 +50,14 @@
 				justify-content: center;
 				overflow: hidden;
 			}
-			.control-panel > * {
-				max-width: 100%;
-				max-height: 100%;
-			}
 			.space {
 				display: flex;
 				align-items: center;
 				justify-content: center;
-				padding: 1em;
 				overflow: hidden;
 			}
 			.space.hide {
 				display: none;
-			}
-			.space > * {
-				width: 100%;
-				height: 100%;
 			}
 			.l00 {
 				display: flex;
@@ -121,8 +116,10 @@
 				constructor() {
 					window.apiUrl = '{{.APIURL}}';
 					this.universe = document.getElementById('universe');
-					this.controlPanel =
-						document.querySelector('.control-panel');
+					this.controlPanel = {
+						el: document.querySelector('.control-panel'),
+						visible: false,
+					};
 					this.space = ['zero', 'one', 'two'].map((id) => ({
 						el: document.getElementById(id),
 						frame: [0, null],
@@ -151,12 +148,12 @@
 					);
 					this.frames = frames;
 					this.layouts = layouts;
+					this.controlPanel.el.innerHTML = keyboard;
 					for (const space of this.space) {
 						for (let j = 0; j < frames.length; j++) {
 							space.state.set(j, new Map());
 						}
 					}
-					this.controlPanel.innerHTML = keyboard;
 					this.sync();
 				}
 
@@ -181,11 +178,13 @@
 
 				onKey(key, fx, global = false, desc = null) {
 					key = key.toLowerCase();
+					const existing = this.keybinds.get(key);
 					this.keybinds.set(key, {
 						fx,
 						global,
 						pressed: false,
 						desc,
+						el: existing?.el || null,
 					});
 					return this;
 				}
@@ -223,11 +222,12 @@
 
 				cleanup() {
 					for (const [key, bind] of this.keybinds) {
-						if (!bind.global) {
-							bind.el?.classList.remove('pressed');
-							if (bind.span) bind.span.textContent = '';
-							this.keybinds.delete(key);
-						}
+						if (bind.global) continue;
+
+						bind.el?.classList.remove('pressed');
+						const bottom = bind.el?.querySelector('.bottom');
+						if (bottom) bottom.textContent = '';
+						this.keybinds.delete(key);
 					}
 				}
 
@@ -269,6 +269,7 @@
 							this.exec(s);
 						}
 					});
+					this.updateKeyboard();
 				}
 
 				async fetch(url) {
@@ -285,10 +286,47 @@
 				}
 
 				togglePanel() {
-					const visible = this.controlPanel.style.display === 'flex';
-					this.universe.style.height = visible ? '100vh' : '75vh';
-					this.controlPanel.style.display = visible ? 'none' : 'flex';
+					this.controlPanel.visible = !this.controlPanel.visible;
+					this.universe.style.height = this.controlPanel.visible
+						? '75vh'
+						: '100vh';
+					this.controlPanel.el.style.display = this.controlPanel
+						.visible
+						? 'flex'
+						: 'none';
 					this.sync();
+				}
+
+				updateKeyboard() {
+					const keys = ['1', '2', '3', 'q', 'w', 'e', 'a', 's', 'd'];
+					for (const key of keys) {
+						const keyEl = this.controlPanel.el.querySelector(
+							`.key[data-key="${key}"]`,
+						);
+						if (!keyEl) continue;
+						const bind = this.keybinds.get(key);
+						if (bind) {
+							bind.el = keyEl;
+							const bottom = keyEl.querySelector('.bottom');
+							if (['1', '2', '3'].includes(key)) {
+								const n = parseInt(key);
+								const layout = this.layouts[n - 1];
+								if (!layout) continue;
+								const variantIdx =
+									n === 1
+										? 0
+										: this.layout[0] === n - 1
+											? (this.layout[1] + 1) %
+												layout.variants.length
+											: 0;
+
+								bottom.innerHTML =
+									layout.variants[variantIdx].svg;
+							} else if (bind.desc) {
+								bottom.textContent = bind.desc;
+							}
+						}
+					}
 				}
 			}
 
@@ -300,7 +338,7 @@
 				u.onKey('3', () => u.setLayout(2), true);
 				u.onKey('q', () => u.nav(-1), true, 'back');
 				u.onKey('e', () => u.nav(1), true, 'next');
-				u.onKey('z', () => u.togglePanel(), true, 'toggle panel');
+				u.onKey('z', () => u.togglePanel(), true);
 				window.space = (i) => u.space[i ?? u.focused].el;
 				window.frame = () => u.space[u.focused].el.firstElementChild;
 				window.onKey = (key, fx, desc) => u.onKey(key, fx, false, desc);
