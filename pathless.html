@@ -8,15 +8,15 @@
 			:root {
 				--b: 1px solid blue;
 			}
-			* {
+			*,
+			*::before,
+			*::after {
 				box-sizing: border-box;
 				margin: 0;
 				padding: 0;
 				user-select: none;
+				-webkit-user-select: none;
 				scrollbar-width: none;
-			}
-			*::-webkit-scrollbar {
-				display: none;
 			}
 			html,
 			body {
@@ -38,18 +38,6 @@
 				height: 100vh;
 				display: grid;
 			}
-			#universe > * {
-				width: 100%;
-				height: 100%;
-			}
-			#control-panel {
-				height: 25vh;
-				border-top: var(--b);
-				display: none;
-				align-items: center;
-				justify-content: center;
-				overflow: hidden;
-			}
 			.space {
 				display: flex;
 				align-items: center;
@@ -57,6 +45,11 @@
 				overflow: hidden;
 			}
 			.space.hide {
+				display: none;
+			}
+			#control-panel {
+				height: 25vh;
+				border-top: var(--b);
 				display: none;
 			}
 			.l00 {
