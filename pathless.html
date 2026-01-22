@@ -116,15 +116,15 @@
 				constructor() {
 					window.apiUrl = '{{.APIURL}}';
 					this.universe = document.getElementById('universe');
-					this.controlPanel = {
-						el: document.getElementById('control-panel'),
-						visible: false,
-					};
-					this.space = ['zero', 'one', 'two'].map((id) => ({
-						el: document.getElementById(id),
-						frame: [0, null],
-						state: new Map(),
-					}));
+					this.space = ['zero', 'one', 'two', 'control-panel'].map(
+						(id) => ({
+							el: document.getElementById(id),
+							index: 0,
+							frame: null,
+							state: new Map(),
+							visible: false,
+						}),
+					);
 					this.frames = [];
 					this.layouts = [];
 					this.layout = [0, 0];
@@ -148,21 +148,26 @@
 					);
 					this.frames = frames;
 					this.layouts = layouts;
-					this.controlPanel.el.innerHTML = keyboard;
-					this.space.forEach((space) =>
-						frames.forEach((_, i) => space.state.set(i, new Map())),
+					this.space[3].el.innerHTML = keyboard;
+					this.space.forEach((s) =>
+						frames.forEach((_, i) => s.state.set(i, new Map())),
 					);
+					this.space[0].visible = true;
 					this.sync();
 				}
 
 				write(key, value) {
-					const s = this.space[this.focused];
-					s.state.get(s.frame[0]).set(key, value);
+					this.space[this.focused].state
+						.get(this.space[this.focused].index)
+						.set(key, value);
 				}
 
 				read() {
-					const s = this.space[this.focused];
-					return Object.fromEntries(s.state.get(s.frame[0]));
+					return Object.fromEntries(
+						this.space[this.focused].state.get(
+							this.space[this.focused].index,
+						),
+					);
 				}
 
 				handleKey(e, pressed) {
@@ -175,9 +180,8 @@
 				}
 
 				onKey(key, fx, global = false, desc = null) {
-					key = key.toLowerCase();
-					const existing = this.keybinds.get(key);
-					this.keybinds.set(key, {
+					const existing = this.keybinds.get(key.toLowerCase());
+					this.keybinds.set(key.toLowerCase(), {
 						fx,
 						global,
 						pressed: false,
@@ -214,8 +218,8 @@
 				nav(dir) {
 					this.cleanup();
 					const s = this.space[this.focused];
-					s.frame[0] =
-						(s.frame[0] + dir + this.frames.length) %
+					s.index =
+						(s.index + dir + this.frames.length) %
 						this.frames.length;
 					this.sync();
 				}
@@ -247,48 +251,41 @@
 						layout.variants[this.layout[1]].class;
 
 					this.space.forEach((s, i) => {
-						const visible =
+						if (i === 3) return;
+						s.visible =
 							this.layout[0] === 0
 								? i === this.focused
 								: i < layout.visible;
-						s.el.classList.toggle('hide', !visible);
-
-						if (
-							visible &&
-							(this.frames[s.frame[0]] !== s.frame[1] ||
-								i === this.focused)
-						) {
-							s.el.innerHTML = this.frames[s.frame[0]];
-							s.frame[1] = this.frames[s.frame[0]];
-							this.exec(s.el);
+						s.el.classList.toggle('hide', !s.visible);
+						if (s.visible) {
+							if (this.frames[s.index] !== s.frame) {
+								s.el.innerHTML = this.frames[s.index];
+								s.frame = this.frames[s.index];
+							}
+							if (i === this.focused) this.exec(s.el);
 						}
 					});
-
-					if (this.controlPanel.visible) {
-						this.exec(this.controlPanel.el);
-					}
+					if (this.space[3].visible) this.exec(this.space[3].el);
 				}
 
 				async fetch(url) {
 					if (this.cache.has(url)) return this.cache.get(url);
 					const promise = fetch(url).then(async (r) => {
 						if (!r.ok) throw new Error(`HTTP ${r.status}`);
-						const ct = r.headers.get('content-type') || '';
-						return ct.includes('json')
-							? await r.json()
-							: await r.text();
+						return r.headers.get('content-type')?.includes('json')
+							? r.json()
+							: r.text();
 					});
 					this.cache.set(url, promise);
 					return promise;
 				}
 
 				togglePanel() {
-					this.controlPanel.visible = !this.controlPanel.visible;
-					this.universe.style.height = this.controlPanel.visible
+					this.space[3].visible = !this.space[3].visible;
+					this.universe.style.height = this.space[3].visible
 						? '75vh'
 						: '100vh';
-					this.controlPanel.el.style.display = this.controlPanel
-						.visible
+					this.space[3].el.style.display = this.space[3].visible
 						? 'flex'
 						: 'none';
 					this.sync();
