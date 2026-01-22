@@ -42,7 +42,7 @@
 				width: 100%;
 				height: 100%;
 			}
-			.control-panel {
+			#control-panel {
 				height: 25vh;
 				border-top: var(--b);
 				display: none;
@@ -117,7 +117,7 @@
 					window.apiUrl = '{{.APIURL}}';
 					this.universe = document.getElementById('universe');
 					this.controlPanel = {
-						el: document.querySelector('.control-panel'),
+						el: document.getElementById('control-panel'),
 						visible: false,
 					};
 					this.space = ['zero', 'one', 'two'].map((id) => ({
@@ -149,11 +149,9 @@
 					this.frames = frames;
 					this.layouts = layouts;
 					this.controlPanel.el.innerHTML = keyboard;
-					for (const space of this.space) {
-						for (let j = 0; j < frames.length; j++) {
-							space.state.set(j, new Map());
-						}
-					}
+					this.space.forEach((space) =>
+						frames.forEach((_, i) => space.state.set(i, new Map())),
+					);
 					this.sync();
 				}
 
@@ -208,11 +206,13 @@
 				}
 
 				cycleFocus() {
+					this.cleanup();
 					this.focused = (this.focused + 1) % (this.layout[0] + 1);
 					this.sync();
 				}
 
 				nav(dir) {
+					this.cleanup();
 					const s = this.space[this.focused];
 					s.frame[0] =
 						(s.frame[0] + dir + this.frames.length) %
@@ -223,31 +223,22 @@
 				cleanup() {
 					for (const [key, bind] of this.keybinds) {
 						if (bind.global) continue;
-
 						bind.el?.classList.remove('pressed');
-						const bottom = bind.el?.querySelector('.bottom');
-						if (bottom) bottom.textContent = '';
 						this.keybinds.delete(key);
 					}
 				}
 
-				exec(space) {
-					this.cleanup();
-					const html = this.frames[space.frame[0]];
-					space.el.innerHTML = html;
-					space.frame[1] = html;
-					space.el
-						.querySelectorAll('script, style')
-						.forEach((old) => {
-							const fresh = document.createElement(
-								old.tagName.toLowerCase(),
-							);
-							[...old.attributes].forEach((attr) =>
-								fresh.setAttribute(attr.name, attr.value),
-							);
-							fresh.textContent = old.textContent;
-							old.replaceWith(fresh);
-						});
+				exec(el) {
+					el.querySelectorAll('script, style').forEach((old) => {
+						const fresh = document.createElement(
+							old.tagName.toLowerCase(),
+						);
+						[...old.attributes].forEach((attr) =>
+							fresh.setAttribute(attr.name, attr.value),
+						);
+						fresh.textContent = old.textContent;
+						old.replaceWith(fresh);
+					});
 				}
 
 				sync() {
@@ -262,14 +253,20 @@
 								: i < layout.visible;
 						s.el.classList.toggle('hide', !visible);
 
-						const needsExec =
-							this.frames[s.frame[0]] !== s.frame[1] ||
-							i === this.focused;
-						if (visible && needsExec) {
-							this.exec(s);
+						if (
+							visible &&
+							(this.frames[s.frame[0]] !== s.frame[1] ||
+								i === this.focused)
+						) {
+							s.el.innerHTML = this.frames[s.frame[0]];
+							s.frame[1] = this.frames[s.frame[0]];
+							this.exec(s.el);
 						}
 					});
-					this.updateKeyboard();
+
+					if (this.controlPanel.visible) {
+						this.exec(this.controlPanel.el);
+					}
 				}
 
 				async fetch(url) {
@@ -296,38 +293,6 @@
 						: 'none';
 					this.sync();
 				}
-
-				updateKeyboard() {
-					const keys = ['1', '2', '3', 'q', 'w', 'e', 'a', 's', 'd'];
-					for (const key of keys) {
-						const keyEl = this.controlPanel.el.querySelector(
-							`.key[data-key="${key}"]`,
-						);
-						if (!keyEl) continue;
-						const bind = this.keybinds.get(key);
-						if (bind) {
-							bind.el = keyEl;
-							const bottom = keyEl.querySelector('.bottom');
-							if (['1', '2', '3'].includes(key)) {
-								const n = parseInt(key);
-								const layout = this.layouts[n - 1];
-								if (!layout) continue;
-								const variantIdx =
-									n === 1
-										? 0
-										: this.layout[0] === n - 1
-											? (this.layout[1] + 1) %
-												layout.variants.length
-											: 0;
-
-								bottom.innerHTML =
-									layout.variants[variantIdx].svg;
-							} else if (bind.desc) {
-								bottom.textContent = bind.desc;
-							}
-						}
-					}
-				}
 			}
 
 			document.addEventListener('DOMContentLoaded', () => {
@@ -351,6 +316,6 @@
 			<div class="space" id="one"></div>
 			<div class="space" id="two"></div>
 		</div>
-		<div class="control-panel"></div>
+		<div class="space" id="control-panel"></div>
 	</body>
 </html>
