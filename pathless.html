@@ -47,11 +47,6 @@
 			.space.hide {
 				display: none;
 			}
-			#control-panel {
-				height: 25vh;
-				border-top: var(--b);
-				display: none;
-			}
 			.l00 {
 				display: flex;
 			}
@@ -103,21 +98,24 @@
 			.l23 #one {
 				border-right: var(--b);
 			}
+			#three {
+				height: 25vh;
+				border-top: var(--b);
+				display: none;
+			}
 		</style>
 		<script>
 			class Universe {
 				constructor() {
 					window.apiUrl = '{{.APIURL}}';
 					this.universe = document.getElementById('universe');
-					this.space = ['zero', 'one', 'two', 'control-panel'].map(
-						(id) => ({
-							el: document.getElementById(id),
-							index: 0,
-							frame: null,
-							state: new Map(),
-							visible: false,
-						}),
-					);
+					this.space = ['zero', 'one', 'two', 'three'].map((id) => ({
+						el: document.getElementById(id),
+						index: 0,
+						frame: null,
+						state: new Map(),
+						visible: false,
+					}));
 					this.frames = [];
 					this.layouts = [];
 					this.layout = [0, 0];
@@ -142,44 +140,46 @@
 					this.frames = frames;
 					this.layouts = layouts;
 					this.space[3].el.innerHTML = keyboard;
-					this.space.forEach((s) =>
-						frames.forEach((_, i) => s.state.set(i, new Map())),
-					);
+					const distance = frames.length;
+					for (const s of this.space) {
+						for (let i = 0; i < distance; i++) {
+							s.state.set(i, new Map());
+						}
+					}
 					this.space[0].visible = true;
 					this.sync();
 				}
 
+				get current() {
+					return this.space[this.focused];
+				}
+
 				write(key, value) {
-					this.space[this.focused].state
-						.get(this.space[this.focused].index)
-						.set(key, value);
+					const s = this.current;
+					s.state.get(s.index).set(key, value);
 				}
 
 				read() {
-					return Object.fromEntries(
-						this.space[this.focused].state.get(
-							this.space[this.focused].index,
-						),
-					);
+					const s = this.current;
+					return Object.fromEntries(s.state.get(s.index));
 				}
 
 				handleKey(e, pressed) {
-					const bind = this.keybinds.get(e.key.toLowerCase());
+					const key = e.key.toLowerCase();
+					const bind = this.keybinds.get(key);
 					if (!bind) return;
 					e.preventDefault();
 					bind.pressed = pressed;
-					bind.el?.classList.toggle('pressed', pressed);
+					this.keyboard?.[pressed ? 'press' : 'release'](key);
 					if (pressed) bind.fx?.(e);
 				}
 
 				onKey(key, fx, global = false, desc = null) {
-					const existing = this.keybinds.get(key.toLowerCase());
 					this.keybinds.set(key.toLowerCase(), {
 						fx,
 						global,
 						pressed: false,
 						desc,
-						el: existing?.el || null,
 					});
 					return this;
 				}
@@ -190,12 +190,12 @@
 							? [[0, 0], this.layout]
 							: [this.prevLayout, this.prevLayout];
 					} else {
+						const variants = this.layouts[n].variants.length;
 						this.focused = Math.min(this.focused, n);
 						this.layout = [
 							n,
 							this.layout[0] === n
-								? (this.layout[1] + 1) %
-									this.layouts[n].variants.length
+								? (this.layout[1] + 1) % variants
 								: 0,
 						];
 					}
@@ -210,7 +210,7 @@
 
 				nav(dir) {
 					this.cleanup();
-					const s = this.space[this.focused];
+					const s = this.current;
 					s.index =
 						(s.index + dir + this.frames.length) %
 						this.frames.length;
@@ -220,50 +220,55 @@
 				cleanup() {
 					for (const [key, bind] of this.keybinds) {
 						if (bind.global) continue;
-						bind.el?.classList.remove('pressed');
+						this.keyboard?.release(key);
 						this.keybinds.delete(key);
 					}
 				}
 
 				exec(el) {
-					el.querySelectorAll('script, style').forEach((old) => {
-						const fresh = document.createElement(
-							old.tagName.toLowerCase(),
-						);
-						[...old.attributes].forEach((attr) =>
-							fresh.setAttribute(attr.name, attr.value),
-						);
+					for (const old of el.querySelectorAll('script, style')) {
+						const fresh = document.createElement(old.localName);
+						for (const { name, value } of old.attributes) {
+							fresh.setAttribute(name, value);
+						}
 						fresh.textContent = old.textContent;
 						old.replaceWith(fresh);
-					});
+					}
 				}
 
 				sync() {
-					const layout = this.layouts[this.layout[0]];
-					this.universe.className =
-						layout.variants[this.layout[1]].class;
-
-					this.space.forEach((s, i) => {
-						if (i === 3) return;
+					const { layouts, layout, focused, frames, space } = this;
+					const current = layouts[layout[0]];
+					const variant = current.variants[layout[1]];
+					this.universe.className = variant.class;
+					for (let i = 0; i < 3; i++) {
+						const s = space[i];
 						s.visible =
-							this.layout[0] === 0
-								? i === this.focused
-								: i < layout.visible;
+							layout[0] === 0
+								? i === focused
+								: i < current.visible;
 						s.el.classList.toggle('hide', !s.visible);
-						if (s.visible) {
-							if (this.frames[s.index] !== s.frame) {
-								s.el.innerHTML = this.frames[s.index];
-								s.frame = this.frames[s.index];
-							}
-							if (i === this.focused) this.exec(s.el);
+
+						if (!s.visible) continue;
+
+						const frame = frames[s.index];
+						if (frame !== s.frame) {
+							s.el.innerHTML = frame;
+							s.frame = frame;
 						}
-					});
-					if (this.space[3].visible) this.exec(this.space[3].el);
+
+						if (i === focused) this.exec(s.el);
+					}
+					const panel = space[3];
+					if (panel.visible) {
+						this.exec(panel.el);
+						this.keyboard?.render();
+					}
 				}
 
 				async fetch(url) {
 					if (this.cache.has(url)) return this.cache.get(url);
-					const promise = fetch(url).then(async (r) => {
+					const promise = fetch(url).then((r) => {
 						if (!r.ok) throw new Error(`HTTP ${r.status}`);
 						return r.headers.get('content-type')?.includes('json')
 							? r.json()
@@ -274,28 +279,27 @@
 				}
 
 				togglePanel() {
-					this.space[3].visible = !this.space[3].visible;
-					this.universe.style.height = this.space[3].visible
+					const panel = this.space[3];
+					panel.visible = !panel.visible;
+					this.universe.style.height = panel.visible
 						? '75vh'
 						: '100vh';
-					this.space[3].el.style.display = this.space[3].visible
-						? 'flex'
-						: 'none';
+					panel.el.style.display = panel.visible ? 'flex' : 'none';
 					this.sync();
 				}
 			}
 
 			document.addEventListener('DOMContentLoaded', () => {
 				const u = (window.pathless = new Universe());
-				u.onKey('tab', () => u.cycleFocus(), true);
-				u.onKey('1', () => u.setLayout(0), true);
-				u.onKey('2', () => u.setLayout(1), true);
-				u.onKey('3', () => u.setLayout(2), true);
-				u.onKey('q', () => u.nav(-1), true, 'back');
-				u.onKey('e', () => u.nav(1), true, 'next');
-				u.onKey('z', () => u.togglePanel(), true);
-				window.space = (i) => u.space[i ?? u.focused].el;
-				window.frame = () => u.space[u.focused].el.firstElementChild;
+				u.onKey('tab', () => u.cycleFocus(), true, 'cycleFocus')
+					.onKey('1', () => u.setLayout(0), true)
+					.onKey('2', () => u.setLayout(1), true)
+					.onKey('3', () => u.setLayout(2), true)
+					.onKey('q', () => u.nav(-1), true, 'back')
+					.onKey('e', () => u.nav(1), true, 'next')
+					.onKey('z', () => u.togglePanel(), true, 'panel');
+				window.space = (i) => u.current.el;
+				window.frame = () => u.current.el.firstElementChild;
 				window.onKey = (key, fx, desc) => u.onKey(key, fx, false, desc);
 			});
 		</script>
@@ -306,6 +310,6 @@
 			<div class="space" id="one"></div>
 			<div class="space" id="two"></div>
 		</div>
-		<div class="space" id="control-panel"></div>
+		<div class="space" id="three"></div>
 	</body>
 </html>
