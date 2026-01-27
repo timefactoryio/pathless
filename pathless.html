@@ -99,7 +99,7 @@
 				border-right: var(--b);
 			}
 			#three {
-				height: 25vh;
+				height: 30vh;
 				border-top: var(--b);
 				display: none;
 			}
@@ -140,6 +140,8 @@
 					this.frames = frames;
 					this.layouts = layouts;
 					this.space[3].el.innerHTML = keyboard;
+					this.exec(this.space[3].el);
+					this.keyboard = new window.Keyboard(this);
 					const distance = frames.length;
 					for (const s of this.space) {
 						for (let i = 0; i < distance; i++) {
@@ -282,7 +284,7 @@
 					const panel = this.space[3];
 					panel.visible = !panel.visible;
 					this.universe.style.height = panel.visible
-						? '75vh'
+						? '70vh'
 						: '100vh';
 					panel.el.style.display = panel.visible ? 'flex' : 'none';
 					this.sync();
@@ -291,13 +293,14 @@
 
 			document.addEventListener('DOMContentLoaded', () => {
 				const u = (window.pathless = new Universe());
-				u.onKey('tab', () => u.cycleFocus(), true, 'cycleFocus')
+				u.onKey('tab', () => u.cycleFocus(), true)
 					.onKey('1', () => u.setLayout(0), true)
 					.onKey('2', () => u.setLayout(1), true)
 					.onKey('3', () => u.setLayout(2), true)
 					.onKey('q', () => u.nav(-1), true, 'back')
 					.onKey('e', () => u.nav(1), true, 'next')
-					.onKey('z', () => u.togglePanel(), true, 'panel');
+					.onKey('z', () => u.togglePanel(), true);
+
 				window.space = (i) => u.current.el;
 				window.frame = () => u.current.el.firstElementChild;
 				window.onKey = (key, fx, desc) => u.onKey(key, fx, false, desc);
