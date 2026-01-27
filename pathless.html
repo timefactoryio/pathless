@@ -252,7 +252,6 @@
 						s.el.classList.toggle('hide', !s.visible);
 
 						if (!s.visible) continue;
-
 						const frame = frames[s.index];
 						if (frame !== s.frame) {
 							s.el.innerHTML = frame;
@@ -280,7 +279,7 @@
 					return promise;
 				}
 
-				togglePanel() {
+				toggleKeyboard() {
 					const panel = this.space[3];
 					panel.visible = !panel.visible;
 					this.universe.style.height = panel.visible
@@ -299,8 +298,7 @@
 					.onKey('3', () => u.setLayout(2), true)
 					.onKey('q', () => u.nav(-1), true, 'back')
 					.onKey('e', () => u.nav(1), true, 'next')
-					.onKey('z', () => u.togglePanel(), true);
-
+					.onKey('z', () => u.toggleKeyboard(), true);
 				window.space = (i) => u.current.el;
 				window.frame = () => u.current.el.firstElementChild;
 				window.onKey = (key, fx, desc) => u.onKey(key, fx, false, desc);
