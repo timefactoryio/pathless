@@ -298,7 +298,8 @@
 					.onKey('3', () => u.setLayout(2), true)
 					.onKey('q', () => u.nav(-1), true, 'back')
 					.onKey('e', () => u.nav(1), true, 'next')
-					.onKey('z', () => u.toggleKeyboard(), true);
+					.onKey('z', () => u.toggleKeyboard(), true)
+					.onKey('x', () => u.keyboard.toggleTab(), true);
 				window.space = (i) => u.current.el;
 				window.frame = () => u.current.el.firstElementChild;
 				window.onKey = (key, fx, desc) => u.onKey(key, fx, false, desc);
