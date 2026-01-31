@@ -27,6 +27,7 @@
 				color: #fff;
 			}
 			body {
+				display: flex;
 				border: var(--b);
 				border-radius: 5px;
 			}
@@ -35,6 +36,7 @@
 				text-decoration: none;
 			}
 			#universe {
+				width: 100vw;
 				height: 100vh;
 				display: grid;
 			}
@@ -99,9 +101,12 @@
 				border-right: var(--b);
 			}
 			#three {
-				height: 30vh;
-				border-top: var(--b);
+				width: 25vw;
+				height: 100vh;
+				border-right: var(--b);
+				border-top: none;
 				display: none;
+				order: -1;
 			}
 		</style>
 		<script>
@@ -278,13 +283,12 @@
 					this.cache.set(url, promise);
 					return promise;
 				}
-
 				toggleKeyboard() {
 					const panel = this.space[3];
 					panel.visible = !panel.visible;
-					this.universe.style.height = panel.visible
-						? '70vh'
-						: '100vh';
+					this.universe.style.width = panel.visible
+						? '75vw'
+						: '100vw';
 					panel.el.style.display = panel.visible ? 'flex' : 'none';
 					this.sync();
 				}
@@ -298,8 +302,7 @@
 					.onKey('3', () => u.setLayout(2), true)
 					.onKey('q', () => u.nav(-1), true, 'back')
 					.onKey('e', () => u.nav(1), true, 'next')
-					.onKey('z', () => u.toggleKeyboard(), true)
-					.onKey('x', () => u.keyboard.toggleTab(), true);
+					.onKey('z', () => u.toggleKeyboard(), true);
 				window.space = (i) => u.current.el;
 				window.frame = () => u.current.el.firstElementChild;
 				window.onKey = (key, fx, desc) => u.onKey(key, fx, false, desc);
