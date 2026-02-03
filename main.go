@@ -37,7 +37,7 @@ func init() {
 
 func Pathless(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" || r.URL.RawQuery != "" {
-		http.Redirect(w, r, "/", http.StatusMovedPermanently)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -50,8 +50,8 @@ func main() {
 	http.ListenAndServe(":1000", nil)
 }
 
+// <style> -> <script> -> <html>
 func minify(html string) []byte {
-	// <style>
 	html = regexp.MustCompile(`<style>([\s\S]*?)</style>`).ReplaceAllStringFunc(html, func(s string) string {
 		s = regexp.MustCompile(`/\*[\s\S]*?\*/`).ReplaceAllString(s, "")
 		s = regexp.MustCompile(`\s*([{}:;,>+~])\s*`).ReplaceAllString(s, "$1")
@@ -67,7 +67,6 @@ func minify(html string) []byte {
 		return s
 	})
 
-	// <script>
 	html = regexp.MustCompile(`<script>([\s\S]*?)</script>`).ReplaceAllStringFunc(html, func(s string) string {
 		s = regexp.MustCompile(`//[^\n]*\n`).ReplaceAllString(s, "\n")
 		s = regexp.MustCompile(`/\*[\s\S]*?\*/`).ReplaceAllString(s, "")
@@ -91,7 +90,6 @@ func minify(html string) []byte {
 		return s
 	})
 
-	// <html>
 	html = regexp.MustCompile(`<!--[\s\S]*?-->`).ReplaceAllString(html, "")
 	html = regexp.MustCompile(`>\s+<`).ReplaceAllString(html, "><")
 	html = regexp.MustCompile(`\s+`).ReplaceAllString(html, " ")

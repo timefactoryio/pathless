@@ -70,41 +70,40 @@
 			.l23 {
 				grid-template: 1fr 1fr / 1fr 1fr;
 			}
-			.l20 #zero {
-				grid-row: 1/3;
-				border-right: var(--b);
-			}
-			.l20 #one {
-				border-bottom: var(--b);
-			}
-			.l21 #zero {
-				grid-column: 1/3;
-				border-bottom: var(--b);
-			}
-			.l21 #one {
-				border-right: var(--b);
-			}
+			.l20 #zero,
 			.l22 #zero {
 				grid-row: 1/3;
-				grid-column: 2;
-				border-left: var(--b);
 			}
+			.l20 #zero {
+				border-right: var(--b);
+			}
+			.l20 #one,
 			.l22 #one {
 				border-bottom: var(--b);
 			}
+			.l21 #zero,
 			.l23 #zero {
-				grid-row: 2;
 				grid-column: 1/3;
-				border-top: var(--b);
 			}
+			.l21 #zero {
+				border-bottom: var(--b);
+			}
+			.l21 #one,
 			.l23 #one {
 				border-right: var(--b);
+			}
+			.l22 #zero {
+				grid-column: 2;
+				border-left: var(--b);
+			}
+			.l23 #zero {
+				grid-row: 2;
+				border-top: var(--b);
 			}
 			#three {
 				width: 25vw;
 				height: 100vh;
 				border-right: var(--b);
-				border-top: none;
 				display: none;
 				order: -1;
 			}
@@ -129,11 +128,11 @@
 					this.cache = new Map();
 					this.keybinds = new Map();
 
-					window.addEventListener('keydown', (e) =>
-						this.handleKey(e, true),
-					);
-					window.addEventListener('keyup', (e) =>
-						this.handleKey(e, false),
+					['keydown', 'keyup'].forEach((type) =>
+						window.addEventListener(
+							type,
+							this.handleKey.bind(this),
+						),
 					);
 					this.init();
 				}
@@ -144,16 +143,11 @@
 					);
 					this.frames = frames;
 					this.layouts = layouts;
+					this.space.forEach((s) => {
+						frames.forEach((_, i) => s.state.set(i, new Map()));
+					});
 					this.space[3].el.innerHTML = keyboard;
 					this.exec(this.space[3].el);
-					this.keyboard = new window.Keyboard(this);
-					const distance = frames.length;
-					for (const s of this.space) {
-						for (let i = 0; i < distance; i++) {
-							s.state.set(i, new Map());
-						}
-					}
-					this.space[0].visible = true;
 					this.sync();
 				}
 
@@ -162,23 +156,22 @@
 				}
 
 				write(key, value) {
-					const s = this.current;
-					s.state.get(s.index).set(key, value);
+					this.current.state.get(this.current.index).set(key, value);
 				}
 
 				read() {
-					const s = this.current;
-					return Object.fromEntries(s.state.get(s.index));
+					return Object.fromEntries(
+						this.current.state.get(this.current.index),
+					);
 				}
 
-				handleKey(e, pressed) {
-					const key = e.key.toLowerCase();
-					const bind = this.keybinds.get(key);
+				handleKey(e) {
+					const bind = this.keybinds.get(e.key.toLowerCase());
 					if (!bind) return;
 					e.preventDefault();
-					bind.pressed = pressed;
-					this.keyboard?.[pressed ? 'press' : 'release'](key);
-					if (pressed) bind.fx?.(e);
+					this.kb?.[e.type === 'keydown' ? 'press' : 'release'](
+						e.key.toLowerCase(),
+					);
 				}
 
 				onKey(key, fx, global = false, desc = null) {
@@ -189,6 +182,16 @@
 						desc,
 					});
 					return this;
+				}
+
+				toggleKeyboard() {
+					const panel = this.space[3];
+					panel.visible = !panel.visible;
+					this.universe.style.width = panel.visible
+						? '75vw'
+						: '100vw';
+					panel.el.style.display = panel.visible ? 'flex' : 'none';
+					this.sync();
 				}
 
 				setLayout(n) {
@@ -217,9 +220,8 @@
 
 				nav(dir) {
 					this.cleanup();
-					const s = this.current;
-					s.index =
-						(s.index + dir + this.frames.length) %
+					this.current.index =
+						(this.current.index + dir + this.frames.length) %
 						this.frames.length;
 					this.sync();
 				}
@@ -227,20 +229,20 @@
 				cleanup() {
 					for (const [key, bind] of this.keybinds) {
 						if (bind.global) continue;
-						this.keyboard?.release(key);
+						this.kb?.release(key);
 						this.keybinds.delete(key);
 					}
 				}
 
 				exec(el) {
-					for (const old of el.querySelectorAll('script, style')) {
+					el.querySelectorAll('script, style').forEach((old) => {
 						const fresh = document.createElement(old.localName);
-						for (const { name, value } of old.attributes) {
-							fresh.setAttribute(name, value);
-						}
+						Array.from(old.attributes).forEach(({ name, value }) =>
+							fresh.setAttribute(name, value),
+						);
 						fresh.textContent = old.textContent;
 						old.replaceWith(fresh);
-					}
+					});
 				}
 
 				sync() {
@@ -248,27 +250,27 @@
 					const current = layouts[layout[0]];
 					const variant = current.variants[layout[1]];
 					this.universe.className = variant.class;
-					for (let i = 0; i < 3; i++) {
-						const s = space[i];
-						s.visible =
+
+					space.slice(0, 3).forEach((s, i) => {
+						const shouldBeVisible =
 							layout[0] === 0
 								? i === focused
 								: i < current.visible;
-						s.el.classList.toggle('hide', !s.visible);
+						s.visible = shouldBeVisible;
+						s.el.classList.toggle('hide', !shouldBeVisible);
 
-						if (!s.visible) continue;
-						const frame = frames[s.index];
-						if (frame !== s.frame) {
-							s.el.innerHTML = frame;
-							s.frame = frame;
+						if (shouldBeVisible) {
+							const frame = frames[s.index];
+							if (frame !== s.frame) {
+								s.el.innerHTML = frame;
+								s.frame = frame;
+							}
+							if (i === focused) this.exec(s.el);
 						}
-
-						if (i === focused) this.exec(s.el);
-					}
-					const panel = space[3];
-					if (panel.visible) {
-						this.exec(panel.el);
-						this.keyboard?.render();
+					});
+					if (space[3].visible) {
+						this.exec(space[3].el);
+						this.kb.render();
 					}
 				}
 
@@ -282,15 +284,6 @@
 					});
 					this.cache.set(url, promise);
 					return promise;
-				}
-				toggleKeyboard() {
-					const panel = this.space[3];
-					panel.visible = !panel.visible;
-					this.universe.style.width = panel.visible
-						? '75vw'
-						: '100vw';
-					panel.el.style.display = panel.visible ? 'flex' : 'none';
-					this.sync();
 				}
 			}
 
