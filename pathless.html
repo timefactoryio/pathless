@@ -126,14 +126,12 @@
 					this.prevLayout = [0, 0];
 					this.focused = 0;
 					this.cache = new Map();
-					this.keybinds = new Map();
+					this.keys = new Map();
 
-					['keydown', 'keyup'].forEach((type) =>
-						window.addEventListener(
-							type,
-							this.handleKey.bind(this),
-						),
+					window.addEventListener('keydown', (e) =>
+						this.key(e, true),
 					);
+					window.addEventListener('keyup', (e) => this.key(e, false));
 					this.init();
 				}
 
@@ -165,23 +163,60 @@
 					);
 				}
 
-				handleKey(e) {
-					const bind = this.keybinds.get(e.key.toLowerCase());
+				key(e, down) {
+					const isEvent = typeof e !== 'string';
+					const k = isEvent ? e.key.toLowerCase() : e;
+					const bind = this.keys.get(k);
 					if (!bind) return;
-					e.preventDefault();
-					this.kb?.[e.type === 'keydown' ? 'press' : 'release'](
-						e.key.toLowerCase(),
-					);
+					if (isEvent) e.preventDefault();
+					if (down) {
+						if (bind.held) {
+							if (bind.up) return;
+							bind.down();
+						} else {
+							bind.held = true;
+							bind.down();
+						}
+					} else {
+						bind.held = false;
+						bind.up?.();
+					}
+					this.kb?.update(k);
 				}
 
-				onKey(key, fx, global = false, desc = null) {
-					this.keybinds.set(key.toLowerCase(), {
-						fx,
+				onKey(key, down, { up, global, desc } = {}) {
+					this.keys.set(key.toLowerCase(), {
+						down,
+						up,
 						global,
-						pressed: false,
 						desc,
+						held: false,
 					});
 					return this;
+				}
+
+				offKey(key) {
+					const k = key.toLowerCase();
+					const bind = this.keys.get(k);
+					if (bind?.held) {
+						bind.held = false;
+						bind.up?.();
+					}
+					this.keys.delete(k);
+					this.kb?.update(k);
+					return this;
+				}
+
+				cleanup() {
+					for (const [k, bind] of this.keys) {
+						if (bind.global) continue;
+						if (bind.held) {
+							bind.held = false;
+							bind.up?.();
+						}
+						this.keys.delete(k);
+					}
+					this.kb?.render();
 				}
 
 				toggleKeyboard() {
@@ -195,6 +230,7 @@
 				}
 
 				setLayout(n) {
+					this.cleanup();
 					if (n === 0) {
 						[this.layout, this.prevLayout] = this.layout[0]
 							? [[0, 0], this.layout]
@@ -224,14 +260,6 @@
 						(this.current.index + dir + this.frames.length) %
 						this.frames.length;
 					this.sync();
-				}
-
-				cleanup() {
-					for (const [key, bind] of this.keybinds) {
-						if (bind.global) continue;
-						this.kb?.release(key);
-						this.keybinds.delete(key);
-					}
 				}
 
 				exec(el) {
@@ -289,16 +317,17 @@
 
 			document.addEventListener('DOMContentLoaded', () => {
 				const u = (window.pathless = new Universe());
-				u.onKey('tab', () => u.cycleFocus(), true)
-					.onKey('1', () => u.setLayout(0), true)
-					.onKey('2', () => u.setLayout(1), true)
-					.onKey('3', () => u.setLayout(2), true)
-					.onKey('q', () => u.nav(-1), true, 'back')
-					.onKey('e', () => u.nav(1), true, 'next')
-					.onKey('z', () => u.toggleKeyboard(), true);
+				u.onKey('tab', () => u.cycleFocus(), { global: true })
+					.onKey('1', () => u.setLayout(0), { global: true })
+					.onKey('2', () => u.setLayout(1), { global: true })
+					.onKey('3', () => u.setLayout(2), { global: true })
+					.onKey('q', () => u.nav(-1), { global: true, desc: 'back' })
+					.onKey('e', () => u.nav(1), { global: true, desc: 'next' })
+					.onKey('z', () => u.toggleKeyboard(), { global: true });
 				window.space = (i) => u.current.el;
 				window.frame = () => u.current.el.firstElementChild;
-				window.onKey = (key, fx, desc) => u.onKey(key, fx, false, desc);
+				window.onKey = (key, down, opts) => u.onKey(key, down, opts);
+				window.offKey = (key) => u.offKey(key);
 			});
 		</script>
 	</head>
