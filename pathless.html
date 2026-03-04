@@ -46,9 +46,6 @@
 				justify-content: center;
 				overflow: hidden;
 			}
-			.space.hide {
-				display: none;
-			}
 			.l00 {
 				display: flex;
 			}
@@ -142,7 +139,7 @@
 					this.frames = frames;
 					this.layouts = layouts;
 					this.space.forEach((s) => {
-						frames.forEach((_, i) => s.state.set(i, new Map()));
+						s.state = new Map(frames.map((_, i) => [i, new Map()]));
 					});
 					this.space[3].el.innerHTML = keyboard;
 					this.exec(this.space[3].el);
@@ -164,19 +161,14 @@
 				}
 
 				key(e, down) {
-					const isEvent = typeof e !== 'string';
-					const k = isEvent ? e.key.toLowerCase() : e;
+					const k = typeof e === 'string' ? e : e.key.toLowerCase();
 					const bind = this.keys.get(k);
 					if (!bind) return;
-					if (isEvent) e.preventDefault();
+					if (k === 'tab') e.preventDefault?.();
 					if (down) {
-						if (bind.held) {
-							if (bind.up) return;
-							bind.down();
-						} else {
-							bind.held = true;
-							bind.down();
-						}
+						if (bind.held && bind.up) return;
+						bind.held = true;
+						bind.down();
 					} else {
 						bind.held = false;
 						bind.up?.();
@@ -208,7 +200,7 @@
 				}
 
 				cleanup() {
-					for (const [k, bind] of this.keys) {
+					for (const [k, bind] of [...this.keys]) {
 						if (bind.global) continue;
 						if (bind.held) {
 							bind.held = false;
@@ -231,17 +223,17 @@
 
 				setLayout(n) {
 					this.cleanup();
-					if (n === 0) {
-						[this.layout, this.prevLayout] = this.layout[0]
-							? [[0, 0], this.layout]
-							: [this.prevLayout, this.prevLayout];
+					if (!n) {
+						this.layout = this.layout[0]
+							? ((this.prevLayout = this.layout), [0, 0])
+							: this.prevLayout;
 					} else {
-						const variants = this.layouts[n].variants.length;
 						this.focused = Math.min(this.focused, n);
 						this.layout = [
 							n,
 							this.layout[0] === n
-								? (this.layout[1] + 1) % variants
+								? (this.layout[1] + 1) %
+									this.layouts[n].variants.length
 								: 0,
 						];
 					}
@@ -263,14 +255,13 @@
 				}
 
 				exec(el) {
-					el.querySelectorAll('script, style').forEach((old) => {
+					for (const old of el.querySelectorAll('script, style')) {
 						const fresh = document.createElement(old.localName);
-						Array.from(old.attributes).forEach(({ name, value }) =>
-							fresh.setAttribute(name, value),
-						);
+						for (const { name, value } of old.attributes)
+							fresh.setAttribute(name, value);
 						fresh.textContent = old.textContent;
 						old.replaceWith(fresh);
-					});
+					}
 				}
 
 				sync() {
@@ -284,9 +275,7 @@
 							layout[0] === 0
 								? i === focused
 								: i < current.visible;
-						s.visible = shouldBeVisible;
-						s.el.classList.toggle('hide', !shouldBeVisible);
-
+						s.el.style.display = shouldBeVisible ? '' : 'none';
 						if (shouldBeVisible) {
 							const frame = frames[s.index];
 							if (frame !== s.frame) {
@@ -303,15 +292,19 @@
 				}
 
 				async fetch(url) {
-					if (this.cache.has(url)) return this.cache.get(url);
-					const promise = fetch(url).then((r) => {
-						if (!r.ok) throw new Error(`HTTP ${r.status}`);
-						return r.headers.get('content-type')?.includes('json')
-							? r.json()
-							: r.text();
-					});
-					this.cache.set(url, promise);
-					return promise;
+					if (!this.cache.has(url))
+						this.cache.set(
+							url,
+							fetch(url).then((r) => {
+								if (!r.ok) throw new Error(`HTTP ${r.status}`);
+								return r.headers
+									.get('content-type')
+									?.includes('json')
+									? r.json()
+									: r.text();
+							}),
+						);
+					return this.cache.get(url);
 				}
 			}
 
