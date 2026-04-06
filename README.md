@@ -1,80 +1,41 @@
 # pathless
 
-![layouts](https://raw.githubusercontent.com/timefactoryio/pathless/main/content/layout.gif)
+### is a closed system. 
 
-#### **pathless** is a closed system. 
+## sequence
 
-#### **pathless** is a viewport allocator
+pathless is an entity with a single purpose.  
 
-| Key | Action         |
-| --- | -------------- |
-| `q` | previous frame |
-| `e` | next frame     |
+**pathless** prepares one artifact to be used from memory for every request. It has no runtime state, no session awareness, no opinion about content. It is a boundary. It knows how to hold applications without knowing what those applications are. The server's responsibility ends at delivery. 
 
- - `space`: in the system
- - `frame`: objects in space 
+### **pathless** allocates observable space.
 
 `frame`'s are a finite pool of simulataneously observable content. 
 
-## Getting Started
+The domain is the application.
 
-| Key   | Action      | Toggle                                     |
-| ----- | ----------- | ------------------------------------------ |
-| `1`   | One panel   | fullscreen <-> previous layout             |
-| `2`   | Two panel   | horizontal <-> vertical                    |
-| `3`   | Three panel | large panel left -> top -> right -> bottom |
-| `Tab` | Cycle focus | panel zero -> one -> two                   |
+A request arrives, bytes go out. That is the entirety of its runtime existence. The client arrives as those bytes. Two primitives govern the model.
 
-When in a multipanel layout, press `1` to make the focused panel fullscreen, press `1` again to return to the previous layout. Press `2` to toggle between side-by-side (vertical split) and stacked (horizontal split). Press `3` to cycle through 50/25/25 layouts.
+#### **space**: where we observe frames.
+
+Each space maintains independent state for each frame. 
+
+#### **frame**: observable object. 
+
+**[frame](https://github.com/timefactoryio/frame)** is the factory for building pathless frames. It handles the construction and delivery of frames, assets, and constants. The dependency flows one way.
+
+The keyboard is a live reflection of the systems keys, which layout is active, which panel holds focus. When a frame is focused, its script executes. The frame registers its own keys, reads its own state, and runs. When focus moves, those keybindings are released. When focus returns, the script re-executes and resumes. Nothing is lost — state is preserved per space, per frame.
+
+Inputs are the interface.
+The keyboard is the thread that runs through all three.
+Universal keys + frame keys that come and go with focus, state is what makes the system feel continuous. When focus moves, state is preserved. When a frame returns, it resumes. Only the client holds state for the life of the session. The session is the application. The seams are invisible by design.
+
+The dependency flows are pre-established and then silent. What the user encounters is a single continuous surface: a domain, a keyboard, panels that respond.
 
 ## Documentation
 
-The `window.pathless` object provides the API coordinating between `panels`, `frames`, and `state`.    
+The `window.pathless` object provides the API coordinating between `space`, `frame`, and `state`.    
 
-#### `pathless.context()`
-Returns the DOM element of the focused panel, DOM element of the current frame, and panel specifasdasdasdic frame state.
+---
 
-#### `pathless.fetch(url, opts)`  
-Returns the parsed response `{ data, headers }`. Caching and request deduplication available using `opts.key` where a single successful round-trip makes a `value` available to all panels.
-
-#### `pathless.onKey(handler)`
-Event handler used to register `frame` keybinds, automatically scoped to the focused panel.
-
-#### `pathless.update(key, value)`
-Key-value pair's used to persist state through layout changes and navigation, automatically scoped to the `frame` of the focused `panel`.
-
-### Architecture
-
-**pathless** builds, then minifies, then compresses HTML once at startup. then serves it from memory with maximum efficiency. 
-
-**Server responsibilities:**
-- Client delivery
-- Redirect all non-root paths to `/`
-
-**Client responsibilities:**
-- Fetch frames from a configurable API endpoint
-- Manage multi-panel layouts with keyboard navigation
-- Cache frames and deduplicate requests
-- Provide state management for loaded frames
-
-## What It Does
-
-Pathless is a lightweight web server that:
-
-1. **Builds template** with Title, ApiUrl, and Favicon environment values
-2. **Minifies the HTML** by removing comments, whitespace, and newlines
-3. **Compresses with gzip** for optimal transfer size
-4. **Serves from memory** - All processing happens **once** during initialization. 
-
-### Client (JavaScript)
-
-```
-┌──────────┐    ┌──────────┐    ┌──────────┐
-│   One    │───▶│    Fx    │───▶│   Zero   │
-│Controller│    │  Layout  │    │  Cache   │
-└──────────┘    └──────────┘    └──────────┘
-     │               │                │
-     │               │                │
-  Keyboard      Panel State      HTTP Fetch
-  Events        Management       & Caching
-```
+![layouts](https://raw.githubusercontent.com/timefactoryio/pathless/main/content/layout.gif)
