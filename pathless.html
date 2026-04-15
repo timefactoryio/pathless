@@ -42,6 +42,7 @@
 				align-items: center;
 				justify-content: center;
 				overflow: hidden;
+				container-type: size;
 			}
 			.l00 {
 				display: flex;
@@ -130,15 +131,21 @@
 				}
 
 				async init() {
-					const { frames, layouts, keyboard } = await this.fetch(
-						window.apiUrl,
+					const entries = await this.fetch(window.apiUrl);
+					const decoder = new TextDecoder();
+
+					this.space[3].el.innerHTML = decoder.decode(
+						entries[0].data,
 					);
-					this.frames = frames;
-					this.layouts = layouts;
+					this.frames = entries
+						.slice(1)
+						.map((e) => decoder.decode(e.data));
+
 					this.space.forEach((s) => {
-						s.state = new Map(frames.map((_, i) => [i, new Map()]));
+						s.state = new Map(
+							this.frames.map((_, i) => [i, new Map()]),
+						);
 					});
-					this.space[3].el.innerHTML = keyboard;
 					this.exec(this.space[3].el);
 					this.sync();
 				}
@@ -170,7 +177,7 @@
 						bind.held = false;
 						bind.up?.();
 					}
-					this.kb?.update(k);
+					this.kb?.render();
 				}
 
 				onKey(key, down, { up, global, desc } = {}) {
@@ -184,26 +191,24 @@
 					return this;
 				}
 
-				offKey(key) {
-					const k = key.toLowerCase();
+				release(k) {
 					const bind = this.keys.get(k);
 					if (bind?.held) {
 						bind.held = false;
 						bind.up?.();
 					}
 					this.keys.delete(k);
-					this.kb?.update(k);
+				}
+
+				offKey(key) {
+					this.release(key.toLowerCase());
+					this.kb?.render();
 					return this;
 				}
 
 				cleanup() {
 					for (const [k, bind] of [...this.keys]) {
-						if (bind.global) continue;
-						if (bind.held) {
-							bind.held = false;
-							bind.up?.();
-						}
-						this.keys.delete(k);
+						if (!bind.global) this.release(k);
 					}
 					this.kb?.render();
 				}
@@ -219,18 +224,20 @@
 				setLayout(n) {
 					this.cleanup();
 					if (!n) {
-						this.layout = this.layout[0]
-							? ((this.prevLayout = this.layout), [0, 0])
-							: this.prevLayout;
+						if (this.layout[0]) {
+							this.prevLayout = this.layout;
+							this.layout = [0, 0];
+						} else {
+							this.layout = this.prevLayout;
+						}
 					} else {
 						this.focused = Math.min(this.focused, n);
-						this.layout = [
-							n,
+						const v =
 							this.layout[0] === n
 								? (this.layout[1] + 1) %
 									this.layouts[n].variants.length
-								: 0,
-						];
+								: 0;
+						this.layout = [n, v];
 					}
 					this.sync();
 				}
@@ -281,7 +288,6 @@
 						}
 					});
 					if (space[3].visible) {
-						this.exec(space[3].el);
 						this.kb.render();
 					}
 				}
@@ -295,11 +301,26 @@
 								const ct = r.headers.get('content-type') || '';
 								if (ct.includes('json')) return r.json();
 								if (ct.includes('octet-stream'))
-									return r.arrayBuffer();
+									return r
+										.arrayBuffer()
+										.then((buf) => this.unpack(buf));
 								return r.text();
 							}),
 						);
 					return this.cache.get(url);
+				}
+
+				unpack(buf) {
+					const len = new DataView(buf).getUint32(0);
+					const manifest = JSON.parse(
+						new TextDecoder().decode(new Uint8Array(buf, 4, len)),
+					);
+					let offset = 4 + len;
+					for (const e of manifest) {
+						e.data = new Uint8Array(buf, offset, e.size);
+						offset += e.size;
+					}
+					return manifest;
 				}
 			}
 

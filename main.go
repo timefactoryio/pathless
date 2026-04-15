@@ -98,7 +98,7 @@ func minify(html string) []byte {
 	html = strings.TrimSpace(html)
 
 	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
+	gz, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
 	if _, err := gz.Write([]byte(html)); err != nil {
 		panic("gzip write error: " + err.Error())
 	}
