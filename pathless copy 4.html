@@ -67,13 +67,13 @@
 				flex-shrink: 0;
 				border-top: var(--b);
 			}
-			#universe[data-layout='v'] {
+			#universe[data-variant='v'] {
 				flex-direction: column;
 			}
-			#universe[data-layout='h'] #zero {
+			#universe[data-variant='h'] #zero {
 				border-right: var(--b);
 			}
-			#universe[data-layout='v'] #zero {
+			#universe[data-variant='v'] #zero {
 				border-bottom: var(--b);
 			}
 			#universe[data-variant='0'] {
@@ -112,17 +112,63 @@
 		<script>
 			class Universe {
 				constructor() {
-					this.universe = { el: document.getElementById('universe') };
+					this.universe = {
+						el: document.getElementById('universe'),
+						state: new Map(),
+					};
 					this.space = ['zero', 'one', 'two'].map((id) => ({
 						el: document.getElementById(id),
-						state: { frame: 0 },
+						state: new Map(),
 					}));
 					this.panel = Object.assign(document.createElement('div'), {
 						id: 'panel',
 					});
-					fetch('{{.APIURL}}')
-						.then((r) => r.arrayBuffer())
-						.then((buf) => this.decode(buf));
+					this.call('{{.APIURL}}').then((entries) => {
+						const decode = (e) =>
+							new Map(
+								Object.entries(
+									JSON.parse(
+										new TextDecoder().decode(e.data),
+									),
+								),
+							);
+						this.universe.state = decode(entries[0]);
+						const spaceState = decode(entries[1]);
+						this.space.forEach(
+							(s) => (s.state = new Map(spaceState)),
+						);
+						this.universe.kb = entries[2];
+						this.universe.frames = entries.slice(3);
+					});
+				}
+
+				async call(url) {
+					const buf = await fetch(url).then((r) => r.arrayBuffer());
+					const len = new DataView(buf).getUint32(0);
+					const manifest = JSON.parse(
+						new TextDecoder().decode(new Uint8Array(buf, 4, len)),
+					);
+					let offset = 4 + len;
+					for (const e of manifest) {
+						e.data = new Uint8Array(buf, offset, e.size);
+						offset += e.size;
+					}
+					return manifest;
+				}
+
+				state(target, value) {
+					const map = this.universe.state.has(target)
+						? this.universe.state
+						: this.space[this.universe.state.get('focused')].state;
+					if (value !== undefined) map.set(target, value);
+					return map.get(target);
+				}
+
+				toggle() {
+					const el = this.space[this.state('focused')].el;
+					el.contains(this.panel)
+						? this.panel.remove()
+						: el.appendChild(this.panel);
 				}
 			}
 
@@ -132,16 +178,10 @@
 		</script>
 	</head>
 	<body>
-		<div id="universe" data-focused="0" data-layout="0" data-variant="0">
-			<div class="space" data-space="0">
-				<div class="frame" data-frame="0"></div>
-			</div>
-			<div class="space" data-space="1">
-				<div class="frame" data-frame="0"></div>
-			</div>
-			<div class="space" data-space="2">
-				<div class="frame" data-frame="0"></div>
-			</div>
+		<div id="universe">
+			<div class="space" id="zero"></div>
+			<div class="space" id="one"></div>
+			<div class="space" id="two"></div>
 		</div>
 	</body>
 </html>

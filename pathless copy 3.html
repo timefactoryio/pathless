@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>hello.universe</title>
+		<style>
+			:root {
+				--b: 1px solid blue;
+			}
+			*,
+			*::before,
+			*::after {
+				box-sizing: border-box;
+				margin: 0;
+				padding: 0;
+				user-select: none;
+				-webkit-user-select: none;
+				scrollbar-width: none;
+			}
+			body {
+				height: 100dvh;
+				overflow: hidden;
+				font-family: sans-serif;
+				background: #000;
+				color: #fff;
+				display: flex;
+				border: var(--b);
+				border-radius: 5px;
+			}
+			a {
+				color: inherit;
+				text-decoration: none;
+			}
+			#universe {
+				width: 100vw;
+				height: 100vh;
+				display: grid;
+			}
+			.space {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				overflow: hidden;
+				container-type: size;
+			}
+			.l00 {
+				display: flex;
+			}
+			.l10 {
+				grid-template: 1fr / 1fr 1fr;
+			}
+			.l10 #zero {
+				border-right: var(--b);
+			}
+			.l11 {
+				grid-template: 1fr 1fr / 1fr;
+			}
+			.l11 #zero {
+				border-bottom: var(--b);
+			}
+			.l20,
+			.l21,
+			.l22,
+			.l23 {
+				grid-template: 1fr 1fr / 1fr 1fr;
+			}
+			.l20 #zero,
+			.l22 #zero {
+				grid-row: 1/3;
+			}
+			.l20 #zero {
+				border-right: var(--b);
+			}
+			.l20 #one,
+			.l22 #one {
+				border-bottom: var(--b);
+			}
+			.l21 #zero,
+			.l23 #zero {
+				grid-column: 1/3;
+			}
+			.l21 #zero {
+				border-bottom: var(--b);
+			}
+			.l21 #one,
+			.l23 #one {
+				border-right: var(--b);
+			}
+			.l22 #zero {
+				grid-column: 2;
+				border-left: var(--b);
+			}
+			.l23 #zero {
+				grid-row: 2;
+				border-top: var(--b);
+			}
+			#three {
+				width: 25vw;
+				height: 100vh;
+				border-right: var(--b);
+				display: none;
+				order: -1;
+			}
+		</style>
+		<script>
+			class Universe {
+				constructor() {
+					window.apiUrl = '{{.APIURL}}';
+					this.universe = document.getElementById('universe');
+					this.space = ['zero', 'one', 'two', 'three'].map((id) => ({
+						el: document.getElementById(id),
+						index: 0,
+						frameIndex: -1,
+						state: new Map(),
+					}));
+					this.space[3].visible = false;
+					this.entries = [];
+					this.frames = [];
+					this.layouts = [];
+					this.layout = [0, 0];
+					this.prevLayout = [0, 0];
+					this.focused = 0;
+					this.cache = new Map();
+					this.init();
+				}
+
+				async init() {
+					this.entries = await this.fetch(window.apiUrl);
+					this.frames = this.entries.slice(1);
+					this.space[3].el.innerHTML = this.decode(this.entries[0]);
+					this.space.forEach((s) => {
+						s.state = new Map(
+							this.frames.map((_, i) => [i, new Map()]),
+						);
+					});
+					this.exec(this.space[3].el);
+					this.sync();
+					this.exec(this.current.el);
+				}
+
+				get current() {
+					return this.space[this.focused];
+				}
+
+				write(key, value) {
+					this.current.state.get(this.current.index).set(key, value);
+				}
+
+				read() {
+					return Object.fromEntries(
+						this.current.state.get(this.current.index),
+					);
+				}
+
+				decode(entry) {
+					if (!entry.html)
+						entry.html = new TextDecoder().decode(entry.data);
+					return entry.html;
+				}
+
+				nav(index, length, dir) {
+					return (index + dir + length) % length;
+				}
+
+				commit(mutate) {
+					mutate();
+					this.sync();
+					this.exec(this.current.el);
+				}
+
+				escape() {
+					if (this.layout[0]) {
+						this.prevLayout = this.layout;
+						this.layout = [0, 0];
+					} else {
+						this.layout = this.prevLayout;
+					}
+					this.sync();
+				}
+
+				setLayout(n) {
+					this.focused = Math.min(this.focused, n);
+					this.layout = [n, 0];
+					this.sync();
+				}
+
+				setVariant(n) {
+					this.layout = [
+						n,
+						(this.layout[1] + 1) % this.layouts[n].variants.length,
+					];
+					this.sync();
+				}
+
+				cycleFocus() {
+					this.focused = this.nav(
+						this.focused,
+						this.layout[0] + 1,
+						1,
+					);
+					this.sync();
+				}
+
+				toggleKeyboard() {
+					const s = this.space[3];
+					s.visible = !s.visible;
+					this.universe.style.width = s.visible ? '75vw' : '100vw';
+					s.el.style.display = s.visible ? 'flex' : 'none';
+					if (s.visible) this.kb?.render();
+				}
+
+				exec(el) {
+					for (const old of el.querySelectorAll('script, style')) {
+						const fresh = document.createElement(old.localName);
+						for (const { name, value } of old.attributes)
+							fresh.setAttribute(name, value);
+						fresh.textContent = old.textContent;
+						old.replaceWith(fresh);
+					}
+				}
+
+				sync() {
+					if (!this.layouts.length) return;
+					const { layouts, layout, focused, frames, space } = this;
+					const current = layouts[layout[0]];
+					this.universe.className = current.variants[layout[1]].class;
+					space.slice(0, 3).forEach((s, i) => {
+						const shouldBeVisible =
+							layout[0] === 0
+								? i === focused
+								: i < current.visible;
+						s.el.style.display = shouldBeVisible ? '' : 'none';
+						if (shouldBeVisible && s.frameIndex !== s.index) {
+							s.el.innerHTML = this.decode(frames[s.index]);
+							s.frameIndex = s.index;
+						}
+					});
+					if (space[3].visible) this.kb?.render();
+				}
+
+				async fetch(url) {
+					if (!this.cache.has(url))
+						this.cache.set(
+							url,
+							fetch(url).then((r) => {
+								if (!r.ok) throw new Error(`HTTP ${r.status}`);
+								const ct = r.headers.get('content-type') || '';
+								if (ct.includes('json')) return r.json();
+								if (ct.includes('octet-stream'))
+									return r
+										.arrayBuffer()
+										.then((buf) => this.unpack(buf));
+								return r.text();
+							}),
+						);
+					return this.cache.get(url);
+				}
+
+				unpack(buf) {
+					const len = new DataView(buf).getUint32(0);
+					const manifest = JSON.parse(
+						new TextDecoder().decode(new Uint8Array(buf, 4, len)),
+					);
+					let offset = 4 + len;
+					for (const e of manifest) {
+						e.data = new Uint8Array(buf, offset, e.size);
+						offset += e.size;
+					}
+					return manifest;
+				}
+			}
+
+			document.addEventListener('DOMContentLoaded', () => {
+				window.pathless = new Universe();
+				window.space = () => pathless.current.el;
+				window.frame = () => pathless.current.el.firstElementChild;
+			});
+		</script>
+	</head>
+	<body>
+		<div id="universe">
+			<div class="space" id="zero"></div>
+			<div class="space" id="one"></div>
+			<div class="space" id="two"></div>
+		</div>
+		<div class="space" id="three"></div>
+	</body>
+</html>

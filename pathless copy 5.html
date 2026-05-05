@@ -124,6 +124,33 @@
 						.then((r) => r.arrayBuffer())
 						.then((buf) => this.decode(buf));
 				}
+
+				decode(buf) {
+					const td = new TextDecoder();
+					const parse = (arr) => JSON.parse(td.decode(arr));
+					const len = new DataView(buf).getUint32(0);
+					const [kb, ...frames] = parse(new Uint8Array(buf, 4, len));
+					this.universe.kb = kb;
+					this.universe.frames = frames;
+				}
+
+				state(target, value) {
+					if (target in this.universe.el.dataset) {
+						if (value !== undefined)
+							this.universe.el.dataset[target] = value;
+						return this.universe.el.dataset[target];
+					}
+					const s = this.space[this.universe.el.dataset.focused];
+					if (value !== undefined) s.state[target] = value;
+					return s.state[target];
+				}
+
+				toggle() {
+					const el = this.space[this.universe.el.dataset.focused].el;
+					el.contains(this.panel)
+						? this.panel.remove()
+						: el.appendChild(this.panel);
+				}
 			}
 
 			document.addEventListener('DOMContentLoaded', () => {
@@ -133,15 +160,9 @@
 	</head>
 	<body>
 		<div id="universe" data-focused="0" data-layout="0" data-variant="0">
-			<div class="space" data-space="0">
-				<div class="frame" data-frame="0"></div>
-			</div>
-			<div class="space" data-space="1">
-				<div class="frame" data-frame="0"></div>
-			</div>
-			<div class="space" data-space="2">
-				<div class="frame" data-frame="0"></div>
-			</div>
+			<div class="space" data-space="0" data-frame="0"></div>
+			<div class="space" data-space="1" data-frame="0"></div>
+			<div class="space" data-space="2" data-frame="0"></div>
 		</div>
 	</body>
 </html>
