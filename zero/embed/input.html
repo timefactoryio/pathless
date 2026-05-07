@@ -1,0 +1,36 @@
+<script>
+	class Input {
+		constructor() {
+			this.u = window.pathless;
+			const el = this.u.universe;
+			const emit = (type, detail = {}) =>
+				el.dispatchEvent(
+					new CustomEvent('input', {
+						bubbles: true,
+						detail: { type, ...detail },
+					}),
+				);
+
+			el.addEventListener('pointerdown', (e) => {
+				el.setPointerCapture(e.pointerId);
+				emit('down', { target: e.target });
+			});
+			el.addEventListener('pointerup', (e) =>
+				emit('up', { target: e.target }),
+			);
+			el.addEventListener('pointercancel', (e) =>
+				emit('cancel', { target: e.target }),
+			);
+			el.addEventListener('click', (e) =>
+				emit('click', { target: e.target }),
+			);
+
+			window.addEventListener('keydown', (e) =>
+				emit('keydown', { key: e.key, code: e.code, repeat: e.repeat }),
+			);
+			window.addEventListener('keyup', (e) =>
+				emit('keyup', { key: e.key, code: e.code }),
+			);
+		}
+	}
+</script>

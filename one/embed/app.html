@@ -1,0 +1,28 @@
+<style>
+	.app {
+		display: flex;
+		flex: 1;
+		align-self: stretch;
+	}
+	.app > * {
+		flex: 1;
+	}
+</style>
+
+<div class="app">
+	<iframe
+		src="{{.URL}}"
+		title="{{.TITLE}}"
+		referrerpolicy="no-referrer"
+		allow="
+			clipboard-read;
+			clipboard-write;
+			fullscreen;
+			autoplay;
+			encrypted-media;
+			picture-in-picture;
+			publickey-credentials-get;
+			publickey-credentials-create;
+		"
+		allowfullscreen></iframe>
+</div>

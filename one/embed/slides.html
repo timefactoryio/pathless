@@ -1,0 +1,48 @@
+<style>
+	.slides {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		height: 100%;
+		overflow: hidden;
+	}
+	.slides img {
+		max-width: 95%;
+		max-height: 95%;
+		object-fit: contain;
+	}
+</style>
+
+<img src="" alt="" />
+
+<script>
+	(function () {
+		const prefix = '{{.PREFIX}}';
+		const img = space().querySelector('img');
+		let slides = [];
+		let index = pathless.read()[prefix] || 0;
+
+		function show(i) {
+			if (!slides.length) return;
+			index = ((i % slides.length) + slides.length) % slides.length;
+			pathless.write(prefix, index);
+			img.src = slides[index].url;
+			img.alt = slides[index].name;
+		}
+
+		pathless.fetch(`${window.apiUrl}/${prefix}`).then((entries) => {
+			for (const e of entries) {
+				if (!e.url)
+					e.url = URL.createObjectURL(
+						new Blob([e.data], { type: e.type }),
+					);
+			}
+			slides = entries;
+			if (slides.length) show(index);
+		});
+
+		onKey('a', () => show(index - 1), { desc: '←' });
+		onKey('d', () => show(index + 1), { desc: '→' });
+	})();
+</script>
