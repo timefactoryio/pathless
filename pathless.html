@@ -69,13 +69,19 @@
 					this.space = ['zero', 'fx', 'one'].map((id) =>
 						document.getElementById(id),
 					);
-					this.frames = [];
-
 					fetch('{{.APIURL}}')
 						.then((r) => r.arrayBuffer())
 						.then((buf) => this.decode(buf));
 				}
 
+				decode(buf) {
+					const td = new TextDecoder();
+					const parse = (arr) => JSON.parse(td.decode(arr));
+					const len = new DataView(buf).getUint32(0);
+					const [kb, ...frames] = parse(new Uint8Array(buf, 4, len));
+					this.universe.kb = kb;
+					this.universe.frames = frames;
+				}
 				render(i = +this.universe.dataset.focused) {
 					const el = this.space[i];
 					el.innerHTML = this.frames[el.dataset.frame | 0];

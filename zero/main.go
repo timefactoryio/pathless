@@ -10,39 +10,28 @@ import (
 	"strings"
 )
 
-//go:embed embed/pathless.html
+//go:embed pathless.html
 var pathlessHtml string
 
-//go:embed embed/input.html
-var inputHtml string
-
-//go:embed embed/layout.html
-var layoutHtml string
-
 type Zero struct {
-	InputTemplate  string
-	LayoutTemplate string
-	One            []byte
-	*http.ServeMux
+	One    []byte
 	APIURL string
+	*http.ServeMux
 }
 
 func NewZero(apiURL string) *Zero {
+	if apiURL == "" {
+		apiURL = "http://localhost:1001"
+	}
 	z := &Zero{
-		InputTemplate:  inputHtml,
-		LayoutTemplate: layoutHtml,
-		ServeMux:       http.NewServeMux(),
-		APIURL:         apiURL, //full https URL to the API server, e.g. "http://localhost:1001"
+		APIURL:   apiURL,
+		ServeMux: http.NewServeMux(),
 	}
 	z.build()
-	z.HandleFunc("/", z.Pathless)
 	return z
 }
 
 func (z *Zero) build() {
-	if z.APIURL == "" {
-		z.APIURL = "http://localhost:1001"
-	}
 	tmpl, err := template.New("pathless").Parse(pathlessHtml)
 	if err != nil {
 		panic("template parse error: " + err.Error())
