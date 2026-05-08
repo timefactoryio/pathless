@@ -10,14 +10,18 @@ type Fx struct {
 	*zero.Zero
 	Forge
 	Circuit
-	Hello []byte
+	Pathless *http.ServeMux
+	Frame    *http.ServeMux
+	Hello    []byte
 }
 
 func NewFx(z *zero.Zero) *Fx {
 	return &Fx{
-		Forge:   NewForge().(*forge),
-		Circuit: NewCircuit().(*circuit),
-		Zero:    z,
+		Forge:    NewForge().(*forge),
+		Circuit:  NewCircuit().(*circuit),
+		Zero:     z,
+		Pathless: http.NewServeMux(),
+		Frame:    http.NewServeMux(),
 	}
 }
 
