@@ -76,13 +76,21 @@
 				}
 
 				decode(buf) {
+					const view = new DataView(buf);
+					const bytes = new Uint8Array(buf);
 					const td = new TextDecoder();
-					const parse = (arr) => JSON.parse(td.decode(arr));
-					const len = new DataView(buf).getUint32(0);
-					const [kb, ...frames] = parse(new Uint8Array(buf, 4, len));
-					this.kb = kb;
-					this.frames = frames;
-					// this.layouts =
+					let pos = 0;
+					while (pos < buf.byteLength) {
+						const type = bytes[pos];
+						const len = view.getUint32(pos + 1);
+						const text = td.decode(
+							bytes.subarray(pos + 5, pos + 5 + len),
+						);
+						if (type === 1)
+							document.head.insertAdjacentHTML('beforeend', text);
+						else if (type === 2) this.frames.push(text);
+						pos += 5 + len;
+					}
 				}
 				render(i = +this.universe.dataset.focused) {
 					const el = this.space[i];

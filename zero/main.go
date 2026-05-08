@@ -5,7 +5,6 @@ import (
 	"compress/gzip"
 	_ "embed"
 	"html/template"
-	"net/http"
 	"regexp"
 	"strings"
 )
@@ -16,45 +15,23 @@ var pathlessHtml string
 type Zero struct {
 	One    []byte
 	APIURL string
-	*http.ServeMux
 }
 
 func NewZero(apiURL string) *Zero {
 	if apiURL == "" {
 		apiURL = "http://localhost:1001"
 	}
-	z := &Zero{
-		APIURL:   apiURL,
-		ServeMux: http.NewServeMux(),
-	}
-	z.build()
-	return z
-}
-
-func (z *Zero) build() {
+	z := &Zero{APIURL: apiURL}
 	tmpl, err := template.New("pathless").Parse(pathlessHtml)
 	if err != nil {
 		panic("template parse error: " + err.Error())
 	}
 	var b strings.Builder
-	if err := tmpl.Execute(&b, map[string]string{"APIURL": z.APIURL}); err != nil {
+	if err := tmpl.Execute(&b, map[string]string{"APIURL": apiURL}); err != nil {
 		panic("template execute error: " + err.Error())
 	}
 	z.One = z.minify(b.String())
-}
-
-func (z *Zero) Pathless(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" || r.URL.RawQuery != "" {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Content-Encoding", "gzip")
-	w.Write(z.One)
-}
-
-func (z *Zero) Serve() {
-	http.ListenAndServe(":1000", z.ServeMux)
+	return z
 }
 
 // minify: <style> -> <script> -> <html>

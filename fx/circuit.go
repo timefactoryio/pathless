@@ -28,10 +28,11 @@ type circuit struct {
 }
 
 type Value struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Size int    `json:"size"`
-	Data []byte `json:"-"`
+	Name   string
+	Type   string
+	Size   uint64
+	Offset uint64
+	Data   []byte
 }
 
 func NewCircuit() Circuit {
@@ -87,6 +88,27 @@ func (c *circuit) Read(path, prefix string) {
 	v.Data = nil
 }
 
+func Encode(objects [][]byte) []byte {
+	n := len(objects)
+	headerSize := 2 + n*4
+	total := headerSize
+	for _, o := range objects {
+		total += len(o)
+	}
+	buf := make([]byte, total)
+	binary.BigEndian.PutUint16(buf, uint16(n))
+	off := uint32(headerSize)
+	for i, o := range objects {
+		binary.BigEndian.PutUint32(buf[2+i*4:], off)
+		off += uint32(len(o))
+	}
+	pos := headerSize
+	for _, o := range objects {
+		copy(buf[pos:], o)
+		pos += len(o)
+	}
+	return buf
+}
 func (c *circuit) Reader(path string) string {
 	dirName, values := c.loadFiles(path)
 	c.value[dirName] = values

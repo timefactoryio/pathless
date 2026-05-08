@@ -3,6 +3,8 @@ package fx
 import (
 	"net/http"
 
+	"github.com/timefactoryio/pathless/fx/core"
+	"github.com/timefactoryio/pathless/fx/templates"
 	"github.com/timefactoryio/pathless/zero"
 )
 
@@ -10,18 +12,17 @@ type Fx struct {
 	*zero.Zero
 	Forge
 	Circuit
-	Pathless *http.ServeMux
-	Frame    *http.ServeMux
-	Hello    []byte
+	*templates.Templates
+	*core.Core
+	Hello []byte
 }
 
 func NewFx(z *zero.Zero) *Fx {
 	return &Fx{
-		Forge:    NewForge().(*forge),
-		Circuit:  NewCircuit().(*circuit),
-		Zero:     z,
-		Pathless: http.NewServeMux(),
-		Frame:    http.NewServeMux(),
+		Forge:     NewForge().(*forge),
+		Circuit:   NewCircuit().(*circuit),
+		Zero:      z,
+		Templates: templates.Init(),
 	}
 }
 
