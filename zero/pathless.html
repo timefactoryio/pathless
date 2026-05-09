@@ -72,25 +72,54 @@
 
 					fetch('{{.APIURL}}')
 						.then((r) => r.arrayBuffer())
-						.then((buf) => this.decode(buf));
+						.then((buf) => {
+							const [input, layout, keyboard, ...frames] =
+								this.decode(buf);
+							this.input = input;
+							this.layout = layout;
+							this.keyboard = keyboard;
+							this.frames = frames;
+						});
 				}
 
+				// Bootstrap: positional strings
+				// [count: 2B][off_0: 4B]...[data_0][data_1]...
 				decode(buf) {
+					const view = new DataView(buf);
+					const n = view.getUint16(0);
+					const off = Array.from({ length: n }, (_, i) =>
+						view.getUint32(2 + i * 4),
+					);
+					const bytes = new Uint8Array(buf);
+					const td = new TextDecoder();
+					return off.map((o, i) =>
+						td.decode(bytes.subarray(o, off[i + 1])),
+					);
+				}
+
+				// Content: fixed schema with metadata
+				// [count: 2B][Name:64B Type:64B Size:8B Offset:8B per entry]...[data_0][data_1]...
+				decodeValues(buf) {
 					const view = new DataView(buf);
 					const bytes = new Uint8Array(buf);
 					const td = new TextDecoder();
-					let pos = 0;
-					while (pos < buf.byteLength) {
-						const type = bytes[pos];
-						const len = view.getUint32(pos + 1);
-						const text = td.decode(
-							bytes.subarray(pos + 5, pos + 5 + len),
-						);
-						if (type === 1)
-							document.head.insertAdjacentHTML('beforeend', text);
-						else if (type === 2) this.frames.push(text);
-						pos += 5 + len;
-					}
+					const n = view.getUint16(0);
+					return Array.from({ length: n }, (_, i) => {
+						const h = 2 + i * 144;
+						const name = td
+							.decode(bytes.subarray(h, h + 64))
+							.replace(/\0+$/, '');
+						const type = td
+							.decode(bytes.subarray(h + 64, h + 128))
+							.replace(/\0+$/, '');
+						const size = Number(view.getBigUint64(h + 128));
+						const offset = Number(view.getBigUint64(h + 136));
+						return {
+							name,
+							type,
+							data: bytes.subarray(offset, offset + size),
+						};
+					});
 				}
 				render(i = +this.universe.dataset.focused) {
 					const el = this.space[i];

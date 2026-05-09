@@ -11,7 +11,6 @@ import (
 type Fx struct {
 	*zero.Zero
 	Forge
-	Circuit
 	*templates.Templates
 	*core.Core
 	Hello []byte
@@ -20,7 +19,6 @@ type Fx struct {
 func NewFx(z *zero.Zero) *Fx {
 	return &Fx{
 		Forge:     NewForge().(*forge),
-		Circuit:   NewCircuit().(*circuit),
 		Zero:      z,
 		Templates: templates.Init(),
 	}

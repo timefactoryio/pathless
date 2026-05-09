@@ -50,6 +50,7 @@ type Forge interface {
 	Build(class string, elements ...*One)
 	Builder(class string, elements ...*One) *One
 	Frames(frame ...*One) []*One
+	FrameBytes() [][]byte
 	Markdown() *goldmark.Markdown
 	HTML(raw string) *One
 	JS(js string) One
@@ -186,4 +187,14 @@ func (f *forge) Block(tag string, attrs Attr, children ...*One) *One {
 func (f *forge) Void(tag string, attrs Attr) *One {
 	o := One(template.HTML(fmt.Sprintf("<%s%s/>", tag, renderAttrs(attrs))))
 	return &o
+}
+
+func (f *forge) FrameBytes() [][]byte {
+	out := make([][]byte, 0, len(f.frames))
+	for _, fr := range f.frames {
+		if fr != nil {
+			out = append(out, []byte(*fr))
+		}
+	}
+	return out
 }

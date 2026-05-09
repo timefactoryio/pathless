@@ -1,6 +1,8 @@
 package one
 
 import (
+	"bytes"
+	"compress/gzip"
 	"net/http"
 
 	"github.com/timefactoryio/pathless/fx"
@@ -28,20 +30,23 @@ func NewOne(z *zero.Zero, fx *fx.Fx) *One {
 
 func (o *One) BuildHello() {
 	objects := [][]byte{
-		[]byte(o.Fx.Input),    // [0]
-		[]byte(o.Fx.Layout),   // [1]
-		[]byte(o.Fx.Keyboard), // [2]
+		[]byte(o.Fx.Input),
+		[]byte(o.Fx.Layout),
+		[]byte(o.Fx.Keyboard),
 	}
-	for _, f := range o.Fx.Frames() {
-		if f != nil {
-			objects = append(objects, []byte(*f)) // [3+]
-		}
-	}
-	o.Hello = o.Fx.Compress(fx.Encode(objects))
+	o.Hello = o.Compress(fx.Encode(append(objects, o.Fx.FrameBytes()...)))
 }
 
 func (o *One) HandleHello(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Encoding", "gzip")
 	w.Write(o.Hello)
+}
+
+func (o *One) Compress(data []byte) []byte {
+	var buf bytes.Buffer
+	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	w.Write(data)
+	w.Close()
+	return buf.Bytes()
 }
