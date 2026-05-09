@@ -9,19 +9,36 @@ import (
 	"strings"
 )
 
-//go:embed pathless.html
+//go:embed core/pathless.html
 var pathlessHtml string
 
+//go:embed core/input.html
+var inputHtml []byte
+
+//go:embed core/layout.html
+var layoutHtml []byte
+
+//go:embed core/keyboard.html
+var keyboardHtml []byte
+
 type Zero struct {
-	One    []byte
-	APIURL string
+	One      []byte
+	Input    []byte
+	Layout   []byte
+	Keyboard []byte
+	APIURL   string
 }
 
 func NewZero(apiURL string) *Zero {
 	if apiURL == "" {
 		apiURL = "http://localhost:1001"
 	}
-	z := &Zero{APIURL: apiURL}
+	z := &Zero{
+		APIURL:   apiURL,
+		Input:    inputHtml,
+		Layout:   layoutHtml,
+		Keyboard: keyboardHtml,
+	}
 	tmpl, err := template.New("pathless").Parse(pathlessHtml)
 	if err != nil {
 		panic("template parse error: " + err.Error())

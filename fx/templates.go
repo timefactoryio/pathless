@@ -11,8 +11,8 @@ import (
 )
 
 func (fx *Fx) Home(logo, heading string) {
-	logoEmbed := fx.ToBytes(logo)
-	if logoEmbed == nil {
+	logoEmbed, err := fx.ToBytes(logo)
+	if err != nil {
 		return
 	}
 
@@ -31,8 +31,8 @@ func (fx *Fx) Home(logo, heading string) {
 }
 
 func (fx *Fx) Text(path string) {
-	content := fx.ToBytes(path)
-	if content == nil {
+	content, err := fx.ToBytes(path)
+	if err != nil {
 		return
 	}
 
@@ -53,7 +53,8 @@ func (fx *Fx) Text(path string) {
 }
 
 func (fx *Fx) Slides(dir string) {
-	prefix := fx.Reader(dir)
+	fx.Load(dir)
+	prefix := fx.APIURL + "/" + filepath.Base(dir)
 	tmpl, err := template.New("slides").Parse(fx.SlidesTemplate)
 	if err != nil {
 		return
@@ -86,14 +87,14 @@ func (fx *Fx) App(title, url string) {
 
 func (fx *Fx) Logo(path string) template.HTML {
 	if strings.ToLower(filepath.Ext(path)) == ".svg" {
-		if b := fx.ToBytes(path); b != nil {
+		if b, err := fx.ToBytes(path); err == nil {
 			return template.HTML(b)
 		}
 		return ""
 	}
 
 	if !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") {
-		fx.Read(path, "")
+		fx.Load(path)
 		name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 		path = fx.APIURL + "/" + name
 	}

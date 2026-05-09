@@ -1,6 +1,8 @@
 package fx
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/binary"
 	"encoding/json"
 	"io"
@@ -8,75 +10,77 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
 type Value struct {
-	Name   string
-	Type   string
-	Size   uint64
-	Offset uint64
-	Data   []byte
+	Name   string `json:"name,omitempty"`
+	Type   string `json:"type,omitempty"`
+	Size   uint32 `json:"size"`
+	Offset uint32 `json:"offset"`
+	Data   []byte `json:"-"`
 }
 
-func (fx *Fx) ToBytes(input string) []byte {
-	if strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://") {
+func Encode(values []*Value) []byte {
+	j, _ := json.Marshal(values)
+	base := uint32(4 + len(j))
+	off := base
+	for i, v := range values {
+		values[i].Size = uint32(len(v.Data))
+		values[i].Offset = off
+		off += uint32(len(v.Data))
+	}
+	j, _ = json.Marshal(values)
+	var buf bytes.Buffer
+	binary.Write(&buf, binary.BigEndian, uint32(len(j)))
+	buf.Write(j)
+	for _, v := range values {
+		buf.Write(v.Data)
+	}
+	return buf.Bytes()
+}
+
+func Compress(data []byte) []byte {
+	var buf bytes.Buffer
+	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	w.Write(data)
+	w.Close()
+	return buf.Bytes()
+}
+
+func (fx *Fx) ToBytes(input string) ([]byte, error) {
+	if strings.HasPrefix(input, "http") {
 		resp, err := http.Get(input)
 		if err != nil {
-			return nil
+			return nil, err
 		}
 		defer resp.Body.Close()
-		b, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil
-		}
-		return b
+		return io.ReadAll(resp.Body)
 	}
-	b, err := os.ReadFile(input)
+	return os.ReadFile(input)
+}
+
+func (fx *Fx) Load(path string) {
+	info, err := os.Stat(path)
 	if err != nil {
-		return nil
+		return
 	}
-	return b
+	key := filepath.Base(path)
+	var values []*Value
+	if info.IsDir() {
+		values = fx.walk(path)
+	} else {
+		if v := fx.read(path); v != nil {
+			values = []*Value{v}
+		}
+	}
+	for _, v := range values {
+		v.Data = nil
+	}
+	fx.Routes[key] = Compress(Encode(values))
 }
 
-func Encode(objects [][]byte) []byte {
-	n := len(objects)
-	headerSize := 2 + n*4
-	total := headerSize
-	for _, o := range objects {
-		total += len(o)
-	}
-	buf := make([]byte, total)
-	binary.BigEndian.PutUint16(buf, uint16(n))
-	off := uint32(headerSize)
-	for i, o := range objects {
-		binary.BigEndian.PutUint32(buf[2+i*4:], off)
-		off += uint32(len(o))
-	}
-	pos := headerSize
-	for _, o := range objects {
-		copy(buf[pos:], o)
-		pos += len(o)
-	}
-	return buf
-}
-
-func Bundle(values []*Value) *Value {
-	objects := make([][]byte, len(values))
-	for i, v := range values {
-		objects[i] = v.Data
-	}
-	data := Encode(objects)
-	return &Value{
-		Name: "bundle",
-		Type: "application/octet-stream",
-		Size: uint64(len(data)),
-		Data: data,
-	}
-}
-
-func (fx *Fx) Read(path string) *Value {
+func (fx *Fx) read(path string) *Value {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
@@ -87,20 +91,20 @@ func (fx *Fx) Read(path string) *Value {
 	if ct == "" {
 		ct = http.DetectContentType(data)
 	}
-	return &Value{Name: base[:len(base)-len(ext)], Type: ct, Size: uint64(len(data)), Data: data}
+	return &Value{Name: base[:len(base)-len(ext)], Type: ct, Size: uint32(len(data)), Data: data}
 }
 
-func (fx *Fx) Reader(path string) (string, []*Value) {
-	dirName := filepath.Base(path)
+func (fx *Fx) walk(path string) []*Value {
 	var values []*Value
-	var orderMap map[string]int
+	index := map[string]int{}
 
 	if data, err := os.ReadFile(filepath.Join(path, "sort.json")); err == nil {
 		var order []string
 		if json.Unmarshal(data, &order) == nil {
-			orderMap = make(map[string]int, len(order))
+			values = make([]*Value, len(order))
 			for i, name := range order {
-				orderMap[name] = i
+				values[i] = &Value{Name: name}
+				index[name] = i
 			}
 		}
 	}
@@ -109,36 +113,16 @@ func (fx *Fx) Reader(path string) (string, []*Value) {
 		if err != nil || d.IsDir() || filepath.Base(p) == "sort.json" {
 			return err
 		}
-		if v := fx.Read(p); v != nil {
+		v := fx.read(p)
+		if v == nil {
+			return nil
+		}
+		if i, ok := index[v.Name]; ok {
+			values[i] = v
+		} else {
 			values = append(values, v)
 		}
 		return nil
 	})
-
-	if len(orderMap) > 0 {
-		sort.Slice(values, func(i, j int) bool {
-			posI, foundI := orderMap[values[i].Name]
-			posJ, foundJ := orderMap[values[j].Name]
-			if foundI && foundJ {
-				return posI < posJ
-			}
-			if foundI {
-				return true
-			}
-			if foundJ {
-				return false
-			}
-			return values[i].Name < values[j].Name
-		})
-	}
-
-	return dirName, values
+	return values
 }
-
-// func (fx *Fx) registerRoute(path, contentType string, data []byte) {
-// 	fx.Router().HandleFunc("/"+path, func(w http.ResponseWriter, r *http.Request) {
-// 		w.Header().Set("Content-Type", contentType)
-// 		w.Header().Set("Content-Encoding", "gzip")
-// 		w.Write(data)
-// 	})
-// }

@@ -3,16 +3,16 @@ package main
 import (
 	"os"
 
+	"github.com/timefactoryio/pathless/fx"
+	"github.com/timefactoryio/pathless/one"
 	"github.com/timefactoryio/pathless/zero"
 )
 
 func main() {
 	z := zero.NewZero(os.Getenv("API_URL"))
-	z.Serve()
-}
+	f := fx.NewFx(z)
+	o := one.NewOne(z, f)
 
-type Payload struct {
-	MetaData []byte
-	Data     []byte
-	Payload  []*Payload
+	// o.Home()
+	o.Serve()
 }

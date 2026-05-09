@@ -49,8 +49,7 @@ type forge struct {
 type Forge interface {
 	Build(class string, elements ...*One)
 	Builder(class string, elements ...*One) *One
-	Frames(frame ...*One) []*One
-	FrameBytes() [][]byte
+	Frames(frame ...*One) [][]byte
 	Markdown() *goldmark.Markdown
 	HTML(raw string) *One
 	JS(js string) One
@@ -83,11 +82,17 @@ func (f *forge) Builder(class string, elements ...*One) *One {
 	return &result
 }
 
-func (f *forge) Frames(frame ...*One) []*One {
+func (f *forge) Frames(frame ...*One) [][]byte {
 	if len(frame) > 0 && frame[0] != nil {
 		f.frames = append(f.frames, frame[0])
 	}
-	return f.frames
+	out := make([][]byte, 0, len(f.frames))
+	for _, fr := range f.frames {
+		if fr != nil {
+			out = append(out, []byte(*fr))
+		}
+	}
+	return out
 }
 
 func (f *forge) consolidateAssets(s string) string {
@@ -187,14 +192,4 @@ func (f *forge) Block(tag string, attrs Attr, children ...*One) *One {
 func (f *forge) Void(tag string, attrs Attr) *One {
 	o := One(template.HTML(fmt.Sprintf("<%s%s/>", tag, renderAttrs(attrs))))
 	return &o
-}
-
-func (f *forge) FrameBytes() [][]byte {
-	out := make([][]byte, 0, len(f.frames))
-	for _, fr := range f.frames {
-		if fr != nil {
-			out = append(out, []byte(*fr))
-		}
-	}
-	return out
 }
