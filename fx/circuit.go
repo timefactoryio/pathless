@@ -22,15 +22,24 @@ type Value struct {
 }
 
 func Encode(values []*Value) []byte {
-	j, _ := json.Marshal(values)
-	base := uint32(4 + len(j))
-	off := base
 	for i, v := range values {
 		values[i].Size = uint32(len(v.Data))
-		values[i].Offset = off
-		off += uint32(len(v.Data))
+		values[i].Offset = 0
 	}
-	j, _ = json.Marshal(values)
+	j, _ := json.Marshal(values)
+	for {
+		off := uint32(4 + len(j))
+		for i, v := range values {
+			values[i].Offset = off
+			off += v.Size
+		}
+		j2, _ := json.Marshal(values)
+		if len(j2) == len(j) {
+			j = j2
+			break
+		}
+		j = j2
+	}
 	var buf bytes.Buffer
 	binary.Write(&buf, binary.BigEndian, uint32(len(j)))
 	buf.Write(j)

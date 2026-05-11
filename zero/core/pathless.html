@@ -64,29 +64,12 @@
 		</style>
 		<script>
 			class Universe {
-				constructor() {
-					this.universe = document.getElementById('universe');
-					this.space = ['zero', 'fx', 'one'].map((id) =>
-						document.getElementById(id),
-					);
+				#td = new TextDecoder();
 
-					fetch('{{.APIURL}}')
-						.then((r) => r.arrayBuffer())
-						.then((buf) => {
-							const [input, layout, keyboard, ...frames] =
-								this.decode(buf);
-							this.input = input;
-							this.layout = layout;
-							this.keyboard = keyboard;
-							this.frames = frames;
-						});
-				}
-
-				decode(buf) {
-					const view = new DataView(buf);
-					const mlen = view.getUint32(0);
+				#parse(buf) {
+					const mlen = new DataView(buf).getUint32(0);
 					const manifest = JSON.parse(
-						new TextDecoder().decode(new Uint8Array(buf, 4, mlen)),
+						this.#td.decode(new Uint8Array(buf, 4, mlen)),
 					);
 					const bytes = new Uint8Array(buf);
 					return manifest.map((e) => ({
@@ -95,11 +78,40 @@
 					}));
 				}
 
+				constructor() {
+					this.universe = document.getElementById('universe');
+					this.space = ['zero', 'fx', 'one'].map((id) =>
+						document.getElementById(id),
+					);
+					this.init();
+				}
+
+				async init() {
+					const [input, layout, keyboard, ...frames] =
+						await this.fetch('{{.APIURL}}');
+					this.mount(document.head, this.#td.decode(input.data));
+					this.mount(document.head, this.#td.decode(layout.data));
+					pathless.layouts.left = this.#td.decode(keyboard.data);
+					if (!frames.length) pathless.layouts.togglePanel();
+					this.frames = frames.map((f) => this.#td.decode(f.data));
+				}
+
+				async fetch(url) {
+					return this.#parse(
+						await window.fetch(url).then((r) => r.arrayBuffer()),
+					);
+				}
+
+				mount(target, html) {
+					target.append(
+						document.createRange().createContextualFragment(html),
+					);
+				}
+
 				render(i = +this.universe.dataset.focused) {
 					const el = this.space[i];
-					el.innerHTML = new TextDecoder().decode(
-						this.frames[el.dataset.frame | 0].data,
-					);
+					el.replaceChildren();
+					this.mount(el, this.frames[el.dataset.frame | 0]);
 				}
 			}
 

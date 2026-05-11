@@ -126,33 +126,33 @@
 			return p;
 		}
 		constructor() {
-			this.u = window.pathless;
 			this.prev = null;
 			this.panel = Layouts.buildPanel();
 			this.layouts = Layouts.buildLayouts();
 			this.sync();
+			pathless.layouts = this;
 		}
 
 		get layout() {
-			return +this.u.universe.dataset.layout;
+			return +pathless.universe.dataset.layout;
 		}
 		set layout(v) {
-			this.u.universe.dataset.layout = v;
+			pathless.universe.dataset.layout = v;
 		}
 		get variant() {
-			return +this.u.universe.dataset.variant;
+			return +pathless.universe.dataset.variant;
 		}
 		set variant(v) {
-			this.u.universe.dataset.variant = v;
+			pathless.universe.dataset.variant = v;
 		}
 		get focused() {
-			return +this.u.universe.dataset.focused;
+			return +pathless.universe.dataset.focused;
 		}
 		set focused(v) {
-			this.u.universe.dataset.focused = v;
+			pathless.universe.dataset.focused = v;
 		}
 		get space() {
-			return this.u.space[this.focused];
+			return pathless.space[this.focused];
 		}
 		get frame() {
 			return this.space.innerHTML;
@@ -173,9 +173,9 @@
 
 		sync() {
 			const l = this.layout;
-			this.u.space[0].visible = true;
-			this.u.space[1].visible = l >= 2;
-			this.u.space[2].visible = l >= 3;
+			pathless.space[0].visible = true;
+			pathless.space[1].visible = l >= 2;
+			pathless.space[2].visible = l >= 3;
 			if (!this.space.visible) this.focused = 0;
 			this.#movePanel();
 		}
@@ -196,7 +196,7 @@
 
 		focus() {
 			do {
-				this.focused = (this.focused + 1) % this.u.space.length;
+				this.focused = (this.focused + 1) % pathless.space.length;
 			} while (!this.space.visible);
 			this.sync();
 		}
@@ -222,4 +222,5 @@
 			this.panel.dataset.panel = rightContent ? '2' : '1';
 		}
 	}
+	new Layouts();
 </script>
