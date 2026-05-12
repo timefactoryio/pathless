@@ -65,16 +65,17 @@
 		<script>
 			class Universe {
 				#td = new TextDecoder();
-
-				#parse(buf) {
-					const mlen = new DataView(buf).getUint32(0);
-					const manifest = JSON.parse(
-						this.#td.decode(new Uint8Array(buf, 4, mlen)),
-					);
+				async #parse(url) {
+					const buf = await window
+						.fetch(url)
+						.then((r) => r.arrayBuffer());
 					const bytes = new Uint8Array(buf);
-					return manifest.map((e) => ({
+					let pos = 4 + new DataView(buf).getUint32(0);
+					return JSON.parse(
+						this.#td.decode(bytes.subarray(4, pos)),
+					).map((e) => ({
 						...e,
-						data: bytes.subarray(e.offset, e.offset + e.size),
+						data: bytes.subarray(pos, (pos += e.size)),
 					}));
 				}
 
@@ -87,19 +88,14 @@
 				}
 
 				async init() {
-					const [input, layout, keyboard, ...frames] =
-						await this.fetch('{{.APIURL}}');
-					this.mount(document.head, this.#td.decode(input.data));
-					this.mount(document.head, this.#td.decode(layout.data));
-					pathless.layouts.left = this.#td.decode(keyboard.data);
-					if (!frames.length) pathless.layouts.togglePanel();
-					this.frames = frames.map((f) => this.#td.decode(f.data));
-				}
-
-				async fetch(url) {
-					return this.#parse(
-						await window.fetch(url).then((r) => r.arrayBuffer()),
-					);
+					const [input, layout, keyboard, ...frames] = (
+						await this.#parse('{{.APIURL}}')
+					).map((e) => this.#td.decode(e.data));
+					this.mount(document.head, input);
+					this.mount(document.head, layout);
+					// pathless.layouts.left = keyboard;
+					// if (!frames.length) pathless.layouts.togglePanel();
+					this.frames = frames;
 				}
 
 				mount(target, html) {

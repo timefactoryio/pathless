@@ -13,35 +13,30 @@ import (
 	"strings"
 )
 
+// Value is the unit of work for encoding. Name and Type populate the manifest;
+// Data is the raw blob. Data is excluded from JSON and freed after encoding.
 type Value struct {
-	Name   string `json:"name,omitempty"`
-	Type   string `json:"type,omitempty"`
-	Size   uint32 `json:"size"`
-	Offset uint32 `json:"offset"`
-	Data   []byte `json:"-"`
+	Name string `json:"name,omitempty"`
+	Type string `json:"type,omitempty"`
+	Size uint32 `json:"size"`
+	Data []byte `json:"-"`
 }
 
+// Encode produces a self-describing asset bundle:
+// [4B: manifest length][JSON manifest][blob][blob]...[blob]
+// Sizes are written into the manifest so the decoder can slice blobs without
+// per-blob length prefixes in the binary data.
 func Encode(values []*Value) []byte {
+	totalData := 0
 	for i, v := range values {
 		values[i].Size = uint32(len(v.Data))
-		values[i].Offset = 0
+		totalData += len(v.Data)
 	}
 	j, _ := json.Marshal(values)
-	for {
-		off := uint32(4 + len(j))
-		for i, v := range values {
-			values[i].Offset = off
-			off += v.Size
-		}
-		j2, _ := json.Marshal(values)
-		if len(j2) == len(j) {
-			j = j2
-			break
-		}
-		j = j2
-	}
-	var buf bytes.Buffer
-	binary.Write(&buf, binary.BigEndian, uint32(len(j)))
+	buf := bytes.NewBuffer(make([]byte, 0, 4+len(j)+totalData))
+	var hdr [4]byte
+	binary.BigEndian.PutUint32(hdr[:], uint32(len(j)))
+	buf.Write(hdr[:])
 	buf.Write(j)
 	for _, v := range values {
 		buf.Write(v.Data)
@@ -49,6 +44,9 @@ func Encode(values []*Value) []byte {
 	return buf.Bytes()
 }
 
+// Compress gzip-compresses data at maximum compression.
+// Bundles are compressed once at build time and served directly
+// with Content-Encoding: gzip.
 func Compress(data []byte) []byte {
 	var buf bytes.Buffer
 	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
@@ -57,6 +55,7 @@ func Compress(data []byte) []byte {
 	return buf.Bytes()
 }
 
+// ToBytes fetches the content at input, either from an HTTP URL or a local file.
 func (fx *Fx) ToBytes(input string) ([]byte, error) {
 	if strings.HasPrefix(input, "http") {
 		resp, err := http.Get(input)
@@ -69,6 +68,9 @@ func (fx *Fx) ToBytes(input string) ([]byte, error) {
 	return os.ReadFile(input)
 }
 
+// Load reads a file or directory at path, encodes and compresses the contents,
+// and stores the bundle in Routes keyed by the base name of path.
+// Raw data is freed from each Value after the bundle is stored.
 func (fx *Fx) Load(path string) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -83,12 +85,14 @@ func (fx *Fx) Load(path string) {
 			values = []*Value{v}
 		}
 	}
+	fx.Routes[key] = Compress(Encode(values))
 	for _, v := range values {
 		v.Data = nil
 	}
-	fx.Routes[key] = Compress(Encode(values))
 }
 
+// read loads a single file into a Value, inferring MIME type from extension
+// or content detection as a fallback.
 func (fx *Fx) read(path string) *Value {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -100,9 +104,12 @@ func (fx *Fx) read(path string) *Value {
 	if ct == "" {
 		ct = http.DetectContentType(data)
 	}
-	return &Value{Name: base[:len(base)-len(ext)], Type: ct, Size: uint32(len(data)), Data: data}
+	return &Value{Name: base[:len(base)-len(ext)], Size: uint32(len(data)), Type: ct, Data: data}
 }
 
+// walk reads all files in a directory into an ordered slice of Values.
+// If a sort.json file is present, it defines the blob order by name;
+// files not listed in sort.json are appended after the ordered entries.
 func (fx *Fx) walk(path string) []*Value {
 	var values []*Value
 	index := map[string]int{}

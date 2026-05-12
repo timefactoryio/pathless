@@ -46,9 +46,9 @@ func (o *One) HandlePathless(w http.ResponseWriter, r *http.Request) {
 
 func (o *One) BuildHello() {
 	values := []*fx.Value{
-		{Name: "input", Data: []byte(o.Input)},
-		{Name: "layout", Data: []byte(o.Layout)},
-		{Name: "keyboard", Data: []byte(o.Keyboard)},
+		{Data: []byte(o.Input)},
+		{Data: []byte(o.Layout)},
+		{Data: []byte(o.Keyboard)},
 	}
 	for _, b := range o.Frames() {
 		values = append(values, &fx.Value{Data: b})
