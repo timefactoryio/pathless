@@ -9,16 +9,73 @@
 		height: 100%;
 	}
 	.key {
+		display: flex;
+		flex-direction: column;
 		border: medium solid #444;
 		border-radius: 3px;
+		overflow: hidden;
+		cursor: pointer;
+		color: #aaa;
+	}
+	.key[data-key='q'] {
+		border-color: red;
+	}
+	.key[data-key='e'] {
+		border-color: blue;
+	}
+	.key.down {
+		border-color: white;
+	}
+	.key .top {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 0.8em;
+	}
+	.key .bottom {
+		flex: 4;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 1.25em;
+		font-weight: bold;
+		color: #fff;
 	}
 </style>
 
 <div class="keyboard">
-	<div class="key" id="0"></div>
-	<div class="key" id="1"></div>
-	<div class="key" id="2"></div>
-	<div class="key" id="3"></div>
-	<div class="key" id="4"></div>
-	<div class="key" id="5"></div>
+	<div class="key" data-key="1">
+		<div class="top">1</div>
+		<div class="bottom"></div>
+	</div>
+	<div class="key" data-key="2">
+		<div class="top">2</div>
+		<div class="bottom"></div>
+	</div>
+	<div class="key" data-key="3">
+		<div class="top">3</div>
+		<div class="bottom"></div>
+	</div>
+	<div class="key" data-key="Tab">
+		<div class="top">Tab</div>
+		<div class="bottom"></div>
+	</div>
+	<div class="key" data-key="q">
+		<div class="top">q</div>
+		<div class="bottom"></div>
+	</div>
+	<div class="key" data-key="e">
+		<div class="top">e</div>
+		<div class="bottom"></div>
+	</div>
 </div>
+
+<script>
+	pathless.universe.addEventListener('input', (e) => {
+		const { key, phase } = e.detail;
+		document
+			.querySelector(`.key[data-key="${key}"]`)
+			?.classList.toggle('down', phase === 'down');
+	});
+</script>

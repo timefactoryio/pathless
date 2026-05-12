@@ -1,36 +1,36 @@
 <script>
 	class Input {
 		constructor() {
-			const el = pathless.universe;
-			const emit = (key, phase) =>
-				el.dispatchEvent(
-					new CustomEvent('input', {
-						detail: { key, phase },
-					}),
-				);
+			this.el = pathless.universe;
+			this.listen();
+			pathless.input = this;
+		}
 
-			// physical keyboard
+		emit(key, phase) {
+			this.el.dispatchEvent(
+				new CustomEvent('input', { detail: { key, phase } }),
+			);
+		}
+
+		listen() {
 			window.addEventListener('keydown', (e) => {
-				if (!e.repeat) emit(e.key, 'down');
+				if (e.key === 'Tab') e.preventDefault();
+				if (!e.repeat) this.emit(e.key, 'down');
 			});
-			window.addEventListener('keyup', (e) => emit(e.key, 'up'));
+			window.addEventListener('keyup', (e) => this.emit(e.key, 'up'));
 
-			// virtual keyboard — pointer on [data-key] elements
-			el.addEventListener('pointerdown', (e) => {
+			const up = (e) => {
+				const key = e.target.closest('[data-key]')?.dataset.key;
+				if (key) this.emit(key, 'up');
+			};
+			this.el.addEventListener('pointerdown', (e) => {
 				const key = e.target.closest('[data-key]')?.dataset.key;
 				if (!key) return;
-				el.setPointerCapture(e.pointerId);
-				emit(key, 'down');
+				this.el.setPointerCapture(e.pointerId);
+				this.emit(key, 'down');
 			});
-			el.addEventListener('pointerup', (e) => {
-				const key = e.target.closest('[data-key]')?.dataset.key;
-				if (key) emit(key, 'up');
-			});
-			el.addEventListener('pointercancel', (e) => {
-				const key = e.target.closest('[data-key]')?.dataset.key;
-				if (key) emit(key, 'up'); // treat cancel same as up
-			});
-			pathless.input = this;
+			this.el.addEventListener('pointerup', up);
+			this.el.addEventListener('pointercancel', up);
 		}
 	}
 	new Input();
