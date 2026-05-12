@@ -14,10 +14,10 @@ type Fx struct {
 	Routes map[string][]byte
 }
 
-func NewFx(z *zero.Zero) *Fx {
+func NewFx(apiUrl string) *Fx {
 	return &Fx{
 		Forge:     NewForge().(*forge),
-		Zero:      z,
+		Zero:      zero.NewZero(apiUrl),
 		Templates: templates.Init(),
 		Routes:    make(map[string][]byte),
 	}

@@ -1,18 +1,13 @@
 package main
 
 import (
-	"os"
-
-	"github.com/timefactoryio/pathless/fx"
 	"github.com/timefactoryio/pathless/one"
-	"github.com/timefactoryio/pathless/zero"
 )
 
 func main() {
-	z := zero.NewZero(os.Getenv("API_URL"))
-	f := fx.NewFx(z)
-	o := one.NewOne(z, f)
+	// o := one.NewOne(os.Getenv("API_URL"))
+	o := one.NewOne("")
 
-	// o.Home()
+	o.Home("https://zero.s3.timefactory.io/timefactory.svg", "the perpetual motion machine")
 	o.Serve()
 }

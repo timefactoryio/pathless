@@ -93,8 +93,7 @@
 					).map((e) => this.#td.decode(e.data));
 					this.mount(document.head, input);
 					this.mount(document.head, layout);
-					// pathless.layouts.left = keyboard;
-					// if (!frames.length) pathless.layouts.togglePanel();
+					pathless.layouts.left = keyboard;
 					this.frames = frames;
 				}
 
@@ -108,6 +107,14 @@
 					const el = this.space[i];
 					el.replaceChildren();
 					this.mount(el, this.frames[el.dataset.frame | 0]);
+				}
+
+				nav(dir) {
+					const el = this.space[+this.universe.dataset.focused];
+					el.dataset.frame =
+						((el.dataset.frame | 0) + dir + this.frames.length) %
+						this.frames.length;
+					this.render();
 				}
 			}
 

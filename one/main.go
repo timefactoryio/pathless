@@ -15,10 +15,10 @@ type One struct {
 	Hello    []byte
 }
 
-func NewOne(z *zero.Zero, f *fx.Fx) *One {
+func NewOne(apiUrl string) *One {
 	o := &One{
-		Zero:     z,
-		Fx:       f,
+		Zero:     zero.NewZero(apiUrl),
+		Fx:       fx.NewFx(apiUrl),
 		Pathless: http.NewServeMux(),
 		Frame:    http.NewServeMux(),
 	}
@@ -46,9 +46,9 @@ func (o *One) HandlePathless(w http.ResponseWriter, r *http.Request) {
 
 func (o *One) BuildHello() {
 	values := []*fx.Value{
-		{Data: []byte(o.Input)},
-		{Data: []byte(o.Layout)},
-		{Data: []byte(o.Keyboard)},
+		{Data: o.Input},
+		{Data: o.Layout},
+		{Data: o.Keyboard},
 	}
 	for _, b := range o.Frames() {
 		values = append(values, &fx.Value{Data: b})
