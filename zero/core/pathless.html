@@ -61,6 +61,72 @@
 				grid-area: one;
 				container-name: one;
 			}
+			#universe[data-layout='1'] #fx,
+			#universe[data-layout='1'] #one,
+			#universe[data-layout='2'] #one {
+				display: none;
+			}
+			#universe[data-layout='2'][data-variant='0'] #zero,
+			#universe[data-layout='3'][data-variant='0'] #zero {
+				border-right: var(--b);
+			}
+			#universe[data-layout='2'][data-variant='1'] #zero,
+			#universe[data-layout='3'][data-variant='1'] #zero {
+				border-bottom: var(--b);
+			}
+			#universe[data-layout='3'][data-variant='2'] #zero {
+				border-left: var(--b);
+			}
+			#universe[data-layout='3'][data-variant='3'] #zero {
+				border-top: var(--b);
+			}
+			#universe[data-layout='2'][data-variant='1'] {
+				flex-direction: column;
+			}
+			#universe[data-layout='3'] {
+				display: grid;
+				grid-template-columns: 1fr 1fr;
+				grid-template-rows: 1fr 1fr;
+			}
+			#universe[data-layout='3'][data-variant='0'] {
+				grid-template-areas: 'zero one' 'zero fx';
+			}
+			#universe[data-layout='3'][data-variant='1'] {
+				grid-template-areas: 'zero zero' 'one  fx';
+			}
+			#universe[data-layout='3'][data-variant='2'] {
+				grid-template-areas: 'one  zero' 'fx   zero';
+			}
+			#universe[data-layout='3'][data-variant='3'] {
+				grid-template-areas: 'one  fx' 'zero zero';
+			}
+			#universe[data-layout='3'][data-variant='1'] #fx,
+			#universe[data-layout='3'][data-variant='3'] #fx {
+				border-left: var(--b);
+			}
+			#panel {
+				height: 20%;
+				flex-shrink: 0;
+				border-top: var(--b);
+				display: flex;
+			}
+			#panel[data-panel='1'] {
+				align-items: center;
+				justify-content: center;
+			}
+			#panel[data-panel='2'] #panel-left,
+			#panel[data-panel='2'] #panel-right {
+				flex: 1;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+			}
+			#panel[data-panel='2'] #panel-left {
+				border-right: var(--b);
+			}
+			#panel[data-panel='1'] #panel-right {
+				display: none;
+			}
 		</style>
 		<script>
 			class Universe {
@@ -84,6 +150,28 @@
 					this.space = ['zero', 'fx', 'one'].map((id) =>
 						document.getElementById(id),
 					);
+
+					new MutationObserver(() => this.render()).observe(
+						this.universe,
+						{ attributeFilter: ['data-focused'] },
+					);
+
+					new MutationObserver(() =>
+						this.space.forEach((_, i) => this.render(i)),
+					).observe(this.universe, {
+						attributeFilter: ['data-layout'],
+					});
+
+					new MutationObserver(() => {}).observe(this.universe, {
+						attributeFilter: ['data-variant'],
+					});
+
+					this.space.forEach((el) =>
+						new MutationObserver(() =>
+							this.exec(el, this.frames[el.dataset.frame | 0]),
+						).observe(el, { attributeFilter: ['data-frame'] }),
+					);
+
 					this.init();
 				}
 
@@ -91,22 +179,24 @@
 					const [input, layout, keyboard, ...frames] = (
 						await this.#parse('{{.APIURL}}')
 					).map((e) => this.#td.decode(e.data));
-					this.mount(document.head, input);
-					this.mount(document.head, layout);
-					pathless.layouts.left = keyboard;
+					this.input = input;
+					this.layout = layout;
 					this.frames = frames;
+					this.render();
 				}
 
-				mount(target, html) {
-					target.append(
-						document.createRange().createContextualFragment(html),
-					);
+				exec(el, html) {
+					el.innerHTML = html;
+					el.querySelectorAll('script').forEach((old) => {
+						const s = document.createElement('script');
+						s.textContent = old.textContent;
+						old.replaceWith(s);
+					});
 				}
 
 				render(i = +this.universe.dataset.focused) {
 					const el = this.space[i];
-					el.replaceChildren();
-					this.mount(el, this.frames[el.dataset.frame | 0]);
+					this.exec(el, this.frames[el.dataset.frame | 0]);
 				}
 
 				nav(dir) {
@@ -114,7 +204,6 @@
 					el.dataset.frame =
 						((el.dataset.frame | 0) + dir + this.frames.length) %
 						this.frames.length;
-					this.render();
 				}
 			}
 
