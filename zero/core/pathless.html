@@ -61,47 +61,47 @@
 				grid-area: one;
 				container-name: one;
 			}
-			#universe[data-layout='1'] #fx,
-			#universe[data-layout='1'] #one,
-			#universe[data-layout='2'] #one {
+			#universe[data-layout='0'] #fx,
+			#universe[data-layout='0'] #one,
+			#universe[data-layout='1'] #one {
 				display: none;
 			}
-			#universe[data-layout='2'][data-variant='0'] #zero,
-			#universe[data-layout='3'][data-variant='0'] #zero {
+			#universe[data-layout='1'][data-variant='0'] #zero,
+			#universe[data-layout='2'][data-variant='0'] #zero {
 				border-right: var(--b);
 			}
-			#universe[data-layout='2'][data-variant='1'] #zero,
-			#universe[data-layout='3'][data-variant='1'] #zero {
+			#universe[data-layout='1'][data-variant='1'] #zero,
+			#universe[data-layout='2'][data-variant='1'] #zero {
 				border-bottom: var(--b);
 			}
-			#universe[data-layout='3'][data-variant='2'] #zero {
+			#universe[data-layout='2'][data-variant='2'] #zero {
 				border-left: var(--b);
 			}
-			#universe[data-layout='3'][data-variant='3'] #zero {
+			#universe[data-layout='2'][data-variant='3'] #zero {
 				border-top: var(--b);
 			}
-			#universe[data-layout='2'][data-variant='1'] {
+			#universe[data-layout='1'][data-variant='1'] {
 				flex-direction: column;
 			}
-			#universe[data-layout='3'] {
+			#universe[data-layout='2'] {
 				display: grid;
 				grid-template-columns: 1fr 1fr;
 				grid-template-rows: 1fr 1fr;
 			}
-			#universe[data-layout='3'][data-variant='0'] {
+			#universe[data-layout='2'][data-variant='0'] {
 				grid-template-areas: 'zero one' 'zero fx';
 			}
-			#universe[data-layout='3'][data-variant='1'] {
+			#universe[data-layout='2'][data-variant='1'] {
 				grid-template-areas: 'zero zero' 'one  fx';
 			}
-			#universe[data-layout='3'][data-variant='2'] {
+			#universe[data-layout='2'][data-variant='2'] {
 				grid-template-areas: 'one  zero' 'fx   zero';
 			}
-			#universe[data-layout='3'][data-variant='3'] {
+			#universe[data-layout='2'][data-variant='3'] {
 				grid-template-areas: 'one  fx' 'zero zero';
 			}
-			#universe[data-layout='3'][data-variant='1'] #fx,
-			#universe[data-layout='3'][data-variant='3'] #fx {
+			#universe[data-layout='2'][data-variant='1'] #fx,
+			#universe[data-layout='2'][data-variant='3'] #fx {
 				border-left: var(--b);
 			}
 			#panel {
@@ -131,7 +131,15 @@
 		<script>
 			class Universe {
 				#td = new TextDecoder();
-				async #parse(url) {
+				constructor() {
+					this.universe = document.getElementById('universe');
+					this.spaces = ['zero', 'fx', 'one'].map((id) =>
+						document.getElementById(id),
+					);
+					this.init();
+				}
+
+				async wire(url) {
 					const buf = await window
 						.fetch(url)
 						.then((r) => r.arrayBuffer());
@@ -145,65 +153,61 @@
 					}));
 				}
 
-				constructor() {
-					this.universe = document.getElementById('universe');
-					this.space = ['zero', 'fx', 'one'].map((id) =>
-						document.getElementById(id),
-					);
-
-					new MutationObserver(() => this.render()).observe(
-						this.universe,
-						{ attributeFilter: ['data-focused'] },
-					);
-
-					new MutationObserver(() =>
-						this.space.forEach((_, i) => this.render(i)),
-					).observe(this.universe, {
-						attributeFilter: ['data-layout'],
-					});
-
-					new MutationObserver(() => {}).observe(this.universe, {
-						attributeFilter: ['data-variant'],
-					});
-
-					this.space.forEach((el) =>
-						new MutationObserver(() =>
-							this.exec(el, this.frames[el.dataset.frame | 0]),
-						).observe(el, { attributeFilter: ['data-frame'] }),
-					);
-
-					this.init();
-				}
-
 				async init() {
 					const [input, layout, keyboard, ...frames] = (
-						await this.#parse('{{.APIURL}}')
+						await this.wire('{{.APIURL}}')
 					).map((e) => this.#td.decode(e.data));
-					this.input = input;
-					this.layout = layout;
+					this.universe.focused = 0;
 					this.frames = frames;
+					this.spaces.forEach((el) => {
+						el.frame = 0;
+						el.state = new Map(
+							frames.map((_, i) => [i, new Map()]),
+						);
+					});
+					this.input = new Function(input)();
+					this.layouts = new Function(layout)();
+					this.kb = new Function(keyboard)();
 					this.render();
 				}
 
-				exec(el, html) {
-					el.innerHTML = html;
-					el.querySelectorAll('script').forEach((old) => {
-						const s = document.createElement('script');
-						s.textContent = old.textContent;
-						old.replaceWith(s);
-					});
+				get space() {
+					return this.spaces[this.universe.focused];
 				}
 
-				render(i = +this.universe.dataset.focused) {
-					const el = this.space[i];
-					this.exec(el, this.frames[el.dataset.frame | 0]);
+				write(key, value) {
+					const el = this.space;
+					el.state.get(el.frame).set(key, value);
+				}
+
+				read() {
+					const el = this.space;
+					return Object.fromEntries(el.state.get(el.frame));
+				}
+
+				exec(el) {
+					for (const old of el.querySelectorAll('script, style')) {
+						const fresh = document.createElement(old.localName);
+						for (const { name, value } of old.attributes)
+							fresh.setAttribute(name, value);
+						fresh.textContent = old.textContent;
+						old.replaceWith(fresh);
+					}
+				}
+
+				render(i = this.universe.focused) {
+					const el = this.spaces[i];
+					el.innerHTML = this.frames[el.frame];
+					this.exec(el);
 				}
 
 				nav(dir) {
-					const el = this.space[+this.universe.dataset.focused];
-					el.dataset.frame =
-						((el.dataset.frame | 0) + dir + this.frames.length) %
+					const el = this.space;
+					el.frame =
+						(el.frame + dir + this.frames.length) %
 						this.frames.length;
+					el.innerHTML = this.frames[el.frame];
+					this.exec(el);
 				}
 			}
 
@@ -213,10 +217,10 @@
 		</script>
 	</head>
 	<body>
-		<div id="universe" data-focused="0" data-layout="1" data-variant="0">
-			<div id="zero" data-frame="0"></div>
-			<div id="fx" data-frame="0"></div>
-			<div id="one" data-frame="0"></div>
+		<div id="universe" data-layout="0" data-variant="0">
+			<div id="zero"></div>
+			<div id="fx"></div>
+			<div id="one"></div>
 		</div>
 	</body>
 </html>

@@ -12,10 +12,10 @@ import (
 //go:embed core/pathless.html
 var pathlessHtml string
 
-//go:embed core/input.html
+//go:embed core/input.js
 var inputHtml []byte
 
-//go:embed core/layout.html
+//go:embed core/layout.js
 var layoutHtml []byte
 
 //go:embed core/keyboard.html
