@@ -104,29 +104,6 @@
 			#universe[data-layout='2'][data-variant='3'] #fx {
 				border-left: var(--b);
 			}
-			#panel {
-				height: 20%;
-				flex-shrink: 0;
-				border-top: var(--b);
-				display: flex;
-			}
-			#panel[data-panel='1'] {
-				align-items: center;
-				justify-content: center;
-			}
-			#panel[data-panel='2'] #panel-left,
-			#panel[data-panel='2'] #panel-right {
-				flex: 1;
-				display: flex;
-				align-items: center;
-				justify-content: center;
-			}
-			#panel[data-panel='2'] #panel-left {
-				border-right: var(--b);
-			}
-			#panel[data-panel='1'] #panel-right {
-				display: none;
-			}
 		</style>
 		<script>
 			class Universe {

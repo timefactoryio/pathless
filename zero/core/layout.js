@@ -46,18 +46,8 @@ class Layouts {
 			},
 		};
 	}
-	static buildPanel() {
-		const p = Object.assign(document.createElement('div'), {
-			id: 'panel',
-			innerHTML:
-				'<div id="panel-left"></div><div id="panel-right"></div>',
-		});
-		p.dataset.panel = '1';
-		return p;
-	}
 	constructor() {
 		this.prev = null;
-		this.panel = Layouts.buildPanel();
 		this.layouts = Layouts.buildLayouts();
 		this.sync();
 
@@ -91,10 +81,6 @@ class Layouts {
 		return this.entry.f[this.variant][pathless.universe.focused];
 	}
 
-	#movePanel() {
-		if (this.panel.isConnected) pathless.space.appendChild(this.panel);
-	}
-
 	sync() {
 		const l = this.layout;
 		pathless.spaces[0].visible = true;
@@ -104,7 +90,7 @@ class Layouts {
 			pathless.universe.focused = 0;
 			pathless.render(0);
 		}
-		this.#movePanel();
+		pathless.panel.move(pathless.space);
 	}
 
 	cycle(layout = this.layout) {
@@ -128,27 +114,6 @@ class Layouts {
 		} while (!pathless.space.visible);
 		pathless.render(pathless.universe.focused);
 		this.sync();
-	}
-
-	togglePanel() {
-		pathless.space.contains(this.panel)
-			? this.panel.remove()
-			: pathless.space.appendChild(this.panel);
-	}
-
-	get right() {
-		return this.panel.querySelector('#panel-right');
-	}
-	get left() {
-		return this.panel.querySelector('#panel-left');
-	}
-	set left(v) {
-		if (!this.left.innerHTML) this.left.innerHTML = v;
-	}
-
-	switchPanel(rightContent) {
-		this.right.innerHTML = rightContent ?? '';
-		this.panel.dataset.panel = rightContent ? '2' : '1';
 	}
 }
 return new Layouts();

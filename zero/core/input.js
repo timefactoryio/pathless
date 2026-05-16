@@ -1,13 +1,23 @@
 class Input {
 	constructor() {
-		this.el = pathless.universe;
+		this.binds = new Map();
 		this.listen();
 	}
 
+	bind(key, { down, up, label } = {}) {
+		this.binds.set(key, { down, up, label: label ?? '' });
+	}
+
+	unbind(key) {
+		this.binds.delete(key);
+	}
+
+	release() {
+		this.binds.clear();
+	}
+
 	emit(key, phase) {
-		this.el.dispatchEvent(
-			new CustomEvent('input', { detail: { key, phase } }),
-		);
+		this.binds.get(key)?.[phase]?.();
 	}
 
 	listen() {
@@ -21,14 +31,13 @@ class Input {
 			const key = e.target.closest('[data-key]')?.dataset.key;
 			if (key) this.emit(key, 'up');
 		};
-		this.el.addEventListener('pointerdown', (e) => {
+		document.addEventListener('pointerdown', (e) => {
 			const key = e.target.closest('[data-key]')?.dataset.key;
 			if (!key) return;
-			this.el.setPointerCapture(e.pointerId);
 			this.emit(key, 'down');
 		});
-		this.el.addEventListener('pointerup', up);
-		this.el.addEventListener('pointercancel', up);
+		document.addEventListener('pointerup', up);
+		document.addEventListener('pointercancel', up);
 	}
 }
 return new Input();

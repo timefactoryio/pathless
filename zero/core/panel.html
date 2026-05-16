@@ -1,0 +1,33 @@
+<style>
+	#panel {
+		height: 20%;
+		flex-shrink: 0;
+		border-top: var(--b);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+</style>
+
+<div id="panel" hidden></div>
+
+<script>
+	class Panel {
+		constructor() {
+			this.el = document.getElementById('panel');
+		}
+
+		set content(v) {
+			this.el.innerHTML = v;
+		}
+
+		move(space) {
+			space.appendChild(this.el);
+		}
+
+		toggle() {
+			this.el.hidden = !this.el.hidden;
+		}
+	}
+	return new Panel();
+</script>
