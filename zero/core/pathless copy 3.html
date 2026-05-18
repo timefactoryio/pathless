@@ -103,35 +103,23 @@
 			}
 		</style>
 		<script>
+			class Space {
+				constructor(el, frameCount) {
+					this.el = el;
+					this.frameIndex = 0;
+					this.state = Array.from(
+						{ length: frameCount },
+						() => new Map(),
+					);
+				}
+			}
 			class Universe {
 				#td = new TextDecoder();
 				#prev = null;
 				constructor() {
 					this.universe = document.getElementById('universe');
-					this.spaces = ['zero', 'fx', 'one'].map((id) => ({
-						el: document.getElementById(id),
-						frameIndex: 0,
-					}));
+					this.spaces = [];
 					this.frames = [];
-					this.keys = [
-						this.key('tab', (e) => {
-							e.preventDefault();
-							this.focus();
-						}),
-						this.key('1', () => this.cycle(0)),
-						this.key('2', () => this.cycle(1)),
-						this.key('3', () => this.cycle(2)),
-						this.key('q', () => this.nav(-1)),
-						this.key('e', () => this.nav(1)),
-					];
-					window.addEventListener('keydown', (e) => {
-						const k = e.key.toLowerCase();
-						this.keys.find((o) => o.key === k)?.down?.(e);
-					});
-					window.addEventListener('keyup', (e) => {
-						const k = e.key.toLowerCase();
-						this.keys.find((o) => o.key === k)?.up?.(e);
-					});
 					this.init();
 				}
 
@@ -147,22 +135,21 @@
 				}
 
 				async init() {
-					try {
-						const buf = await fetch('{{.APIURL}}').then((r) =>
-							r.arrayBuffer(),
-						);
-						this.frames = this.wire(buf).map((e) => {
-							const t = document.createElement('template');
-							t.innerHTML = this.#td.decode(e.data);
-							return [t, []];
-						});
-						for (const s of this.spaces)
-							s.state = Array.from(
-								{ length: this.frames.length },
-								() => new Map(),
-							);
-					} catch (_) {}
+					const buf = await fetch('{{.APIURL}}').then((r) =>
+						r.arrayBuffer(),
+					);
+					this.frames = this.wire(buf).map((e) =>
+						this.#td.decode(e.data),
+					);
+					this.spaces = ['zero', 'fx', 'one'].map(
+						(id) =>
+							new Space(
+								document.getElementById(id),
+								this.frames.length,
+							),
+					);
 					this.sync();
+					this.render();
 				}
 
 				get focused() {
@@ -194,48 +181,23 @@
 					const s = this.space;
 					return Object.fromEntries(s.state[s.frameIndex]);
 				}
-				write(k, v) {
+				write(key, value) {
 					const s = this.space;
-					s.state[s.frameIndex].set(k, v);
+					s.state[s.frameIndex].set(key, value);
 				}
 
-				key(k, down, { up = null, el = null, desc = '' } = {}) {
-					return { key: k.toLowerCase(), down, up, el, desc };
-				}
-				register(keys) {
-					const f = this.frames[this.space.frameIndex];
-					if (!f[1].length) f[1] = keys;
-				}
 				sync() {
 					const l = this.layout;
-					const wasHidden = this.spaces.map((s) => s.el.hidden);
-					if (l !== 0) {
-						this.spaces[0].el.hidden = false;
-						this.spaces[1].el.hidden = l < 1;
-						this.spaces[2].el.hidden = l < 2;
-					}
+					this.spaces[0].el.hidden = false;
+					this.spaces[1].el.hidden = l < 1;
+					this.spaces[2].el.hidden = l < 2;
 					const f = this.focused;
-					this.focused = this.spaces[f].el.hidden
-						? this.spaces.findIndex((s) => !s.el.hidden)
-						: f;
-					const s = this.space;
-					this.exec(s);
-					this.spaces.forEach((sp, i) => {
-						if (wasHidden[i] && !sp.el.hidden && sp !== s)
-							this.exec(sp);
-					});
-					this.keys.length = 6;
-					this.keys.push(...(this.frames[s.frameIndex]?.[1] ?? []));
+					this.focused = this.spaces[f].el.hidden ? 0 : f;
 				}
 
-				exec(s) {
-					const frame = this.frames[s.frameIndex];
-					if (!frame) {
-						s.el.replaceChildren();
-						return;
-					}
-					const [template] = frame;
-					s.el.replaceChildren(template.content.cloneNode(true));
+				render(i = this.focused) {
+					const s = this.spaces[i];
+					s.el.innerHTML = this.frames[s.frameIndex];
 					for (const old of s.el.querySelectorAll('script,style')) {
 						const n = document.createElement(old.localName);
 						for (const { name, value } of old.attributes)
@@ -250,35 +212,31 @@
 					s.frameIndex =
 						(s.frameIndex + dir + this.frames.length) %
 						this.frames.length;
-					this.sync();
+					this.render();
 				}
+
 				focus() {
-					if (this.spaces.every((s) => s.el.hidden)) return;
 					let next = this.focused;
 					do {
 						next = (next + 1) % this.spaces.length;
 					} while (this.spaces[next].el.hidden);
 					this.focused = next;
-					this.sync();
+					this.render();
 				}
+
 				cycle(layout = this.layout) {
 					if (layout !== this.layout) {
-						this.#prev = [this.layout, this.variant];
+						this.#prev = this.layout;
 						this.layout = layout;
 						this.variant = 0;
-						if (layout === 0) {
-							const f = this.focused;
-							this.spaces.forEach(
-								(s, i) => (s.el.hidden = i !== f),
-							);
-						}
 					} else if (layout === 0) {
-						if (!this.#prev) return;
-						[this.layout, this.variant] = this.#prev;
+						this.layout = this.#prev ?? 2;
+						this.variant = 0;
 					} else {
 						this.variant = (this.variant + 1) % [1, 2, 4][layout];
 					}
 					this.sync();
+					this.render();
 				}
 			}
 
@@ -288,8 +246,6 @@
 				window.write = (k, v) => u.write(k, v);
 				window.space = () => u.space;
 				window.frame = () => u.space.el.firstElementChild;
-				window.key = (k, down, opts) => u.key(k, down, opts);
-				window.register = (keys) => u.register(keys);
 			});
 		</script>
 	</head>

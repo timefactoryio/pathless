@@ -1,16 +1,3 @@
-<style>
-	#panel {
-		height: 20%;
-		flex-shrink: 0;
-		border-top: var(--b);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-	}
-</style>
-
-<div id="panel" hidden></div>
-
 <script>
 	class Layouts {
 		static buildLayouts() {
@@ -41,23 +28,24 @@
 				BL = [25, 313, 415, 258],
 				BR = [455, 313, 415, 258];
 			return {
-				0: { v: [v()], f: [[full()]] },
-				1: {
-					v: [v(V), v(H)],
-					f: [
+				v: [
+					[v()],
+					[v(V), v(H)],
+					[v(V, HR), v(H, VB), v(V, HL), v(H, VT)],
+				],
+				f: [
+					[[full()]],
+					[
 						[f(LF, V), f(RF, V)],
 						[f(TF, H), f(BF, H)],
 					],
-				},
-				2: {
-					v: [v(V, HR), v(H, VB), v(V, HL), v(H, VT)],
-					f: [
+					[
 						[f(LF, V, HR), f(TR, V, HR), f(BR, V, HR)],
 						[f(TF, H, VB), f(BL, H, VB), f(BR, H, VB)],
 						[f(RF, V, HL), f(TL, V, HL), f(BL, V, HL)],
 						[f(BF, H, VT), f(TL, H, VT), f(TR, H, VT)],
 					],
-				},
+				],
 			};
 		}
 
@@ -87,17 +75,17 @@
 		set variant(v) {
 			pathless.universe.dataset.variant = v;
 		}
-		get entry() {
-			return this.layouts[this.layout];
-		}
 		set content(v) {
 			this.panel.innerHTML = v;
 		}
+
 		get variantSVG() {
-			return this.entry.v[this.variant];
+			return this.layouts.v[this.layout][this.variant];
 		}
 		get focusSVG() {
-			return this.entry.f[this.variant][pathless.universe.focused];
+			return this.layouts.f[this.layout][this.variant][
+				pathless.universe.focused
+			];
 		}
 
 		sync() {
@@ -121,7 +109,8 @@
 				this.layout = layout;
 				this.variant = 0;
 			} else {
-				this.variant = (this.variant + 1) % this.entry.v.length;
+				this.variant =
+					(this.variant + 1) % this.layouts.v[this.layout].length;
 			}
 			this.sync();
 		}
@@ -133,14 +122,6 @@
 			} while (!pathless.space.visible);
 			pathless.render(pathless.universe.focused);
 			this.sync();
-		}
-
-		move(space) {
-			space.appendChild(this.panel);
-		}
-
-		toggle() {
-			this.panel.hidden = !this.panel.hidden;
 		}
 	}
 	return new Layouts();
