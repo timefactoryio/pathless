@@ -45,16 +45,24 @@ func (o *One) HandlePathless(w http.ResponseWriter, r *http.Request) {
 }
 
 func (o *One) BuildHello() {
-	values := []*fx.Value{
-		{Data: o.Input},
-		{Data: o.Layout},
-		{Data: o.Keyboard},
-	}
+	var values []*fx.Value
 	for _, b := range o.Frames() {
 		values = append(values, &fx.Value{Data: b})
 	}
 	o.Hello = fx.Compress(fx.Encode(values))
 }
+
+// func (o *One) BuildHello() {
+// 	values := []*fx.Value{
+// 		{Data: o.Input},
+// 		{Data: o.Layout},
+// 		{Data: o.Keyboard},
+// 	}
+// 	for _, b := range o.Frames() {
+// 		values = append(values, &fx.Value{Data: b})
+// 	}
+// 	o.Hello = fx.Compress(fx.Encode(values))
+// }
 
 func (o *One) Serve() {
 	o.BuildHello()

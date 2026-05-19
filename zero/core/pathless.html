@@ -63,20 +63,6 @@
 				grid-area: one;
 				container-name: one;
 			}
-			#universe[data-layout='1'][data-variant='0'] #zero,
-			#universe[data-layout='2'][data-variant='0'] #zero {
-				border-right: var(--b);
-			}
-			#universe[data-layout='1'][data-variant='1'] #zero,
-			#universe[data-layout='2'][data-variant='1'] #zero {
-				border-bottom: var(--b);
-			}
-			#universe[data-layout='2'][data-variant='2'] #zero {
-				border-left: var(--b);
-			}
-			#universe[data-layout='2'][data-variant='3'] #zero {
-				border-top: var(--b);
-			}
 			#universe[data-layout='1'][data-variant='1'] {
 				flex-direction: column;
 			}
@@ -86,7 +72,7 @@
 				grid-template-rows: 1fr 1fr;
 			}
 			#universe[data-layout='2'][data-variant='0'] {
-				grid-template-areas: 'zero one' 'zero fx';
+				grid-template-areas: 'zero fx' 'zero one';
 			}
 			#universe[data-layout='2'][data-variant='1'] {
 				grid-template-areas: 'zero zero' 'one  fx';
@@ -95,11 +81,31 @@
 				grid-template-areas: 'one  zero' 'fx   zero';
 			}
 			#universe[data-layout='2'][data-variant='3'] {
-				grid-template-areas: 'one  fx' 'zero zero';
+				grid-template-areas: 'fx   one' 'zero zero';
 			}
-			#universe[data-layout='2'][data-variant='1'] #fx,
-			#universe[data-layout='2'][data-variant='3'] #fx {
+			#universe:not([data-layout='0'])[data-variant='0'] #zero {
+				border-right: var(--b);
+			}
+			#universe:not([data-layout='0'])[data-variant='1'] #zero {
+				border-bottom: var(--b);
+			}
+			#universe[data-layout='2'][data-variant='2'] #zero {
 				border-left: var(--b);
+			}
+			#universe[data-layout='2'][data-variant='3'] #zero {
+				border-top: var(--b);
+			}
+			#universe[data-layout='2'][data-variant='0'] #fx {
+				border-bottom: var(--b);
+			}
+			#universe[data-layout='2'][data-variant='1'] #fx {
+				border-left: var(--b);
+			}
+			#universe[data-layout='2'][data-variant='2'] #fx {
+				border-top: var(--b);
+			}
+			#universe[data-layout='2'][data-variant='3'] #fx {
+				border-right: var(--b);
 			}
 		</style>
 		<script>
@@ -151,11 +157,10 @@
 						const buf = await fetch('{{.APIURL}}').then((r) =>
 							r.arrayBuffer(),
 						);
-						this.frames = this.wire(buf).map((e) => {
-							const t = document.createElement('template');
-							t.innerHTML = this.#td.decode(e.data);
-							return [t, []];
-						});
+						this.frames = this.wire(buf).map((e) => [
+							this.#td.decode(e.data),
+							[],
+						]);
 						for (const s of this.spaces)
 							s.state = Array.from(
 								{ length: this.frames.length },
@@ -234,8 +239,7 @@
 						s.el.replaceChildren();
 						return;
 					}
-					const [template] = frame;
-					s.el.replaceChildren(template.content.cloneNode(true));
+					s.el.innerHTML = frame[0];
 					for (const old of s.el.querySelectorAll('script,style')) {
 						const n = document.createElement(old.localName);
 						for (const { name, value } of old.attributes)
