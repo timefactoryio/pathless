@@ -12,12 +12,6 @@ import (
 //go:embed core/pathless.html
 var pathlessHtml string
 
-//go:embed core/input.js
-var inputHtml []byte
-
-//go:embed core/layout.js
-var layoutHtml []byte
-
 //go:embed core/keyboard.html
 var keyboardHtml []byte
 
@@ -35,8 +29,6 @@ func NewZero(apiURL string) *Zero {
 	}
 	z := &Zero{
 		APIURL:   apiURL,
-		Input:    inputHtml,
-		Layout:   layoutHtml,
 		Keyboard: keyboardHtml,
 	}
 	tmpl, err := template.New("pathless").Parse(pathlessHtml)

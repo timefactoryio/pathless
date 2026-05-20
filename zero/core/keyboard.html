@@ -5,7 +5,7 @@
 		grid-template-rows: repeat(2, 1fr);
 		gap: 0.3em;
 		padding: 0.2em;
-		width: 100%;
+		width: 50%;
 		height: 100%;
 	}
 	.key {
@@ -17,23 +17,14 @@
 		cursor: pointer;
 		color: #aaa;
 	}
-	.key[data-key='q'] {
-		border-color: red;
-	}
-	.key[data-key='e'] {
-		border-color: blue;
-	}
-	.key.down {
-		border-color: white;
-	}
-	.key .top {
+	.key > :first-child {
 		flex: 1;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 0.8em;
+		font-size: 1.2em;
 	}
-	.key .bottom {
+	.key > :last-child {
 		flex: 4;
 		display: flex;
 		align-items: center;
@@ -41,41 +32,126 @@
 		font-size: 1.25em;
 		font-weight: bold;
 		color: #fff;
+		position: relative;
+		overflow: hidden;
+	}
+	.key > :last-child > svg {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 90%;
+	}
+	.key[data-state='true'] {
+		border-color: white;
+	}
+	.key[data-key='q'] {
+		border-color: red;
+	}
+	.key[data-key='e'] {
+		border-color: blue;
+	}
+	.key[data-key='q'][data-state='true'],
+	.key[data-key='e'][data-state='true'] {
+		border-color: white;
+	}
+	.key[data-key='z'] {
+		display: none;
 	}
 </style>
 
 <div class="keyboard">
-	<div class="key" data-key="1">
-		<div class="top">1</div>
-		<div class="bottom"></div>
-	</div>
-	<div class="key" data-key="2">
-		<div class="top">2</div>
-		<div class="bottom"></div>
-	</div>
-	<div class="key" data-key="3">
-		<div class="top">3</div>
-		<div class="bottom"></div>
-	</div>
-	<div class="key" data-key="Tab">
-		<div class="top">Tab</div>
-		<div class="bottom"></div>
-	</div>
-	<div class="key" data-key="q">
-		<div class="top">q</div>
-		<div class="bottom"></div>
-	</div>
-	<div class="key" data-key="e">
-		<div class="top">e</div>
-		<div class="bottom"></div>
-	</div>
-</div>
+	<script>
+		const svgs = (() => {
+			const el = (inner, fill) =>
+				`<svg viewBox="0 0 880 596"><rect width="860" height="576" x="10" y="10" fill="${fill || 'none'}" stroke="#00f" stroke-width="30" rx="16"/>${inner}</svg>`;
+			const div = (...d) =>
+				d.length
+					? `<path stroke="#00f" stroke-width="30" d="${d.join('')}"/>`
+					: '';
+			const pane = (x, y, w, h) =>
+				`<rect width="${w}" height="${h}" x="${x}" y="${y}" fill="#00f"/>`;
+			const v = (...d) => el(div(...d));
+			const f = (p, ...d) => el(pane(...p) + div(...d));
+			const full = () => el('', '#00f');
+			const V = 'M440 10v576',
+				H = 'M10 298h860',
+				HR = 'M440 298h430',
+				HL = 'M10 298h430',
+				VB = 'M440 298v288',
+				VT = 'M440 10v288';
+			const LF = [25, 25, 415, 546],
+				RF = [455, 25, 415, 546],
+				TF = [25, 25, 830, 258],
+				BF = [25, 313, 830, 258];
+			const TL = [25, 25, 415, 258],
+				TR = [455, 25, 415, 258],
+				BL = [25, 313, 415, 258],
+				BR = [455, 313, 415, 258];
+			// svgs[layout][variant][spaceIndex + 1], index 0 = unfocused base
+			return [
+				[[v(), full(), full(), full()]],
+				[
+					[v(V), f(LF, V), f(RF, V), f(RF, V)],
+					[v(H), f(TF, H), f(BF, H), f(BF, H)],
+				],
+				[
+					[v(V, HR), f(LF, V, HR), f(TR, V, HR), f(BR, V, HR)],
+					[v(H, VB), f(TF, H, VB), f(BR, H, VB), f(BL, H, VB)],
+					[v(V, HL), f(RF, V, HL), f(BL, V, HL), f(TL, V, HL)],
+					[v(H, VT), f(BF, H, VT), f(TL, H, VT), f(TR, H, VT)],
+				],
+			];
+		})();
 
-<script>
-	pathless.universe.addEventListener('input', (e) => {
-		const { key, phase } = e.detail;
-		document
-			.querySelector(`.key[data-key="${key}"]`)
-			?.classList.toggle('down', phase === 'down');
-	});
-</script>
+		const variantCount = [1, 2, 4];
+
+		const keyboard = document.querySelector('.keyboard');
+		const fragment = document.createDocumentFragment();
+		pathless.keys.forEach((k, i) => {
+			const el = fragment.appendChild(document.createElement('div'));
+			el.className = 'key';
+			el.dataset.key = k.key;
+			el.innerHTML = `<div>${k.key}</div><div>${k.desc}</div>`;
+			k.view = { el };
+		});
+		keyboard.appendChild(fragment);
+
+		const layoutDescs = pathless.keys
+			.slice(0, 3)
+			.map((k) => k.view.el.lastElementChild);
+		const tabDesc = pathless.keys[3].view.el.lastElementChild;
+
+		function updateIcons() {
+			const { layout, variant, focused } = pathless;
+			layoutDescs.forEach((desc, i) => {
+				const next = i === layout ? (variant + 1) % variantCount[i] : 0;
+				desc.innerHTML = svgs[i][next][0];
+			});
+			tabDesc.innerHTML = svgs[layout][variant][focused + 1];
+		}
+
+		new MutationObserver(updateIcons).observe(
+			document.getElementById('universe'),
+			{
+				attributes: true,
+				attributeFilter: [
+					'data-layout',
+					'data-variant',
+					'data-focused',
+				],
+			},
+		);
+
+		updateIcons();
+
+		const reflect = (e) => {
+			const o = pathless.keys.find((o) => o.key === e.key.toLowerCase());
+			if (!o?.view) return;
+			o.state
+				? (o.view.el.dataset.state = o.state)
+				: delete o.view.el.dataset.state;
+		};
+		window.addEventListener('keydown', reflect);
+		window.addEventListener('keyup', reflect);
+	</script>
+</div>

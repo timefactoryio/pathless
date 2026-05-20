@@ -64,14 +64,13 @@
 		function updateVisibility() {
 			const u = window.pathless;
 			const shouldShow =
-				u?.space[3].visible === false &&
-				u?.focused === 0 &&
-				u?.space[0].index === 0 &&
-				u?.layout[0] === 0;
+				u?.panel?.hidden === true &&
+				u?.space.frameIndex === 0 &&
+				u?.layout === 0;
 			button.classList.toggle('show', shouldShow);
 		}
 		button.addEventListener('click', () => {
-			window.pathless?.toggleKeyboard();
+			window.pathless?.toggle();
 			updateVisibility();
 		});
 		updateVisibility();

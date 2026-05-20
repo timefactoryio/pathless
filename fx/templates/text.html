@@ -134,7 +134,7 @@
 </style>
 <script>
 	(function () {
-		const f = space().querySelector('.text');
+		const f = space().el.querySelector('.text');
 		const c = f.children;
 
 		function snap() {
@@ -148,14 +148,14 @@
 		}
 
 		requestAnimationFrame(() => {
-			const s = pathless.read().scroll;
+			const s = read().scroll;
 			if (s?.i != null) {
 				const el = c[s.i];
 				if (el) f.scrollTop = el.offsetTop + s.r * el.offsetHeight;
 			}
 		});
 
-		f.addEventListener('scroll', () => pathless.write('scroll', snap()), {
+		f.addEventListener('scroll', () => write('scroll', snap()), {
 			passive: true,
 		});
 
@@ -180,7 +180,9 @@
 
 		const w = hold(-1.5),
 			s = hold(1.5);
-		onKey('w', w.down, { up: w.up, desc: '↑' });
-		onKey('s', s.down, { up: s.up, desc: '↓' });
+		register(space().frameIndex, [
+			key('w', w.down, { up: w.up, desc: '↑' }),
+			key('s', s.down, { up: s.up, desc: '↓' }),
+		]);
 	})();
 </script>

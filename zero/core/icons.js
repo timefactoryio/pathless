@@ -1,4 +1,4 @@
-function buildLayouts() {
+function buildLayoutSVGS() {
 	const el = (inner, fill) =>
 		`<svg viewBox="0 0 880 596" style="width:100%;height:100%"><rect width="860" height="576" x="10" y="10" fill="${fill || 'none'}" stroke="#00f" stroke-width="30" rx="16"/>${inner}</svg>`;
 	const div = (...d) =>
@@ -26,7 +26,7 @@ function buildLayouts() {
 		BL = [25, 313, 415, 258],
 		BR = [455, 313, 415, 258];
 	return [
-		[[full(), full()]],
+		[[v(), full()]],
 		[
 			[v(V), f(LF, V), f(RF, V)],
 			[v(H), f(TF, H), f(BF, H)],
