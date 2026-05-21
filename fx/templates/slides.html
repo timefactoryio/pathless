@@ -19,30 +19,36 @@
 <script>
 	(function () {
 		const prefix = '{{.PREFIX}}';
-		const img = space().querySelector('img');
 		let slides = [];
 		let index = pathless.read()[prefix] || 0;
 
 		function show(i) {
 			if (!slides.length) return;
+			const img = document.querySelector('.slides img');
+			if (!img) return;
 			index = ((i % slides.length) + slides.length) % slides.length;
 			pathless.write(prefix, index);
 			img.src = slides[index].url;
 			img.alt = slides[index].name;
 		}
 
-		pathless.fetch(`${window.apiUrl}/${prefix}`).then((entries) => {
-			for (const e of entries) {
-				if (!e.url)
-					e.url = URL.createObjectURL(
-						new Blob([e.data], { type: e.type }),
-					);
-			}
-			slides = entries;
-			if (slides.length) show(index);
-		});
+		fetch(prefix)
+			.then((r) => r.arrayBuffer())
+			.then((buf) => pathless.wire(buf))
+			.then((entries) => {
+				for (const e of entries) {
+					if (!e.url)
+						e.url = URL.createObjectURL(
+							new Blob([e.data], { type: e.type }),
+						);
+				}
+				slides = entries;
+				if (slides.length) show(index);
+			});
 
-		onKey('a', () => show(index - 1), { desc: '←' });
-		onKey('d', () => show(index + 1), { desc: '→' });
+		pathless.register(pathless.space.frameIndex, [
+			pathless.key('a', () => show(index - 1), { desc: '←' }),
+			pathless.key('d', () => show(index + 1), { desc: '→' }),
+		]);
 	})();
 </script>
