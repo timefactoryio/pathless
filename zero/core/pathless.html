@@ -110,21 +110,14 @@
 			#universe[data-layout='2'][data-variant='3'] #fx {
 				border-right: var(--b);
 			}
-			#panel {
-				height: 20cqh;
-				flex-shrink: 0;
-				border-top: var(--b);
-				display: flex;
-				align-items: center;
-				justify-content: center;
-			}
 		</style>
 		<script>
 			window.apiUrl = '{{.APIURL}}';
 			class Universe {
 				#td = new TextDecoder();
-				#prev = [0, 0];
+				#prev = null;
 				frames = [];
+
 				constructor() {
 					this.universe = document.getElementById('universe');
 					this.spaces = ['zero', 'fx', 'one'].map((id) => ({
@@ -159,6 +152,7 @@
 						this.frame?.binds?.find((o) => o.key === key);
 					if (!o) return;
 					o.state = e.type === 'keydown';
+					this.keyboard?.reflect(o);
 					(o.state ? o.down : o.up)?.(e);
 				};
 
@@ -174,20 +168,18 @@
 				}
 
 				async init() {
-					const [keyboard, ...rest] = this.wire(
+					const [kb, ...rest] = this.wire(
 						await fetch(window.apiUrl).then((r) => r.arrayBuffer()),
 					);
-					this.panel.innerHTML = this.#td.decode(keyboard.data);
+					this.panel.innerHTML = this.#td.decode(kb.data);
+					document.body.appendChild(this.panel);
 					this.exec(this.panel);
+					document.body.removeChild(this.panel);
 					this.frames = rest.map((e) => ({
 						html: this.#td.decode(e.data),
-						binds: [],
 					}));
 					for (const s of this.spaces)
-						s.state = Array.from(
-							{ length: this.frames.length },
-							() => new Map(),
-						);
+						s.state = this.frames.map(() => new Map());
 					if (this.frames.length) this.render();
 				}
 
@@ -195,9 +187,8 @@
 					return +this.universe.dataset.focused;
 				}
 				set focused(v) {
-					let i = v % this.spaces.length;
-					while (this.spaces[i].el.hidden)
-						i = (i + 1) % this.spaces.length;
+					let i = v % 3;
+					while (this.spaces[i].el.hidden) i = (i + 1) % 3;
 					this.universe.dataset.focused = i;
 					this.spaces.forEach((s, j) => {
 						s.el.inert = !s.el.hidden && j !== i;
@@ -208,6 +199,9 @@
 				}
 				get variant() {
 					return +this.universe.dataset.variant;
+				}
+				get variants() {
+					return [1, 2, 4][this.layout];
 				}
 				get view() {
 					return [this.layout, this.variant];
@@ -243,30 +237,32 @@
 						state: false,
 					};
 				}
-				register(i, keys) {
-					if (!this.frames[i]?.binds.length)
-						this.frames[i].binds = keys;
+				bind(k, down, opts) {
+					(this.frame.binds ??= []).push(this.key(k, down, opts));
 				}
 
 				sync() {
 					this.spaces.forEach((s, i) => {
-						const was = s.el.hidden;
 						s.el.hidden =
 							this.layout === 0
 								? i !== this.focused
 								: i > this.layout;
-						if (was && !s.el.hidden) this.render(s);
 					});
 					this.focused = this.focused;
-					this.render();
+					const focused = this.space;
+					this.spaces
+						.filter((s) => !s.el.hidden && s !== focused)
+						.forEach((s) => this.render(s));
+					this.render(focused);
 				}
 
 				render(s = this.space) {
 					const f = this.frames[s.frameIndex];
+					f.binds = [];
 					s.el.innerHTML = f.html;
-					if (!f.binds.length) this.exec(s.el);
-					if (s === this.spaces[0])
-						this.spaces[0].el.appendChild(this.panel);
+					this.exec(s.el);
+					if (!this.panel.hidden && s === this.space)
+						this.keyboard.mount(this.space.el);
 				}
 
 				exec(el) {
@@ -283,15 +279,22 @@
 					if (layout !== this.layout) {
 						this.view = [layout, 0];
 					} else if (layout === 0) {
+						if (!this.#prev) return;
 						this.view = this.#prev;
 					} else {
 						this.view = [
 							this.layout,
-							(this.variant + 1) % [1, 2, 4][layout],
+							(this.variant + 1) % this.variants,
 						];
 						return this.render();
 					}
 					this.sync();
+				}
+
+				focus() {
+					const prev = this.focused;
+					this.focused = prev + 1;
+					if (this.focused !== prev) this.render();
 				}
 
 				nav(dir) {
@@ -301,14 +304,9 @@
 					this.render();
 				}
 
-				focus() {
-					this.focused = this.focused + 1;
-					this.render();
-				}
 				toggle() {
 					this.panel.hidden = !this.panel.hidden;
-					if (!this.panel.hidden)
-						this.space.el.appendChild(this.panel);
+					if (!this.panel.hidden) this.keyboard.mount(this.space.el);
 				}
 			}
 			document.addEventListener('DOMContentLoaded', () => {
