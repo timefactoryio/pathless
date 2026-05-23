@@ -113,17 +113,26 @@
 		</style>
 		<script>
 			window.apiUrl = '{{.APIURL}}';
+			const state = {
+				layout: 0,
+				variant: 0,
+				focused: 0,
+				prev: null,
+				frames: [],
+				spaces: [
+					{ frameIndex: 0, frameState: [] },
+					{ frameIndex: 0, frameState: [] },
+					{ frameIndex: 0, frameState: [] },
+				],
+			};
 			class Universe {
 				#td = new TextDecoder();
-				#prev = null;
-				frames = [];
 
 				constructor() {
 					this.universe = document.getElementById('universe');
-					this.spaces = ['zero', 'fx', 'one'].map((id) => ({
-						el: document.getElementById(id),
-						frameIndex: 0,
-					}));
+					this.els = ['zero', 'fx', 'one'].map((id) =>
+						document.getElementById(id),
+					);
 					this.panel = Object.assign(document.createElement('div'), {
 						id: 'panel',
 						hidden: true,
@@ -175,57 +184,50 @@
 					document.body.appendChild(this.panel);
 					this.exec(this.panel);
 					document.body.removeChild(this.panel);
-					this.frames = rest.map((e) => ({
+					state.frames = rest.map((e) => ({
 						html: this.#td.decode(e.data),
 					}));
-					for (const s of this.spaces)
-						s.state = this.frames.map(() => new Map());
-					if (this.frames.length) this.render();
+					for (const s of state.spaces)
+						s.frameState = state.frames.map(() => ({}));
+					if (state.frames.length) this.render();
 				}
 
-				get focused() {
-					return +this.universe.dataset.focused;
-				}
 				set focused(v) {
 					let i = v % 3;
-					while (this.spaces[i].el.hidden) i = (i + 1) % 3;
+					while (this.els[i].hidden) i = (i + 1) % 3;
+					state.focused = i;
 					this.universe.dataset.focused = i;
-					this.spaces.forEach((s, j) => {
-						s.el.inert = !s.el.hidden && j !== i;
+					this.els.forEach((el, j) => {
+						el.inert = !el.hidden && j !== i;
 					});
 				}
-				get layout() {
-					return +this.universe.dataset.layout;
-				}
-				get variant() {
-					return +this.universe.dataset.variant;
-				}
-				get variants() {
-					return [1, 2, 4][this.layout];
-				}
-				get view() {
-					return [this.layout, this.variant];
-				}
+
 				set view([l, v]) {
-					this.#prev = this.view;
+					state.prev = [state.layout, state.variant];
+					state.layout = l;
+					state.variant = v;
 					this.universe.dataset.layout = l;
 					this.universe.dataset.variant = v;
 				}
+
 				get space() {
-					return this.spaces[this.focused];
+					return state.spaces[state.focused];
 				}
+
 				get frame() {
-					return this.frames[this.space.frameIndex];
+					return state.frames[this.space.frameIndex];
 				}
-				get state() {
-					return this.space.state[this.space.frameIndex];
+
+				get frameState() {
+					return this.space.frameState[this.space.frameIndex];
 				}
 
 				read() {
-					return Object.fromEntries(this.state);
+					return { ...this.space.frameState[this.space.frameIndex] };
 				}
+
 				write(k, v) {
-					this.state.set(k, v);
+					this.space.frameState[this.space.frameIndex][k] = v;
 				}
 
 				key(k, down, { up = null, desc = '' } = {}) {
@@ -237,32 +239,32 @@
 						state: false,
 					};
 				}
+
 				bind(k, down, opts) {
 					(this.frame.binds ??= []).push(this.key(k, down, opts));
 				}
 
 				sync() {
-					this.spaces.forEach((s, i) => {
-						s.el.hidden =
-							this.layout === 0
-								? i !== this.focused
-								: i > this.layout;
+					this.els.forEach((el, i) => {
+						el.hidden =
+							state.layout === 0
+								? i !== state.focused
+								: i > state.layout;
 					});
-					this.focused = this.focused;
-					const focused = this.space;
-					this.spaces
-						.filter((s) => !s.el.hidden && s !== focused)
-						.forEach((s) => this.render(s));
-					this.render(focused);
+					this.focused = state.focused;
+					this.els.forEach((_, i) => {
+						if (!this.els[i].hidden) this.render(i);
+					});
 				}
 
-				render(s = this.space) {
-					const f = this.frames[s.frameIndex];
+				render(i = state.focused) {
+					const s = state.spaces[i];
+					const f = state.frames[s.frameIndex];
 					f.binds = [];
-					s.el.innerHTML = f.html;
-					this.exec(s.el);
-					if (!this.panel.hidden && s === this.space)
-						this.keyboard.mount(this.space.el);
+					this.els[i].innerHTML = f.html;
+					this.exec(this.els[i]);
+					if (!this.panel.hidden && i === state.focused)
+						this.keyboard.mount(this.els[i]);
 				}
 
 				exec(el) {
@@ -275,16 +277,16 @@
 					}
 				}
 
-				cycle(layout = this.layout) {
-					if (layout !== this.layout) {
+				cycle(layout = state.layout) {
+					if (layout !== state.layout) {
 						this.view = [layout, 0];
 					} else if (layout === 0) {
-						if (!this.#prev) return;
-						this.view = this.#prev;
+						if (!state.prev) return;
+						this.view = state.prev;
 					} else {
 						this.view = [
-							this.layout,
-							(this.variant + 1) % this.variants,
+							state.layout,
+							(state.variant + 1) % [1, 2, 4][state.layout],
 						];
 						return this.render();
 					}
@@ -292,23 +294,25 @@
 				}
 
 				focus() {
-					const prev = this.focused;
+					const prev = state.focused;
 					this.focused = prev + 1;
-					if (this.focused !== prev) this.render();
+					if (state.focused !== prev) this.render();
 				}
 
 				nav(dir) {
 					this.space.frameIndex =
-						(this.space.frameIndex + dir + this.frames.length) %
-						this.frames.length;
+						(this.space.frameIndex + dir + state.frames.length) %
+						state.frames.length;
 					this.render();
 				}
 
 				toggle() {
 					this.panel.hidden = !this.panel.hidden;
-					if (!this.panel.hidden) this.keyboard.mount(this.space.el);
+					if (!this.panel.hidden)
+						this.keyboard.mount(this.els[state.focused]);
 				}
 			}
+
 			document.addEventListener('DOMContentLoaded', () => {
 				window.pathless = new Universe();
 			});

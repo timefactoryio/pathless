@@ -136,7 +136,7 @@
 			}
 
 			update() {
-				const { layout, variant, focused } = this.#universe;
+				const { layout, variant, focused } = state;
 				this.#descs.slice(0, 3).forEach((desc, i) => {
 					const next =
 						i === layout ? (variant + 1) % [1, 2, 4][i] : 0;
