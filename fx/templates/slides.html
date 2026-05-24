@@ -17,38 +17,45 @@
 <img src="" alt="" />
 
 <script>
-	(function () {
+	{
 		const prefix = '{{.PREFIX}}';
-		let slides = [];
-		let index = pathless.read()[prefix] || 0;
+		const url = '{{.URL}}';
 
-		function show(i) {
-			if (!slides.length) return;
-			const img = document.querySelector('.slides img');
-			if (!img) return;
-			index = ((i % slides.length) + slides.length) % slides.length;
-			pathless.write(prefix, index);
-			img.src = slides[index].url;
-			img.alt = slides[index].name;
+		class Slides {
+			constructor() {
+				this.img = document.querySelector('.slides img');
+				this.entries = [];
+				this.index = pathless.read()[prefix] || 0;
+
+				pathless.bind('a', () => this.show(this.index - 1), {
+					desc: '←',
+				});
+				pathless.bind('d', () => this.show(this.index + 1), {
+					desc: '→',
+				});
+
+				pathless.source(url).then((entries) => {
+					for (const e of entries)
+						if (!e.url)
+							e.url = URL.createObjectURL(
+								new Blob([e.data], { type: e.type }),
+							);
+					this.entries = entries;
+					if (this.entries.length) this.show(this.index);
+				});
+			}
+
+			show(i) {
+				if (!this.entries.length) return;
+				this.index =
+					((i % this.entries.length) + this.entries.length) %
+					this.entries.length;
+				pathless.write(prefix, this.index);
+				this.img.src = this.entries[this.index].url;
+				this.img.alt = this.entries[this.index].name;
+			}
 		}
 
-		fetch(prefix)
-			.then((r) => r.arrayBuffer())
-			.then((buf) => pathless.wire(buf))
-			.then((entries) => {
-				for (const e of entries) {
-					if (!e.url)
-						e.url = URL.createObjectURL(
-							new Blob([e.data], { type: e.type }),
-						);
-				}
-				slides = entries;
-				if (slides.length) show(index);
-			});
-
-		pathless.register(pathless.space.frameIndex, [
-			pathless.key('a', () => show(index - 1), { desc: '←' }),
-			pathless.key('d', () => show(index + 1), { desc: '→' }),
-		]);
-	})();
+		new Slides();
+	}
 </script>

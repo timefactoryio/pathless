@@ -59,7 +59,7 @@ func (o *One) BuildHello() {
 	for _, b := range o.Frames() {
 		values = append(values, &fx.Value{Data: b})
 	}
-	o.Hello = fx.Compress(fx.Encode(values))
+	o.Hello = fx.Compress(fx.Encode(values, false))
 }
 
 func (o *One) Serve() {

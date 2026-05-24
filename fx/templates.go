@@ -11,23 +11,12 @@ import (
 )
 
 func (fx *Fx) Home(logo, heading string) {
-	logoEmbed, err := fx.ToBytes(logo)
-	if err != nil {
-		return
-	}
-
-	tmpl := template.Must(template.New("home").Parse(fx.HomeTemplate))
-
-	var buf strings.Builder
-	if err := tmpl.Execute(&buf, map[string]template.HTML{
-		"LOGO":    template.HTML(string(logoEmbed)),
-		"HEADING": template.HTML(heading),
-	}); err != nil {
-		return
-	}
-
-	result := One(template.HTML(buf.String()))
-	fx.Build("", &result)
+	tmpl := One(template.HTML(fx.HomeTemplate))
+	logoDiv := fx.Block("div", Attr{"class": "logo"}, fx.HTML(string(fx.Logo(logo))))
+	h1 := fx.Elem("h1", heading)
+	kbd := fx.Elem("kbd", "Z")
+	button := fx.Block("button", nil, fx.HTML("Press"), kbd)
+	fx.Build("home", &tmpl, logoDiv, h1, button)
 }
 
 func (fx *Fx) Text(path string) {
@@ -54,17 +43,18 @@ func (fx *Fx) Text(path string) {
 
 func (fx *Fx) Slides(dir string) {
 	fx.Load(dir)
-	prefix := fx.APIURL + "/" + filepath.Base(dir)
+	base := filepath.Base(dir)
 	tmpl, err := template.New("slides").Parse(fx.SlidesTemplate)
 	if err != nil {
 		return
 	}
-
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, map[string]string{"PREFIX": prefix}); err != nil {
+	if err := tmpl.Execute(&buf, map[string]string{
+		"PREFIX": base,
+		"URL":    fx.APIURL + "/" + base,
+	}); err != nil {
 		return
 	}
-
 	result := One(template.HTML(buf.String()))
 	fx.Build("slides", &result)
 }
@@ -90,18 +80,21 @@ func (fx *Fx) Logo(path string) template.HTML {
 		if b, err := fx.ToBytes(path); err == nil {
 			return template.HTML(b)
 		}
-		return ""
 	}
 
-	if !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") {
-		fx.Load(path)
-		name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-		path = fx.APIURL + "/" + name
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		alt := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		return template.HTML(fmt.Sprintf(`<img src="%s" alt="%s">`,
+			html.EscapeString(path),
+			html.EscapeString(alt),
+		))
 	}
 
-	alt := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	return template.HTML(fmt.Sprintf(`<img src="%s" alt="%s">`,
-		html.EscapeString(path),
+	fx.Load(path)
+	base := filepath.Base(path)
+	alt := strings.TrimSuffix(base, filepath.Ext(base))
+	return template.HTML(fmt.Sprintf(`<img data-src="%s" alt="%s">`,
+		html.EscapeString(fx.APIURL+"/"+base),
 		html.EscapeString(alt),
 	))
 }

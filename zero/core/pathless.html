@@ -125,6 +125,8 @@
 					{ frameIndex: 0, frameState: [] },
 				],
 			};
+			const cache = new Map();
+
 			class Universe {
 				#td = new TextDecoder();
 
@@ -167,13 +169,36 @@
 
 				wire(buf) {
 					const bytes = new Uint8Array(buf);
-					let pos = 4 + new DataView(buf).getUint32(0);
-					return JSON.parse(
-						this.#td.decode(bytes.subarray(4, pos)),
-					).map((e) => ({
-						...e,
-						data: bytes.subarray(pos, (pos += e.size)),
-					}));
+					const view = new DataView(buf);
+					let pos = 1;
+					if (bytes[0] === 0x00) {
+						pos += 4 + view.getUint32(1);
+						return JSON.parse(
+							this.#td.decode(bytes.subarray(5, pos)),
+						).map((e) => ({
+							...e,
+							data: bytes.subarray(pos, (pos += e.size)),
+						}));
+					}
+					const result = [];
+					while (pos < bytes.length) {
+						const size = view.getUint32(pos);
+						result.push({
+							data: bytes.subarray((pos += 4), (pos += size)),
+						});
+					}
+					return result;
+				}
+
+				source(url) {
+					if (!cache.has(url))
+						cache.set(
+							url,
+							fetch(url)
+								.then((r) => r.arrayBuffer())
+								.then((buf) => this.wire(buf)),
+						);
+					return cache.get(url);
 				}
 
 				async init() {

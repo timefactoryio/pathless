@@ -53,26 +53,48 @@
 		margin-left: 0.3em;
 	}
 </style>
-<div class="home">
-	<div class="logo">{{.LOGO}}</div>
-	<h1>{{.HEADING}}</h1>
-	<button>Press<kbd>Z</kbd></button>
-</div>
 <script>
-	(() => {
-		const button = document.querySelector('.home button');
-		function updateVisibility() {
-			const u = window.pathless;
-			const shouldShow =
-				u?.panel?.hidden === true &&
-				u?.space.frameIndex === 0 &&
-				u?.layout === 0;
-			button.classList.toggle('show', shouldShow);
+	{
+		class Home {
+			constructor() {
+				this.button = document.querySelector('.home button');
+				this.button.addEventListener('click', () => {
+					pathless.toggle();
+					this.update();
+				});
+
+				const logoImg = document.querySelector(
+					'.home .logo img[data-src]',
+				);
+				if (logoImg) {
+					const src = logoImg.dataset.src;
+					const blobKey = src + '#blob';
+					if (cache.has(blobKey)) {
+						logoImg.src = cache.get(blobKey);
+					} else {
+						pathless.source(src).then(([entry]) => {
+							const url = URL.createObjectURL(
+								new Blob([entry.data], { type: entry.type }),
+							);
+							cache.set(blobKey, url);
+							logoImg.src = url;
+						});
+					}
+				}
+
+				this.update();
+			}
+
+			update() {
+				this.button.classList.toggle(
+					'show',
+					pathless.panel.hidden &&
+						pathless.space.frameIndex === 0 &&
+						state.layout === 0,
+				);
+			}
 		}
-		button.addEventListener('click', () => {
-			window.pathless?.toggle();
-			updateVisibility();
-		});
-		updateVisibility();
-	})();
+
+		new Home();
+	}
 </script>
