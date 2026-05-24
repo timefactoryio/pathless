@@ -1,7 +1,3 @@
-I'm in Ask mode and can't edit files directly. Here's the complete updated ai.md to apply:
-
----
-
 # pathless — AI Builder Reference
 
 ## What is pathless?
