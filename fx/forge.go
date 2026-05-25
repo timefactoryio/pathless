@@ -20,7 +20,7 @@ var (
 func NewForge() Forge {
 	return &forge{
 		frames: []*One{},
-		md:     markdown.New(),
+		md:     markdown.New("github-dark"),
 	}
 }
 

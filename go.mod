@@ -2,7 +2,7 @@ module github.com/timefactoryio/pathless
 
 go 1.26.2
 
-require github.com/timefactoryio/markdown v0.0.1
+require github.com/timefactoryio/markdown v0.0.3
 
 require (
 	github.com/alecthomas/chroma/v2 v2.24.1 // indirect
