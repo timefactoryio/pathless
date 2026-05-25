@@ -26,7 +26,7 @@ func (fx *Fx) Text(path string) {
 	}
 
 	var buf bytes.Buffer
-	if err := (*fx.Markdown()).Convert(content, &buf); err != nil {
+	if err := fx.Markdown().Convert(content, &buf, false); err != nil {
 		return
 	}
 

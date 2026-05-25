@@ -9,6 +9,6 @@ func main() {
 	o := one.NewOne("")
 
 	o.Home("https://zero.s3.timefactory.io/timefactory.svg", "the perpetual motion machine")
-	o.Text("https://raw.githubusercontent.com/timefactoryio/pathless/refs/heads/main/README.md")
+	o.Text("https://raw.githubusercontent.com/timefactoryio/pathless/refs/heads/main/mechanics.md")
 	o.Serve()
 }

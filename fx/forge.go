@@ -7,11 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	math "github.com/litao91/goldmark-mathjax"
-	"github.com/yuin/goldmark"
-	"github.com/yuin/goldmark/extension"
-	"github.com/yuin/goldmark/parser"
-	h "github.com/yuin/goldmark/renderer/html"
+	"github.com/timefactoryio/markdown"
 )
 
 type One template.HTML
@@ -22,35 +18,22 @@ var (
 )
 
 func NewForge() Forge {
-	md := goldmark.New(
-		goldmark.WithExtensions(extension.GFM, math.MathJax),
-		goldmark.WithParserOptions(
-			parser.WithAutoHeadingID(),
-			parser.WithAttribute(),
-			parser.WithBlockParsers(),
-			parser.WithInlineParsers(),
-		),
-		goldmark.WithRendererOptions(
-			h.WithHardWraps(),
-			h.WithXHTML(),
-		),
-	)
 	return &forge{
 		frames: []*One{},
-		Md:     &md,
+		md:     markdown.New(),
 	}
 }
 
 type forge struct {
 	frames []*One
-	Md     *goldmark.Markdown
+	md     *markdown.Markdown
 }
 
 type Forge interface {
 	Build(class string, elements ...*One)
 	Builder(class string, elements ...*One) *One
 	Frames(frame ...*One) [][]byte
-	Markdown() *goldmark.Markdown
+	Markdown() *markdown.Markdown
 	HTML(raw string) *One
 	JS(js string) One
 	CSS(css string) One
@@ -95,26 +78,43 @@ func (f *forge) Frames(frame ...*One) [][]byte {
 	return out
 }
 
+const (
+	openStyle   = "<style>"
+	closeStyle  = "</style>"
+	openScript  = "<script>"
+	closeScript = "</script>"
+	openBlock   = "<script>{"
+	closeBlock  = "}</script>"
+)
+
 func (f *forge) consolidateAssets(s string) string {
-	if styleMatches := style.FindAllStringSubmatch(s, -1); len(styleMatches) > 1 {
+	if styles := style.FindAllStringSubmatch(s, -1); len(styles) > 1 {
 		var sb strings.Builder
-		for _, m := range styleMatches {
+		for _, m := range styles {
 			sb.WriteString(m[1])
 			sb.WriteByte('\n')
 		}
-		s = fmt.Sprintf("<style>%s</style>%s", sb.String(), style.ReplaceAllString(s, ""))
+		s = openStyle + sb.String() + closeStyle + style.ReplaceAllString(s, "")
 	}
-	if scriptMatches := script.FindAllStringSubmatch(s, -1); len(scriptMatches) > 1 {
-		var sb strings.Builder
-		for _, m := range scriptMatches {
-			sb.WriteString(m[1])
-			sb.WriteByte('\n')
+
+	var scripts strings.Builder
+	s = script.ReplaceAllStringFunc(s, func(m string) string {
+		content := m[len(openScript) : len(m)-len(closeScript)]
+		if t := strings.TrimSpace(content); !strings.HasPrefix(t, "{") {
+			scripts.WriteByte('{')
+			scripts.WriteString(content)
+			scripts.WriteString("}\n")
+		} else {
+			scripts.WriteString(content)
+			scripts.WriteByte('\n')
 		}
-		s = fmt.Sprintf("%s<script>%s</script>", script.ReplaceAllString(s, ""), sb.String())
+		return ""
+	})
+	if scripts.Len() > 0 {
+		s += openBlock + scripts.String() + closeBlock
 	}
 	return s
 }
-
 func renderAttrs(a Attr) string {
 	if len(a) == 0 {
 		return ""
@@ -127,8 +127,8 @@ func renderAttrs(a Attr) string {
 }
 
 // Markdown returns the configured goldmark instance for rendering markdown to HTML.
-func (f *forge) Markdown() *goldmark.Markdown {
-	return f.Md
+func (f *forge) Markdown() *markdown.Markdown {
+	return f.md
 }
 
 // HTML wraps a raw HTML string as a trusted One value without escaping.

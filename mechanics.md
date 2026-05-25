@@ -1,4 +1,28 @@
-# pathless — AI Builder Reference
+# pathless — Mechanics
+
+## Table of Contents
+
+- [pathless — Mechanics](#pathless--mechanics)
+  - [Table of Contents](#table-of-contents)
+  - [What is pathless?](#what-is-pathless)
+  - [Server Architecture](#server-architecture)
+  - [Client Runtime](#client-runtime)
+    - [`state`](#state)
+    - [`cache`](#cache)
+    - [`window.pathless` API](#windowpathless-api)
+  - [Frame Lifecycle](#frame-lifecycle)
+  - [Canonical Frame Pattern](#canonical-frame-pattern)
+    - [Rules](#rules)
+  - [CSS — The Space Handles Sizing](#css--the-space-handles-sizing)
+  - [Wire Protocol](#wire-protocol)
+    - [Two formats, one `wire()` method](#two-formats-one-wire-method)
+    - [Hello bundle structure (`0x01`)](#hello-bundle-structure-0x01)
+  - [Frame-Specific Backends](#frame-specific-backends)
+  - [Assets and Blob URLs](#assets-and-blob-urls)
+  - [Go Package Reference](#go-package-reference)
+    - [Two asset registries](#two-asset-registries)
+
+---
 
 ## What is pathless?
 
@@ -19,7 +43,7 @@ pathless runs two HTTP servers:
 
 ---
 
-## The Universe Shell
+## Client Runtime
 
 `pathless.html` is served once at page load and never changes. It provides:
 
@@ -258,7 +282,7 @@ No changes to the pathless repo are needed in either case. The backend can aggre
 
 ---
 
-## Assets — `pathless.source()` and Blob URLs
+## Assets and Blob URLs
 
 `pathless.source(url)` returns a Promise of decoded entries and caches the Promise by URL. Calling it multiple times with the same URL makes only one fetch.
 
@@ -282,7 +306,7 @@ The `#blob` suffix prevents key collision between the wire Promise and the blob 
 
 ---
 
-## Go Server Structure
+## Go Package Reference
 
 ```
 fx/

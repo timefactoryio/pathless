@@ -8,6 +8,7 @@
 		padding: max(2vw, 1.5em);
 		max-width: min(70vw, 100%);
 		color: #f3f3f3;
+		scroll-behavior: auto;
 	}
 	a {
 		color: inherit;
@@ -133,56 +134,56 @@
 	}
 </style>
 <script>
-	(function () {
-		const f = space().el.querySelector('.text');
-		const c = f.children;
+	{
+		class Text {
+			constructor() {
+				this.el = document.querySelector('.text');
 
-		function snap() {
-			const t = f.scrollTop;
-			for (let i = 0; i < c.length; i++) {
-				const o = c[i].offsetTop,
-					h = c[i].offsetHeight;
-				if (o + h > t) return { i, r: (t - o) / (h || 1) };
+				const s = pathless.read();
+				requestAnimationFrame(() => {
+					if (s.scroll?.i != null) {
+						const child = this.el.children[s.scroll.i];
+						if (child)
+							this.el.scrollTop =
+								child.offsetTop +
+								s.scroll.r * child.offsetHeight;
+					}
+				});
+
+				const up = this.hold(-8);
+				const dn = this.hold(8);
+				pathless.bind('w', up.down, { up: up.up, desc: '↑' });
+				pathless.bind('s', dn.down, { up: dn.up, desc: '↓' });
 			}
-			return { i: 0, r: 0 };
+
+			snap() {
+				const t = this.el.scrollTop;
+				const c = this.el.children;
+				for (let i = 0; i < c.length; i++) {
+					const h = c[i].offsetHeight;
+					if (c[i].offsetTop + h > t)
+						return { i, r: (t - c[i].offsetTop) / (h || 1) };
+				}
+				return { i: 0, r: 0 };
+			}
+
+			hold(v) {
+				let id;
+				return {
+					down: () => {
+						id = setInterval(
+							() => this.el.scrollBy({ top: v }),
+							16,
+						);
+					},
+					up: () => {
+						clearInterval(id);
+						pathless.write('scroll', this.snap());
+					},
+				};
+			}
 		}
 
-		requestAnimationFrame(() => {
-			const s = read().scroll;
-			if (s?.i != null) {
-				const el = c[s.i];
-				if (el) f.scrollTop = el.offsetTop + s.r * el.offsetHeight;
-			}
-		});
-
-		f.addEventListener('scroll', () => write('scroll', snap()), {
-			passive: true,
-		});
-
-		function hold(v) {
-			let id, prev;
-			function step(now) {
-				if (prev) f.scrollBy({ top: (now - prev) * v });
-				prev = now;
-				id = requestAnimationFrame(step);
-			}
-			return {
-				down: () => {
-					prev = 0;
-					id = requestAnimationFrame(step);
-				},
-				up: () => {
-					cancelAnimationFrame(id);
-					prev = 0;
-				},
-			};
-		}
-
-		const w = hold(-1.5),
-			s = hold(1.5);
-		register(space().frameIndex, [
-			key('w', w.down, { up: w.up, desc: '↑' }),
-			key('s', s.down, { up: s.up, desc: '↓' }),
-		]);
-	})();
+		new Text();
+	}
 </script>
