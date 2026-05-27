@@ -19,14 +19,12 @@
 				user-select: none;
 				-webkit-user-select: none;
 				scrollbar-width: none;
-				touch-action: manipulation;
 			}
 			[hidden] {
 				display: none !important;
 			}
 			body {
 				height: 100dvh;
-				width: 100dvw;
 				overflow: hidden;
 				font-family: sans-serif;
 				background: #000;
@@ -34,25 +32,11 @@
 				display: flex;
 				border: var(--b);
 				border-radius: 5px;
-				padding-bottom: env(safe-area-inset);
+				touch-action: pan-y;
 			}
 			#universe {
 				flex: 1;
 				display: flex;
-				position: relative;
-			}
-			.tap {
-				position: absolute;
-				top: 0;
-				bottom: 0;
-				width: 20%;
-				z-index: 10;
-			}
-			.tap-left {
-				left: 0;
-			}
-			.tap-right {
-				right: 0;
 			}
 			:is(#zero, #fx, #one) {
 				flex: 1;
@@ -148,9 +132,6 @@
 
 			class Universe {
 				#td = new TextDecoder();
-				#tx = 0;
-				#ty = 0;
-
 				constructor() {
 					this.universe = document.getElementById('universe');
 					this.els = ['zero', 'fx', 'one'].map((id) =>
@@ -160,57 +141,8 @@
 						id: 'panel',
 						hidden: true,
 					});
-					this.keys = [
-						this.key('1', () => this.cycle(0)),
-						this.key('2', () => this.cycle(1)),
-						this.key('3', () => this.cycle(2)),
-						this.key(
-							'tab',
-							(e) => (e.preventDefault(), this.focus()),
-						),
-						this.key('q', () => this.nav(-1), { desc: 'back' }),
-						this.key('e', () => this.nav(1), { desc: 'next' }),
-						this.key('z', () => this.toggle()),
-					];
 					this.init();
-					window.addEventListener('keydown', this.handle);
-					window.addEventListener('keyup', this.handle);
-
-					this.tapLeft = Object.assign(
-						document.createElement('div'),
-						{ className: 'tap tap-left' },
-					);
-					this.tapRight = Object.assign(
-						document.createElement('div'),
-						{ className: 'tap tap-right' },
-					);
-					this.tapLeft.addEventListener('click', () =>
-						this.frame?.tap?.left?.(),
-					);
-					this.tapRight.addEventListener('click', () =>
-						this.frame?.tap?.right?.(),
-					);
-
-					this.universe.addEventListener('touchstart', this.swipe, {
-						passive: true,
-					});
-					this.universe.addEventListener('touchend', this.swipe, {
-						passive: true,
-					});
-					this.universe.appendChild(this.tapLeft);
-					this.universe.appendChild(this.tapRight);
 				}
-
-				handle = (e) => {
-					const key = e.key.toLowerCase();
-					const o =
-						this.keys.find((o) => o.key === key) ??
-						this.frame?.binds?.find((o) => o.key === key);
-					if (!o) return;
-					o.state = e.type === 'keydown';
-					this.keyboard?.reflect(o);
-					(o.state ? o.down : o.up)?.(e);
-				};
 
 				wire(buf) {
 					const bytes = new Uint8Array(buf);
@@ -247,13 +179,21 @@
 				}
 
 				async init() {
-					const [kb, ...rest] = this.wire(
+					const [input, kb, ...rest] = this.wire(
 						await fetch(window.apiUrl).then((r) => r.arrayBuffer()),
 					);
+
+					const inputEl = document.createElement('div');
+					inputEl.innerHTML = this.#td.decode(input.data);
+					document.body.appendChild(inputEl);
+					this.exec(inputEl);
+					document.body.removeChild(inputEl);
+
 					this.panel.innerHTML = this.#td.decode(kb.data);
 					document.body.appendChild(this.panel);
 					this.exec(this.panel);
 					document.body.removeChild(this.panel);
+
 					state.frames = rest.map((e) => ({
 						html: this.#td.decode(e.data),
 					}));
@@ -288,10 +228,6 @@
 					return state.frames[this.space.frameIndex];
 				}
 
-				get frameState() {
-					return this.space.frameState[this.space.frameIndex];
-				}
-
 				read() {
 					return { ...this.space.frameState[this.space.frameIndex] };
 				}
@@ -300,18 +236,14 @@
 					this.space.frameState[this.space.frameIndex][k] = v;
 				}
 
-				key(k, down, { up = null, desc = '' } = {}) {
-					return {
-						key: k.toLowerCase(),
+				bind(key, gesture, down, up = null) {
+					this.input.register({
+						key,
+						gesture,
 						down,
 						up,
-						desc,
-						state: false,
-					};
-				}
-
-				bind(k, down, opts) {
-					(this.frame.binds ??= []).push(this.key(k, down, opts));
+						space: state.focused,
+					});
 				}
 
 				sync() {
@@ -330,8 +262,7 @@
 				render(i = state.focused) {
 					const s = state.spaces[i];
 					const f = state.frames[s.frameIndex];
-					f.binds = [];
-					f.tap = null;
+					this.input?.clear(i);
 					this.els[i].innerHTML = f.html;
 					this.exec(this.els[i]);
 					if (!this.panel.hidden && i === state.focused)
@@ -382,20 +313,6 @@
 					if (!this.panel.hidden)
 						this.keyboard.mount(this.els[state.focused]);
 				}
-				tap(left, right) {
-					this.frame.tap = { left, right };
-				}
-				swipe = (e) => {
-					if (e.type === 'touchstart') {
-						this.#tx = e.changedTouches[0].clientX;
-						this.#ty = e.changedTouches[0].clientY;
-						return;
-					}
-					const dx = e.changedTouches[0].clientX - this.#tx;
-					const dy = e.changedTouches[0].clientY - this.#ty;
-					if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40)
-						this.nav(dx < 0 ? 1 : -1);
-				};
 			}
 
 			document.addEventListener('DOMContentLoaded', () => {

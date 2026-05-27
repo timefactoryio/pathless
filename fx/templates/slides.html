@@ -14,7 +14,9 @@
 	}
 </style>
 
-<img src="" alt="" />
+<div class="slides">
+	<img src="" alt="" />
+</div>
 
 <script>
 	{
@@ -27,16 +29,18 @@
 				this.entries = [];
 				this.index = pathless.read()[prefix] || 0;
 
-				pathless.bind('a', () => this.show(this.index - 1), {
-					desc: '←',
+				pathless.input.register({
+					key: 'a',
+					gesture: 'tapLeft',
+					down: () => this.show(this.index - 1),
+					space: state.focused,
 				});
-				pathless.bind('d', () => this.show(this.index + 1), {
-					desc: '→',
+				pathless.input.register({
+					key: 'd',
+					gesture: 'tapRight',
+					down: () => this.show(this.index + 1),
+					space: state.focused,
 				});
-				pathless.tap(
-					() => this.show(this.index - 1),
-					() => this.show(this.index + 1),
-				);
 
 				pathless.source(url).then((entries) => {
 					for (const e of entries)

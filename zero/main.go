@@ -15,10 +15,12 @@ var pathlessHtml string
 //go:embed core/keyboard.html
 var keyboardHtml []byte
 
+//go:embed core/input.html
+var inputHtml []byte
+
 type Zero struct {
 	One      []byte
 	Input    []byte
-	Layout   []byte
 	Keyboard []byte
 	APIURL   string
 }
@@ -30,6 +32,7 @@ func NewZero(apiURL string) *Zero {
 	z := &Zero{
 		APIURL:   apiURL,
 		Keyboard: keyboardHtml,
+		Input:    inputHtml,
 	}
 	tmpl, err := template.New("pathless").Parse(pathlessHtml)
 	if err != nil {

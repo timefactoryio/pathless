@@ -1,29 +1,5 @@
 # pathless — Mechanics
 
-## Table of Contents
-
-- [pathless — Mechanics](#pathless--mechanics)
-  - [Table of Contents](#table-of-contents)
-  - [What is pathless?](#what-is-pathless)
-  - [Server Architecture](#server-architecture)
-  - [Client Runtime](#client-runtime)
-    - [`state`](#state)
-    - [`cache`](#cache)
-    - [`window.pathless` API](#windowpathless-api)
-  - [Frame Lifecycle](#frame-lifecycle)
-  - [Canonical Frame Pattern](#canonical-frame-pattern)
-    - [Rules](#rules)
-  - [CSS — The Space Handles Sizing](#css--the-space-handles-sizing)
-  - [Wire Protocol](#wire-protocol)
-    - [Two formats, one `wire()` method](#two-formats-one-wire-method)
-    - [Hello bundle structure (`0x01`)](#hello-bundle-structure-0x01)
-  - [Frame-Specific Backends](#frame-specific-backends)
-  - [Assets and Blob URLs](#assets-and-blob-urls)
-  - [Go Package Reference](#go-package-reference)
-    - [Two asset registries](#two-asset-registries)
-
----
-
 ## What is pathless?
 
 pathless is a Go + HTML framework for building keyboard-driven, fullscreen applications delivered as a single compressed binary payload over HTTP. There is no JavaScript build step, no bundler, no framework runtime. The server sends gzipped binary; the browser decodes and renders it.

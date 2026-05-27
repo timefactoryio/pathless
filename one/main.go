@@ -83,6 +83,7 @@ func (o *One) HandlePathless(w http.ResponseWriter, r *http.Request) {
 
 func (o *One) BuildHello() {
 	values := []*fx.Value{
+		{Data: o.Input},
 		{Data: o.Keyboard},
 	}
 	for _, b := range o.Frames() {

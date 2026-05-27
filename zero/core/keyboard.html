@@ -69,90 +69,128 @@
 
 <div class="keyboard">
 	<script>
-		class Keyboard {
-			static #svgs = (() => {
-				const el = (inner, fill) =>
-					`<svg viewBox="0 0 880 596"><rect width="860" height="576" x="10" y="10" fill="${fill || 'none'}" stroke="#00f" stroke-width="30" rx="16"/>${inner}</svg>`;
-				const div = (...d) =>
-					d.length
-						? `<path stroke="#00f" stroke-width="30" d="${d.join('')}"/>`
-						: '';
-				const pane = (x, y, w, h) =>
-					`<rect width="${w}" height="${h}" x="${x}" y="${y}" fill="#00f"/>`;
-				const v = (...d) => el(div(...d));
-				const f = (p, ...d) => el(pane(...p) + div(...d));
-				const full = () => el('', '#00f');
-				const V = 'M440 10v576',
-					H = 'M10 298h860',
-					HR = 'M440 298h430',
-					HL = 'M10 298h430',
-					VB = 'M440 298v288',
-					VT = 'M440 10v288';
-				const LF = [25, 25, 415, 546],
-					RF = [455, 25, 415, 546],
-					TF = [25, 25, 830, 258],
-					BF = [25, 313, 830, 258];
-				const TL = [25, 25, 415, 258],
-					TR = [455, 25, 415, 258],
-					BL = [25, 313, 415, 258],
-					BR = [455, 313, 415, 258];
-				return [
-					[[v(), full(), full(), full()]],
-					[
-						[v(V), f(LF, V), f(RF, V), f(RF, V)],
-						[v(H), f(TF, H), f(BF, H), f(BF, H)],
-					],
-					[
-						[v(V, HR), f(LF, V, HR), f(TR, V, HR), f(BR, V, HR)],
-						[v(H, VB), f(TF, H, VB), f(BR, H, VB), f(BL, H, VB)],
-						[v(V, HL), f(RF, V, HL), f(BL, V, HL), f(TL, V, HL)],
-						[v(H, VT), f(BF, H, VT), f(TL, H, VT), f(TR, H, VT)],
-					],
-				];
-			})();
+		{
+			const KEYS = [
+				{ key: '1' },
+				{ key: '2' },
+				{ key: '3' },
+				{ key: 'tab' },
+				{ key: 'q', desc: 'back' },
+				{ key: 'e', desc: 'next' },
+				{ key: 'z' },
+			];
 
-			#universe;
-			#descs;
+			class Keyboard {
+				static #svgs = (() => {
+					const el = (inner, fill) =>
+						`<svg viewBox="0 0 880 596"><rect width="860" height="576" x="10" y="10" fill="${fill || 'none'}" stroke="#00f" stroke-width="30" rx="16"/>${inner}</svg>`;
+					const div = (...d) =>
+						d.length
+							? `<path stroke="#00f" stroke-width="30" d="${d.join('')}"/>`
+							: '';
+					const pane = (x, y, w, h) =>
+						`<rect width="${w}" height="${h}" x="${x}" y="${y}" fill="#00f"/>`;
+					const v = (...d) => el(div(...d));
+					const f = (p, ...d) => el(pane(...p) + div(...d));
+					const V = 'M440 10v576',
+						H = 'M10 298h860',
+						HR = 'M440 298h430',
+						HL = 'M10 298h430',
+						VB = 'M440 298v288',
+						VT = 'M440 10v288';
+					const LF = [25, 25, 415, 546],
+						RF = [455, 25, 415, 546],
+						TF = [25, 25, 830, 258],
+						BF = [25, 313, 830, 258];
+					const TL = [25, 25, 415, 258],
+						TR = [455, 25, 415, 258],
+						BL = [25, 313, 415, 258],
+						BR = [455, 313, 415, 258];
+					return [
+						[[v(), full(), full(), full()]],
+						[
+							[v(V), f(LF, V), f(RF, V), f(RF, V)],
+							[v(H), f(TF, H), f(BF, H), f(BF, H)],
+						],
+						[
+							[
+								v(V, HR),
+								f(LF, V, HR),
+								f(TR, V, HR),
+								f(BR, V, HR),
+							],
+							[
+								v(H, VB),
+								f(TF, H, VB),
+								f(BR, H, VB),
+								f(BL, H, VB),
+							],
+							[
+								v(V, HL),
+								f(RF, V, HL),
+								f(BL, V, HL),
+								f(TL, V, HL),
+							],
+							[
+								v(H, VT),
+								f(BF, H, VT),
+								f(TL, H, VT),
+								f(TR, H, VT),
+							],
+						],
+					];
 
-			constructor(panel, universe) {
-				this.el = panel;
-				this.#universe = universe;
-				const kb = panel.querySelector('.keyboard');
-				universe.keys.forEach((k) => {
-					const el = kb.appendChild(document.createElement('div'));
-					el.className = 'key';
-					el.dataset.key = k.key;
-					el.innerHTML = `<div>${k.key}</div><div>${k.desc}</div>`;
-					k.view = el;
-				});
-				this.#descs = universe.keys
-					.slice(0, 4)
-					.map((k) => k.view.lastElementChild);
+					function full() {
+						return el('', '#00f');
+					}
+				})();
+
+				#els = new Map();
+				#descs;
+
+				constructor(panel) {
+					this.el = panel;
+					const kb = panel.querySelector('.keyboard');
+					KEYS.forEach((k) => {
+						const el = kb.appendChild(
+							document.createElement('div'),
+						);
+						el.className = 'key';
+						el.dataset.key = k.key;
+						el.innerHTML = `<div>${k.key}</div><div>${k.desc ?? ''}</div>`;
+						this.#els.set(k.key, el);
+					});
+					this.#descs = ['1', '2', '3', 'tab'].map(
+						(key) => this.#els.get(key).lastElementChild,
+					);
+				}
+
+				mount(spaceEl) {
+					spaceEl.appendChild(this.el);
+					this.update();
+				}
+
+				update() {
+					const { layout, variant, focused } = state;
+					this.#descs.slice(0, 3).forEach((desc, i) => {
+						const next =
+							i === layout ? (variant + 1) % [1, 2, 4][i] : 0;
+						desc.innerHTML = Keyboard.#svgs[i][next][0];
+					});
+					this.#descs[3].innerHTML =
+						Keyboard.#svgs[layout][variant][focused + 1];
+				}
+
+				reflect(name, down) {
+					const el = this.#els.get(name);
+					if (!el) return;
+					down
+						? (el.dataset.state = 'true')
+						: delete el.dataset.state;
+				}
 			}
 
-			mount(spaceEl) {
-				spaceEl.appendChild(this.el);
-				this.update();
-			}
-
-			update() {
-				const { layout, variant, focused } = state;
-				this.#descs.slice(0, 3).forEach((desc, i) => {
-					const next =
-						i === layout ? (variant + 1) % [1, 2, 4][i] : 0;
-					desc.innerHTML = Keyboard.#svgs[i][next][0];
-				});
-				this.#descs[3].innerHTML =
-					Keyboard.#svgs[layout][variant][focused + 1];
-			}
-
-			reflect(k) {
-				if (!k.view) return;
-				k.state
-					? (k.view.dataset.state = true)
-					: delete k.view.dataset.state;
-			}
+			pathless.keyboard = new Keyboard(pathless.panel);
 		}
-		pathless.keyboard = new Keyboard(pathless.panel, pathless);
 	</script>
 </div>
