@@ -33,6 +33,10 @@
 				pathless.bind('d', () => this.show(this.index + 1), {
 					desc: '→',
 				});
+				pathless.tap(
+					() => this.show(this.index - 1),
+					() => this.show(this.index + 1),
+				);
 
 				pathless.source(url).then((entries) => {
 					for (const e of entries)

@@ -26,19 +26,48 @@ func NewOne(apiUrl string) *One {
 	return o
 }
 
+//	func binaryHandler(data []byte) http.HandlerFunc {
+//		return func(w http.ResponseWriter, r *http.Request) {
+//			w.Header().Set("Content-Type", "application/octet-stream")
+//			w.Header().Set("Content-Encoding", "gzip")
+//			w.Write(data)
+//		}
+//	}
+// func binaryHandler(data []byte) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		if origin := r.Header.Get("Origin"); strings.HasPrefix(origin, "http://localhost") {
+// 			w.Header().Set("Access-Control-Allow-Origin", origin)
+// 		}
+// 		w.Header().Set("Content-Type", "application/octet-stream")
+// 		w.Header().Set("Content-Encoding", "gzip")
+// 		w.Write(data)
+// 	}
+// }
+
 func binaryHandler(data []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "*")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Write(data)
 	}
 }
-
 func (o *One) HandlePathless(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" || r.URL.RawQuery != "" {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "*")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Encoding", "gzip")
 	w.Write(o.Zero.One)

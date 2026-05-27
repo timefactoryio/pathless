@@ -30,13 +30,7 @@ func (fx *Fx) Text(path string) {
 		return
 	}
 
-	html := buf.String()
-	html = strings.ReplaceAll(html, "<p><img", "<img")
-	html = strings.ReplaceAll(html, "\"></p>", "\">")
-	html = strings.ReplaceAll(html, "\" /></p>", "\" />")
-	html = strings.ReplaceAll(html, "\"/></p>", "\"/>")
-
-	markdown := One(template.HTML(html))
+	markdown := One(template.HTML(buf.String()))
 	textTmpl := One(template.HTML(fx.TextTemplate))
 	fx.Build("text", &markdown, &textTmpl)
 }

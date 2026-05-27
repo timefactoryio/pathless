@@ -2,7 +2,9 @@
 <html lang="en">
 	<head>
 		<meta charset="UTF-8" />
-		<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+		<meta
+			name="viewport"
+			content="width=device-width,initial-scale=1.0,viewport-fit=cover,user-scalable=no" />
 		<title>hello.universe</title>
 		<style>
 			:root {
@@ -17,12 +19,14 @@
 				user-select: none;
 				-webkit-user-select: none;
 				scrollbar-width: none;
+				touch-action: manipulation;
 			}
 			[hidden] {
 				display: none !important;
 			}
 			body {
 				height: 100dvh;
+				width: 100dvw;
 				overflow: hidden;
 				font-family: sans-serif;
 				background: #000;
@@ -30,10 +34,25 @@
 				display: flex;
 				border: var(--b);
 				border-radius: 5px;
+				padding-bottom: env(safe-area-inset);
 			}
 			#universe {
 				flex: 1;
 				display: flex;
+				position: relative;
+			}
+			.tap {
+				position: absolute;
+				top: 0;
+				bottom: 0;
+				width: 20%;
+				z-index: 10;
+			}
+			.tap-left {
+				left: 0;
+			}
+			.tap-right {
+				right: 0;
 			}
 			:is(#zero, #fx, #one) {
 				flex: 1;
@@ -129,6 +148,8 @@
 
 			class Universe {
 				#td = new TextDecoder();
+				#tx = 0;
+				#ty = 0;
 
 				constructor() {
 					this.universe = document.getElementById('universe');
@@ -154,6 +175,30 @@
 					this.init();
 					window.addEventListener('keydown', this.handle);
 					window.addEventListener('keyup', this.handle);
+
+					this.tapLeft = Object.assign(
+						document.createElement('div'),
+						{ className: 'tap tap-left' },
+					);
+					this.tapRight = Object.assign(
+						document.createElement('div'),
+						{ className: 'tap tap-right' },
+					);
+					this.tapLeft.addEventListener('click', () =>
+						this.frame?.tap?.left?.(),
+					);
+					this.tapRight.addEventListener('click', () =>
+						this.frame?.tap?.right?.(),
+					);
+
+					this.universe.addEventListener('touchstart', this.swipe, {
+						passive: true,
+					});
+					this.universe.addEventListener('touchend', this.swipe, {
+						passive: true,
+					});
+					this.universe.appendChild(this.tapLeft);
+					this.universe.appendChild(this.tapRight);
 				}
 
 				handle = (e) => {
@@ -286,6 +331,7 @@
 					const s = state.spaces[i];
 					const f = state.frames[s.frameIndex];
 					f.binds = [];
+					f.tap = null;
 					this.els[i].innerHTML = f.html;
 					this.exec(this.els[i]);
 					if (!this.panel.hidden && i === state.focused)
@@ -336,6 +382,20 @@
 					if (!this.panel.hidden)
 						this.keyboard.mount(this.els[state.focused]);
 				}
+				tap(left, right) {
+					this.frame.tap = { left, right };
+				}
+				swipe = (e) => {
+					if (e.type === 'touchstart') {
+						this.#tx = e.changedTouches[0].clientX;
+						this.#ty = e.changedTouches[0].clientY;
+						return;
+					}
+					const dx = e.changedTouches[0].clientX - this.#tx;
+					const dy = e.changedTouches[0].clientY - this.#ty;
+					if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40)
+						this.nav(dx < 0 ? 1 : -1);
+				};
 			}
 
 			document.addEventListener('DOMContentLoaded', () => {
