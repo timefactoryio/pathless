@@ -6,6 +6,7 @@
 		width: 100%;
 		height: 100%;
 		overflow: hidden;
+		touch-action: none;
 	}
 	.slides img {
 		max-width: 95%;
@@ -27,7 +28,7 @@
 			constructor() {
 				this.img = document.querySelector('.slides img');
 				this.entries = [];
-				this.index = pathless.read()[prefix] || 0;
+				this.index = pathless.read(this.img)[prefix] || 0;
 
 				pathless.input.register({
 					key: 'a',
@@ -58,7 +59,7 @@
 				this.index =
 					((i % this.entries.length) + this.entries.length) %
 					this.entries.length;
-				pathless.write(prefix, this.index);
+				pathless.write(this.img, prefix, this.index);
 				this.img.src = this.entries[this.index].url;
 				this.img.alt = this.entries[this.index].name;
 			}

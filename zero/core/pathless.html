@@ -121,14 +121,13 @@
 				variant: 0,
 				focused: 0,
 				prev: null,
-				frames: [],
-				spaces: [
-					{ frameIndex: 0, frameState: [] },
-					{ frameIndex: 0, frameState: [] },
-					{ frameIndex: 0, frameState: [] },
-				],
 			};
 			const cache = new Map();
+			const frames = [];
+			const zero = { el: null, frame: 0, frameState: [] };
+			const fx = { el: null, frame: 0, frameState: [] };
+			const one = { el: null, frame: 0, frameState: [] };
+			const spaces = [zero, fx, one];
 
 			class Universe {
 				#td = new TextDecoder();
@@ -225,15 +224,15 @@
 				}
 
 				get frame() {
-					return state.frames[this.space.frameIndex];
+					return state.frames[this.space.frame];
 				}
 
 				read() {
-					return { ...this.space.frameState[this.space.frameIndex] };
+					return { ...this.space.frameState[this.space.frame] };
 				}
 
 				write(k, v) {
-					this.space.frameState[this.space.frameIndex][k] = v;
+					this.space.frameState[this.space.frame][k] = v;
 				}
 
 				bind(key, gesture, down, up = null) {
@@ -261,7 +260,7 @@
 
 				render(i = state.focused) {
 					const s = state.spaces[i];
-					const f = state.frames[s.frameIndex];
+					const f = state.frames[s.frame];
 					this.input?.clear(i);
 					this.els[i].innerHTML = f.html;
 					this.exec(this.els[i]);
@@ -302,8 +301,8 @@
 				}
 
 				nav(dir) {
-					this.space.frameIndex =
-						(this.space.frameIndex + dir + state.frames.length) %
+					this.space.frame =
+						(this.space.frame + dir + state.frames.length) %
 						state.frames.length;
 					this.render();
 				}

@@ -138,61 +138,16 @@
 			constructor() {
 				this.el = document.querySelector('.text');
 
-				const s = pathless.read();
+				const s = pathless.read(this.el);
 				requestAnimationFrame(() => {
-					if (s.scroll?.i != null) {
-						const child = this.el.children[s.scroll.i];
-						if (child)
-							this.el.scrollTop =
-								child.offsetTop +
-								s.scroll.r * child.offsetHeight;
-					}
+					if (s.scroll != null) this.el.scrollTop = s.scroll;
 				});
 
-				const up = this.#hold(-8);
-				const dn = this.#hold(8);
-
-				pathless.input.register({
-					key: 'w',
-					gesture: 'tapLeft',
-					down: up.down,
-					up: up.up,
-					space: state.focused,
-				});
-				pathless.input.register({
-					key: 's',
-					gesture: 'tapRight',
-					down: dn.down,
-					up: dn.up,
-					space: state.focused,
-				});
-			}
-
-			snap() {
-				const t = this.el.scrollTop;
-				const c = this.el.children;
-				for (let i = 0; i < c.length; i++) {
-					const h = c[i].offsetHeight;
-					if (c[i].offsetTop + h > t)
-						return { i, r: (t - c[i].offsetTop) / (h || 1) };
-				}
-				return { i: 0, r: 0 };
-			}
-
-			#hold(v) {
-				let id;
-				return {
-					down: () => {
-						id = setInterval(
-							() => this.el.scrollBy({ top: v }),
-							16,
-						);
-					},
-					up: () => {
-						clearInterval(id);
-						pathless.write('scroll', this.snap());
-					},
-				};
+				this.el.addEventListener(
+					'scroll',
+					() => pathless.write(this.el, 'scroll', this.el.scrollTop),
+					{ passive: true },
+				);
 			}
 		}
 

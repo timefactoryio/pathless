@@ -1,0 +1,103 @@
+<script>
+	{
+		class Input {
+			#byKey = new Map();
+			#byGesture = new Map();
+			#starts = new Map();
+
+			constructor() {
+				const w = (t, fn, o) => window.addEventListener(t, fn, o);
+				w('keydown', (e) => this.#key(e, true));
+				w('keyup', (e) => this.#key(e, false));
+				w('pointerdown', (e) =>
+					this.#starts.set(e.pointerId, {
+						x: e.clientX,
+						y: e.clientY,
+					}),
+				);
+				w('pointerup', (e) => this.#end(e));
+				w('pointercancel', (e) => this.#starts.delete(e.pointerId));
+
+				this.register({ key: '1', down: () => pathless.cycle(0) });
+				this.register({ key: '2', down: () => pathless.cycle(1) });
+				this.register({ key: '3', down: () => pathless.cycle(2) });
+				this.register({
+					key: 'tab',
+					down: (e) => (e.preventDefault(), pathless.focus()),
+				});
+				this.register({
+					key: 'q',
+					gesture: 'swipeLeft',
+					down: () => pathless.nav(-1),
+				});
+				this.register({
+					key: 'e',
+					gesture: 'swipeRight',
+					down: () => pathless.nav(1),
+				});
+				this.register({ key: 'z', down: () => pathless.toggle() });
+			}
+
+			register(k) {
+				if (k.key) this.#byKey.set(k.key.toLowerCase(), k);
+				if (k.gesture) this.#byGesture.set(k.gesture, k);
+			}
+
+			clear(i) {
+				for (const [n, k] of this.#byKey)
+					if (k.space === i) this.#byKey.delete(n);
+				for (const [n, k] of this.#byGesture)
+					if (k.space === i) this.#byGesture.delete(n);
+			}
+
+			#key(e, down) {
+				const k = this.#byKey.get(e.key.toLowerCase());
+				if (!k) return;
+				e.preventDefault();
+				k.state = down;
+				pathless.keyboard?.reflect(k.key, down);
+				(down ? k.down : k.up)?.(e);
+			}
+
+			#end(e) {
+				const s = this.#starts.get(e.pointerId);
+				if (!s) return;
+				this.#starts.delete(e.pointerId);
+				const dx = e.clientX - s.x,
+					dy = e.clientY - s.y;
+				const dist = Math.hypot(dx, dy);
+
+				if (dist > 40) return this.#swipe(dx, dy);
+				if (dist < 10) this.#tap(e.clientX, e.clientY);
+			}
+
+			#swipe(dx, dy) {
+				if (Math.abs(dx) > Math.abs(dy))
+					this.fire(dx < 0 ? 'swipeLeft' : 'swipeRight');
+			}
+
+			#tap(x, y) {
+				const el = document.elementFromPoint(x, y);
+				if (el) this.fire('tap', el);
+			}
+
+			fire(name, ctx) {
+				const k = this.#byGesture.get(name);
+				if (!k) return;
+				k.state = true;
+				pathless.keyboard?.reflect(k.key, true);
+				k.down?.(ctx);
+				k.up
+					? setTimeout(() => {
+							k.up?.(ctx);
+							k.state = false;
+							pathless.keyboard?.reflect(k.key, false);
+						}, 120)
+					: ((k.state = false),
+						pathless.keyboard?.reflect(k.key, false));
+			}
+		}
+
+		pathless.input = new Input();
+	}
+</script>
