@@ -22,35 +22,21 @@ type Value struct {
 	Data []byte `json:"-"`
 }
 
-// Encode produces a wire bundle in one of two formats:
-//
-// meta=true  [4B: manifest length][JSON manifest (name, type, size)][blob]...[blob]
-// meta=false [4B: size][blob][4B: size][blob]...
-//
-// Size is always encoded so the decoder can slice blobs. Name and type are
-// included only when the client needs to identify or handle individual assets.
-func Encode(values []*Value, meta bool) []byte {
+func Encode(values []*Value) []byte {
 	totalData := 0
 	for i, v := range values {
 		values[i].Size = uint32(len(v.Data))
 		totalData += len(v.Data)
 	}
+	buf := bytes.NewBuffer(make([]byte, 0, 2+6*len(values)+totalData))
+	buf.WriteByte(byte(len(values) >> 8))
+	buf.WriteByte(byte(len(values)))
 	var hdr [4]byte
-	if meta {
-		j, _ := json.Marshal(values)
-		buf := bytes.NewBuffer(make([]byte, 0, 1+4+len(j)+totalData))
-		buf.WriteByte(0x00)
-		binary.BigEndian.PutUint32(hdr[:], uint32(len(j)))
-		buf.Write(hdr[:])
-		buf.Write(j)
-		for _, v := range values {
-			buf.Write(v.Data)
-		}
-		return buf.Bytes()
-	}
-	buf := bytes.NewBuffer(make([]byte, 0, 1+4*len(values)+totalData))
-	buf.WriteByte(0x01)
 	for _, v := range values {
+		buf.WriteByte(byte(len(v.Name)))
+		buf.WriteString(v.Name)
+		buf.WriteByte(byte(len(v.Type)))
+		buf.WriteString(v.Type)
 		binary.BigEndian.PutUint32(hdr[:], v.Size)
 		buf.Write(hdr[:])
 		buf.Write(v.Data)
@@ -99,7 +85,7 @@ func (fx *Fx) Load(path string) {
 			values = []*Value{v}
 		}
 	}
-	fx.Routes[key] = Compress(Encode(values, true))
+	fx.Routes[key] = Compress(Encode(values))
 	for _, v := range values {
 		v.Data = nil
 	}

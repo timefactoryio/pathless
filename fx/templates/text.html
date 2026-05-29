@@ -138,19 +138,19 @@
 			constructor() {
 				this.el = document.querySelector('.text');
 
-				const s = pathless.read(this.el);
+				const s = pathless.read();
 				requestAnimationFrame(() => {
-					if (s.scroll != null) this.el.scrollTop = s.scroll;
+					if (s.get('scroll') != null)
+						this.el.scrollTop = s.get('scroll');
 				});
 
 				this.el.addEventListener(
 					'scroll',
-					() => pathless.write(this.el, 'scroll', this.el.scrollTop),
+					() => pathless.write('scroll', this.el.scrollTop),
 					{ passive: true },
 				);
 			}
 		}
-
 		new Text();
 	}
 </script>

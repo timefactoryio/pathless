@@ -163,6 +163,17 @@
 					this.#descs = ['1', '2', '3', 'tab'].map(
 						(key) => this.#els.get(key).lastElementChild,
 					);
+
+					window.addEventListener(
+						'reflect',
+						({ detail: { key, state } }) => {
+							const el = this.#els.get(key);
+							if (!el) return;
+							state
+								? (el.dataset.state = 'true')
+								: delete el.dataset.state;
+						},
+					);
 				}
 
 				mount(spaceEl) {
@@ -180,16 +191,7 @@
 					this.#descs[3].innerHTML =
 						Keyboard.#svgs[layout][variant][focused + 1];
 				}
-
-				reflect(name, down) {
-					const el = this.#els.get(name);
-					if (!el) return;
-					down
-						? (el.dataset.state = 'true')
-						: delete el.dataset.state;
-				}
 			}
-
 			pathless.keyboard = new Keyboard(pathless.panel);
 		}
 	</script>

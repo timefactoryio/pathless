@@ -1,23 +1,23 @@
 <script>
 	{
 		class Input {
-			#byKey = new Map();
-			#byGesture = new Map();
-			#starts = new Map();
+			#actions = new Map();
 
 			constructor() {
 				const w = (t, fn, o) => window.addEventListener(t, fn, o);
 				w('keydown', (e) => this.#key(e, true));
 				w('keyup', (e) => this.#key(e, false));
-				w('pointerdown', (e) =>
-					this.#starts.set(e.pointerId, {
+				w('click', (e) => this.fire('tap', e.target));
+				w('pointerdown', (e) => {
+					const i = this.#spaceAt(e.clientX, e.clientY);
+					this.#actions.set(e.pointerId, {
 						x: e.clientX,
 						y: e.clientY,
-						t: Date.now(),
-					}),
-				);
+						space: i,
+					});
+				});
 				w('pointerup', (e) => this.#end(e));
-				w('pointercancel', (e) => this.#starts.delete(e.pointerId));
+				w('pointercancel', (e) => this.#actions.delete(e.pointerId));
 
 				this.register({ key: '1', down: () => pathless.cycle(0) });
 				this.register({ key: '2', down: () => pathless.cycle(1) });
@@ -40,66 +40,45 @@
 			}
 
 			register(k) {
-				if (k.key) this.#byKey.set(k.key.toLowerCase(), k);
-				if (k.gesture) this.#byGesture.set(k.gesture, k);
+				if (k.key) this.#actions.set(k.key.toLowerCase(), k);
+				if (k.gesture) this.#actions.set(k.gesture, k);
 			}
 
 			clear(i) {
-				for (const [n, k] of this.#byKey)
-					if (k.space === i) this.#byKey.delete(n);
-				for (const [n, k] of this.#byGesture)
-					if (k.space === i) this.#byGesture.delete(n);
+				for (const [n, k] of this.#actions)
+					if (k.space === i) this.#actions.delete(n);
 			}
 
 			#key(e, down) {
-				const k = this.#byKey.get(e.key.toLowerCase());
+				const k = this.#actions.get(e.key.toLowerCase());
 				if (!k) return;
 				e.preventDefault();
 				k.state = down;
-				pathless.keyboard?.reflect(k.key, down);
+				this.#reflect(k.key, down);
 				(down ? k.down : k.up)?.(e);
 			}
 
 			#end(e) {
-				const s = this.#starts.get(e.pointerId);
+				const s = this.#actions.get(e.pointerId);
 				if (!s) return;
-				this.#starts.delete(e.pointerId);
+				this.#actions.delete(e.pointerId);
 				const dx = e.clientX - s.x,
 					dy = e.clientY - s.y;
-				const dist = Math.hypot(dx, dy),
-					dt = Date.now() - s.t;
-
-				if (dist > 40 && Math.abs(dx) > Math.abs(dy) && dt < 400)
-					return this.#fire(dx < 0 ? 'swipeLeft' : 'swipeRight');
-
-				if (dist < 10 && dt < 250) {
-					const i = this.#spaceAt(e.clientX, e.clientY);
-					if (i !== -1)
-						this.#fire(
-							this.#localX(e.clientX, i) < 0.5
-								? 'tapLeft'
-								: 'tapRight',
-						);
+				if (Math.hypot(dx, dy) > 40) {
+					if (s.space !== -1) pathless.focus(s.space, false); // focus without re-render
+					this.#swipe(dx, dy); // nav() will render
 				}
 			}
 
-			#fire(name) {
-				const k = this.#byGesture.get(name);
-				if (!k) return;
-				k.state = true;
-				k.down?.();
-				k.up
-					? setTimeout(() => {
-							k.up?.();
-							k.state = false;
-						}, 120)
-					: (k.state = false);
+			#swipe(dx, dy) {
+				if (Math.abs(dx) > Math.abs(dy))
+					this.fire(dx < 0 ? 'swipeLeft' : 'swipeRight');
 			}
 
 			#spaceAt(x, y) {
-				for (let i = 0; i < pathless.els.length; i++) {
-					if (pathless.els[i].hidden) continue;
-					const r = pathless.els[i].getBoundingClientRect();
+				for (let i = 0; i < pathless.spaces.length; i++) {
+					if (pathless.spaces[i].el.hidden) continue;
+					const r = pathless.spaces[i].el.getBoundingClientRect();
 					if (
 						x >= r.left &&
 						x <= r.right &&
@@ -111,9 +90,25 @@
 				return -1;
 			}
 
-			#localX(x, i) {
-				const r = pathless.els[i].getBoundingClientRect();
-				return (x - r.left) / r.width;
+			#reflect(key, state) {
+				window.dispatchEvent(
+					new CustomEvent('reflect', { detail: { key, state } }),
+				);
+			}
+
+			fire(name, ctx) {
+				const k = this.#actions.get(name);
+				if (!k) return;
+				k.state = true;
+				this.#reflect(k.key, true);
+				k.down?.(ctx);
+				k.up
+					? setTimeout(() => {
+							k.up?.(ctx);
+							k.state = false;
+							this.#reflect(k.key, false);
+						}, 120)
+					: ((k.state = false), this.#reflect(k.key, false));
 			}
 		}
 

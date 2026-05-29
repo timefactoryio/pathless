@@ -116,26 +116,26 @@
 		</style>
 		<script>
 			window.apiUrl = '{{.APIURL}}';
-			const state = {
-				layout: 0,
-				variant: 0,
-				focused: 0,
-				prev: null,
-			};
-			const cache = new Map();
-			const frames = [];
-			const zero = { el: null, frame: 0, frameState: [] };
-			const fx = { el: null, frame: 0, frameState: [] };
-			const one = { el: null, frame: 0, frameState: [] };
-			const spaces = [zero, fx, one];
-
 			class Universe {
 				#td = new TextDecoder();
 				constructor() {
-					this.universe = document.getElementById('universe');
-					this.els = ['zero', 'fx', 'one'].map((id) =>
-						document.getElementById(id),
-					);
+					this.universe = {
+						el: document.getElementById('universe'),
+						layout: 0,
+						variant: 0,
+						focused: 0,
+						prev: null,
+						frames: [],
+						cache: new Map(),
+					};
+					for (const id of ['zero', 'fx', 'one']) {
+						this[id] = this.universe[id] = {
+							el: document.getElementById(id),
+							frame: 0,
+							state: new Map(),
+						};
+					}
+					this.spaces = [this.zero, this.fx, this.one];
 					this.panel = Object.assign(document.createElement('div'), {
 						id: 'panel',
 						hidden: true,
@@ -145,28 +145,33 @@
 
 				wire(buf) {
 					const bytes = new Uint8Array(buf);
-					const view = new DataView(buf);
-					let pos = 1;
-					if (bytes[0] === 0x00) {
-						pos += 4 + view.getUint32(1);
-						return JSON.parse(
-							this.#td.decode(bytes.subarray(5, pos)),
-						).map((e) => ({
-							...e,
-							data: bytes.subarray(pos, (pos += e.size)),
-						}));
+					const count = (bytes[0] << 8) | bytes[1];
+					const values = new Array(count);
+					let pos = 2;
+					const str = (n) =>
+						n
+							? this.#td.decode(bytes.subarray(pos, (pos += n)))
+							: undefined;
+					const u32 = () =>
+						(bytes[pos++] << 24) |
+						(bytes[pos++] << 16) |
+						(bytes[pos++] << 8) |
+						bytes[pos++];
+					for (let i = 0; i < count; i++) {
+						const name = str(bytes[pos++]);
+						const type = str(bytes[pos++]);
+						const n = u32();
+						values[i] = {
+							name,
+							type,
+							data: bytes.subarray(pos, (pos += n)),
+						};
 					}
-					const result = [];
-					while (pos < bytes.length) {
-						const size = view.getUint32(pos);
-						result.push({
-							data: bytes.subarray((pos += 4), (pos += size)),
-						});
-					}
-					return result;
+					return values;
 				}
 
 				source(url) {
+					const { cache } = this.universe;
 					if (!cache.has(url))
 						cache.set(
 							url,
@@ -181,7 +186,6 @@
 					const [input, kb, ...rest] = this.wire(
 						await fetch(window.apiUrl).then((r) => r.arrayBuffer()),
 					);
-
 					const inputEl = document.createElement('div');
 					inputEl.innerHTML = this.#td.decode(input.data);
 					document.body.appendChild(inputEl);
@@ -193,79 +197,69 @@
 					this.exec(this.panel);
 					document.body.removeChild(this.panel);
 
-					state.frames = rest.map((e) => ({
+					this.universe.frames = rest.map((e) => ({
 						html: this.#td.decode(e.data),
 					}));
-					for (const s of state.spaces)
-						s.frameState = state.frames.map(() => ({}));
-					if (state.frames.length) this.render();
+					if (this.universe.frames.length) this.render();
 				}
 
 				set focused(v) {
 					let i = v % 3;
-					while (this.els[i].hidden) i = (i + 1) % 3;
-					state.focused = i;
-					this.universe.dataset.focused = i;
-					this.els.forEach((el, j) => {
-						el.inert = !el.hidden && j !== i;
+					while (this.spaces[i].el.hidden) i = (i + 1) % 3;
+					this.universe.focused = i;
+					this.universe.el.dataset.focused = i;
+					this.spaces.forEach((s, j) => {
+						s.el.inert = !s.el.hidden && j !== i;
 					});
 				}
-
 				set view([l, v]) {
-					state.prev = [state.layout, state.variant];
-					state.layout = l;
-					state.variant = v;
-					this.universe.dataset.layout = l;
-					this.universe.dataset.variant = v;
+					this.universe.prev = [
+						this.universe.layout,
+						this.universe.variant,
+					];
+					this.universe.layout = l;
+					this.universe.variant = v;
+					this.universe.el.dataset.layout = l;
+					this.universe.el.dataset.variant = v;
 				}
 
 				get space() {
-					return state.spaces[state.focused];
+					return this.spaces[this.universe.focused];
 				}
 
 				get frame() {
-					return state.frames[this.space.frame];
+					return this.universe.frames[this.space.frame];
 				}
 
 				read() {
-					return { ...this.space.frameState[this.space.frame] };
+					return this.space.state.get(this.space.frame) ?? new Map();
 				}
 
 				write(k, v) {
-					this.space.frameState[this.space.frame][k] = v;
-				}
-
-				bind(key, gesture, down, up = null) {
-					this.input.register({
-						key,
-						gesture,
-						down,
-						up,
-						space: state.focused,
-					});
+					const { frame, state } = this.space;
+					if (!state.has(frame)) state.set(frame, new Map());
+					state.get(frame).set(k, v);
 				}
 
 				sync() {
-					this.els.forEach((el, i) => {
-						el.hidden =
-							state.layout === 0
-								? i !== state.focused
-								: i > state.layout;
+					const { layout, focused } = this.universe;
+					this.spaces.forEach((s, i) => {
+						s.el.hidden = layout === 0 ? i !== focused : i > layout;
 					});
-					this.focused = state.focused;
-					this.els.forEach((_, i) => {
-						if (!this.els[i].hidden) this.render(i);
+					this.focused = focused;
+					this.spaces.forEach((s, i) => {
+						if (!s.el.hidden) this.render(i);
 					});
 				}
 
-				render(i = state.focused) {
-					const s = state.spaces[i];
-					const f = state.frames[s.frame];
+				render(i = this.universe.focused) {
+					const s = this.spaces[i];
+					const f = this.universe.frames[s.frame];
 					this.input?.clear(i);
-					this.els[i].innerHTML = f.html;
-					this.exec(this.els[i]);
-					if (!this.panel.hidden && i === state.focused)
-						this.keyboard.mount(this.els[i]);
+					s.el.innerHTML = f.html;
+					this.exec(s.el);
+					if (!this.panel.hidden && i === this.universe.focused)
+						this.keyboard.mount(s.el);
 				}
 
 				exec(el) {
@@ -278,39 +272,43 @@
 					}
 				}
 
-				cycle(layout = state.layout) {
-					if (layout !== state.layout) {
+				cycle(layout = this.universe.layout) {
+					if (layout !== this.universe.layout) {
 						this.view = [layout, 0];
 					} else if (layout === 0) {
-						if (!state.prev) return;
-						this.view = state.prev;
+						if (!this.universe.prev) return;
+						this.view = this.universe.prev;
 					} else {
 						this.view = [
-							state.layout,
-							(state.variant + 1) % [1, 2, 4][state.layout],
+							this.universe.layout,
+							(this.universe.variant + 1) %
+								[1, 2, 4][this.universe.layout],
 						];
 						return this.render();
 					}
 					this.sync();
 				}
 
-				focus() {
-					const prev = state.focused;
-					this.focused = prev + 1;
-					if (state.focused !== prev) this.render();
+				focus(i = this.universe.focused + 1, rerender = true) {
+					const prev = this.universe.focused;
+					this.focused = i;
+					if (rerender && this.universe.focused !== prev)
+						this.render();
 				}
 
 				nav(dir) {
 					this.space.frame =
-						(this.space.frame + dir + state.frames.length) %
-						state.frames.length;
+						(this.space.frame + dir + this.universe.frames.length) %
+						this.universe.frames.length;
 					this.render();
 				}
 
 				toggle() {
 					this.panel.hidden = !this.panel.hidden;
 					if (!this.panel.hidden)
-						this.keyboard.mount(this.els[state.focused]);
+						this.keyboard.mount(
+							this.spaces[this.universe.focused].el,
+						);
 				}
 			}
 

@@ -15,9 +15,7 @@
 	}
 </style>
 
-<div class="slides">
-	<img src="" alt="" />
-</div>
+<img src="" alt="" />
 
 <script>
 	{
@@ -28,19 +26,19 @@
 			constructor() {
 				this.img = document.querySelector('.slides img');
 				this.entries = [];
-				this.index = pathless.read(this.img)[prefix] || 0;
+				this.index = pathless.read().get(prefix) || 0;
 
 				pathless.input.register({
 					key: 'a',
 					gesture: 'tapLeft',
 					down: () => this.show(this.index - 1),
-					space: state.focused,
+					space: pathless.universe.focused,
 				});
 				pathless.input.register({
 					key: 'd',
 					gesture: 'tapRight',
 					down: () => this.show(this.index + 1),
-					space: state.focused,
+					space: pathless.universe.focused,
 				});
 
 				pathless.source(url).then((entries) => {
@@ -59,7 +57,7 @@
 				this.index =
 					((i % this.entries.length) + this.entries.length) %
 					this.entries.length;
-				pathless.write(this.img, prefix, this.index);
+				pathless.write(prefix, this.index);
 				this.img.src = this.entries[this.index].url;
 				this.img.alt = this.entries[this.index].name;
 			}
