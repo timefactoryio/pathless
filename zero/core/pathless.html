@@ -30,12 +30,14 @@
 				background: #000;
 				color: #fff;
 				display: flex;
+				flex-direction: column;
 				border: var(--b);
 				border-radius: 5px;
 				touch-action: pan-y;
 			}
 			#universe {
 				flex: 1;
+				min-height: 0;
 				display: flex;
 			}
 			:is(#zero, #fx, #one) {
@@ -53,9 +55,6 @@
 			:is(#zero, #fx, #one) > :first-child {
 				flex: 1;
 				min-height: 0;
-			}
-			:is(#zero, #fx, #one):has(#panel:not([hidden])) > :first-child {
-				flex: 0 0 80cqh;
 			}
 			#zero {
 				grid-area: zero;
@@ -133,9 +132,13 @@
 							el: document.getElementById(id),
 							frame: 0,
 							state: new Map(),
+							taps: null,
 						};
 					}
 					this.spaces = [this.zero, this.fx, this.one];
+					window.state = this.universe;
+					window.cache = this.universe.cache;
+					this.rendering = null;
 					this.panel = Object.assign(document.createElement('div'), {
 						id: 'panel',
 						hidden: true,
@@ -195,7 +198,6 @@
 					this.panel.innerHTML = this.#td.decode(kb.data);
 					document.body.appendChild(this.panel);
 					this.exec(this.panel);
-					document.body.removeChild(this.panel);
 
 					this.universe.frames = rest.map((e) => ({
 						html: this.#td.decode(e.data),
@@ -211,6 +213,7 @@
 					this.spaces.forEach((s, j) => {
 						s.el.inert = !s.el.hidden && j !== i;
 					});
+					this.keyboard?.update();
 				}
 				set view([l, v]) {
 					this.universe.prev = [
@@ -221,24 +224,28 @@
 					this.universe.variant = v;
 					this.universe.el.dataset.layout = l;
 					this.universe.el.dataset.variant = v;
+					this.keyboard?.update();
 				}
 
-				get space() {
-					return this.spaces[this.universe.focused];
+				read(i = this.rendering ?? this.universe.focused) {
+					const s = this.spaces[i];
+					return s.state.get(s.frame) ?? new Map();
 				}
 
-				get frame() {
-					return this.universe.frames[this.space.frame];
-				}
-
-				read() {
-					return this.space.state.get(this.space.frame) ?? new Map();
-				}
-
-				write(k, v) {
-					const { frame, state } = this.space;
+				write(k, v, i = this.rendering ?? this.universe.focused) {
+					const { frame, state } = this.spaces[i];
 					if (!state.has(frame)) state.set(frame, new Map());
 					state.get(frame).set(k, v);
+				}
+
+				scope(i = this.rendering ?? this.universe.focused) {
+					return {
+						read: () => this.read(i),
+						write: (k, v) => this.write(k, v, i),
+						bind: (handlers) => {
+							this.spaces[i].taps = handlers;
+						},
+					};
 				}
 
 				sync() {
@@ -254,12 +261,11 @@
 
 				render(i = this.universe.focused) {
 					const s = this.spaces[i];
-					const f = this.universe.frames[s.frame];
-					this.input?.clear(i);
-					s.el.innerHTML = f.html;
+					s.taps = null;
+					this.rendering = i;
+					s.el.innerHTML = this.universe.frames[s.frame].html;
 					this.exec(s.el);
-					if (!this.panel.hidden && i === this.universe.focused)
-						this.keyboard.mount(s.el);
+					this.rendering = null;
 				}
 
 				exec(el) {
@@ -296,19 +302,21 @@
 						this.render();
 				}
 
-				nav(dir) {
-					this.space.frame =
-						(this.space.frame + dir + this.universe.frames.length) %
+				nav(dir, i = this.universe.focused) {
+					const s = this.spaces[i];
+					s.frame =
+						(s.frame + dir + this.universe.frames.length) %
 						this.universe.frames.length;
-					this.render();
+					this.render(i);
+				}
+
+				tap(i, side) {
+					this.spaces[i].taps?.[side]?.();
 				}
 
 				toggle() {
 					this.panel.hidden = !this.panel.hidden;
-					if (!this.panel.hidden)
-						this.keyboard.mount(
-							this.spaces[this.universe.focused].el,
-						);
+					if (!this.panel.hidden) this.keyboard.update();
 				}
 			}
 

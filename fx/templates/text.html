@@ -137,8 +137,9 @@
 		class Text {
 			constructor() {
 				this.el = document.querySelector('.text');
+				const ctx = pathless.scope(); // capture this space
 
-				const s = pathless.read();
+				const s = ctx.read();
 				requestAnimationFrame(() => {
 					if (s.get('scroll') != null)
 						this.el.scrollTop = s.get('scroll');
@@ -146,7 +147,7 @@
 
 				this.el.addEventListener(
 					'scroll',
-					() => pathless.write('scroll', this.el.scrollTop),
+					() => ctx.write('scroll', this.el.scrollTop),
 					{ passive: true },
 				);
 			}

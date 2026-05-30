@@ -1,7 +1,7 @@
 <style>
 	#panel {
-		height: 20cqh;
-		flex-shrink: 0;
+		flex: 0 0 18dvh;
+		width: 100%;
 		border-top: var(--b);
 		display: flex;
 		align-items: center;
@@ -176,13 +176,8 @@
 					);
 				}
 
-				mount(spaceEl) {
-					spaceEl.appendChild(this.el);
-					this.update();
-				}
-
 				update() {
-					const { layout, variant, focused } = state;
+					const { layout, variant, focused } = pathless.universe;
 					this.#descs.slice(0, 3).forEach((desc, i) => {
 						const next =
 							i === layout ? (variant + 1) % [1, 2, 4][i] : 0;
@@ -193,6 +188,7 @@
 				}
 			}
 			pathless.keyboard = new Keyboard(pathless.panel);
+			pathless.keyboard.update();
 		}
 	</script>
 </div>

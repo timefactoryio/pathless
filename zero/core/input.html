@@ -1,84 +1,81 @@
 <script>
 	{
 		class Input {
-			#actions = new Map();
+			#pointers = new Map();
+			#keys = new Map();
 
 			constructor() {
 				const w = (t, fn, o) => window.addEventListener(t, fn, o);
 				w('keydown', (e) => this.#key(e, true));
 				w('keyup', (e) => this.#key(e, false));
-				w('click', (e) => this.fire('tap', e.target));
 				w('pointerdown', (e) => {
 					const i = this.#spaceAt(e.clientX, e.clientY);
-					this.#actions.set(e.pointerId, {
+					const r =
+						i === -1
+							? null
+							: pathless.spaces[i].el.getBoundingClientRect();
+					this.#pointers.set(e.pointerId, {
 						x: e.clientX,
 						y: e.clientY,
 						space: i,
+						mid: r ? r.left + r.width / 2 : 0,
 					});
 				});
 				w('pointerup', (e) => this.#end(e));
-				w('pointercancel', (e) => this.#actions.delete(e.pointerId));
+				w('pointercancel', (e) => this.#pointers.delete(e.pointerId));
 
-				this.register({ key: '1', down: () => pathless.cycle(0) });
-				this.register({ key: '2', down: () => pathless.cycle(1) });
-				this.register({ key: '3', down: () => pathless.cycle(2) });
-				this.register({
-					key: 'tab',
-					down: (e) => (e.preventDefault(), pathless.focus()),
-				});
-				this.register({
-					key: 'q',
-					gesture: 'swipeLeft',
-					down: () => pathless.nav(-1),
-				});
-				this.register({
-					key: 'e',
-					gesture: 'swipeRight',
-					down: () => pathless.nav(1),
-				});
-				this.register({ key: 'z', down: () => pathless.toggle() });
-			}
-
-			register(k) {
-				if (k.key) this.#actions.set(k.key.toLowerCase(), k);
-				if (k.gesture) this.#actions.set(k.gesture, k);
-			}
-
-			clear(i) {
-				for (const [n, k] of this.#actions)
-					if (k.space === i) this.#actions.delete(n);
+				const f = () => pathless.universe.focused;
+				const K = {
+					1: () => pathless.cycle(0),
+					2: () => pathless.cycle(1),
+					3: () => pathless.cycle(2),
+					tab: (e) => (e.preventDefault(), pathless.focus()),
+					q: () => pathless.nav(-1, f()),
+					e: () => pathless.nav(1, f()),
+					a: () => pathless.tap(f(), 'left'),
+					d: () => pathless.tap(f(), 'right'),
+					z: () => pathless.toggle(),
+				};
+				for (const [key, fn] of Object.entries(K))
+					this.#keys.set(key, fn);
 			}
 
 			#key(e, down) {
-				const k = this.#actions.get(e.key.toLowerCase());
-				if (!k) return;
+				const fn = this.#keys.get(e.key.toLowerCase());
+				if (!fn) return;
 				e.preventDefault();
-				k.state = down;
-				this.#reflect(k.key, down);
-				(down ? k.down : k.up)?.(e);
+				this.#flash(e.key.toLowerCase(), down); // visual only
+				if (down) fn(e); // logic, synchronous
 			}
 
 			#end(e) {
-				const s = this.#actions.get(e.pointerId);
+				const s = this.#pointers.get(e.pointerId);
 				if (!s) return;
-				this.#actions.delete(e.pointerId);
+				this.#pointers.delete(e.pointerId);
+				if (s.space === -1) return;
+
+				pathless.focus(s.space, false); // touch is self-addressing: focus follows
+
 				const dx = e.clientX - s.x,
 					dy = e.clientY - s.y;
 				if (Math.hypot(dx, dy) > 40) {
-					if (s.space !== -1) pathless.focus(s.space, false); // focus without re-render
-					this.#swipe(dx, dy); // nav() will render
+					if (Math.abs(dx) > Math.abs(dy)) {
+						const dir = dx < 0 ? -1 : 1;
+						this.#pulse(dir < 0 ? 'q' : 'e');
+						pathless.nav(dir, s.space);
+					}
+				} else {
+					const side = e.clientX < s.mid ? 'left' : 'right';
+					this.#pulse(side === 'left' ? 'a' : 'd');
+					pathless.tap(s.space, side);
 				}
-			}
-
-			#swipe(dx, dy) {
-				if (Math.abs(dx) > Math.abs(dy))
-					this.fire(dx < 0 ? 'swipeLeft' : 'swipeRight');
 			}
 
 			#spaceAt(x, y) {
 				for (let i = 0; i < pathless.spaces.length; i++) {
-					if (pathless.spaces[i].el.hidden) continue;
-					const r = pathless.spaces[i].el.getBoundingClientRect();
+					const el = pathless.spaces[i].el;
+					if (el.hidden) continue;
+					const r = el.getBoundingClientRect();
 					if (
 						x >= r.left &&
 						x <= r.right &&
@@ -90,25 +87,17 @@
 				return -1;
 			}
 
-			#reflect(key, state) {
+			#flash(key, on) {
 				window.dispatchEvent(
-					new CustomEvent('reflect', { detail: { key, state } }),
+					new CustomEvent('reflect', {
+						detail: { key, state: on },
+					}),
 				);
 			}
-
-			fire(name, ctx) {
-				const k = this.#actions.get(name);
-				if (!k) return;
-				k.state = true;
-				this.#reflect(k.key, true);
-				k.down?.(ctx);
-				k.up
-					? setTimeout(() => {
-							k.up?.(ctx);
-							k.state = false;
-							this.#reflect(k.key, false);
-						}, 120)
-					: ((k.state = false), this.#reflect(k.key, false));
+			// pulse = visual blip for a one-shot gesture; gates no logic
+			#pulse(key) {
+				this.#flash(key, true);
+				setTimeout(() => this.#flash(key, false), 120);
 			}
 		}
 

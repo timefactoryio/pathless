@@ -89,7 +89,7 @@
 				this.button.classList.toggle(
 					'show',
 					pathless.panel.hidden &&
-						pathless.space.frameIndex === 0 &&
+						pathless.spaces[state.focused].frame === 0 &&
 						state.layout === 0,
 				);
 			}
