@@ -115,35 +115,54 @@
 		</style>
 		<script>
 			window.apiUrl = '{{.APIURL}}';
-			class Universe {
+			class Pathless {
 				#td = new TextDecoder();
-				constructor() {
-					this.universe = {
-						el: document.getElementById('universe'),
-						layout: 0,
-						variant: 0,
-						focused: 0,
-						prev: null,
-						frames: [],
-						cache: new Map(),
-					};
-					for (const id of ['zero', 'fx', 'one']) {
-						this[id] = this.universe[id] = {
-							el: document.getElementById(id),
-							frame: 0,
-							state: new Map(),
-							taps: null,
-						};
-					}
-					this.spaces = [this.zero, this.fx, this.one];
-					window.state = this.universe;
-					window.cache = this.universe.cache;
-					this.rendering = null;
-					this.panel = Object.assign(document.createElement('div'), {
+				static #newUniverse() {
+					const space = ['zero', 'fx', 'one'].map((id) => ({
+						el: document.getElementById(id),
+						frame: null,
+					}));
+					const panel = Object.assign(document.createElement('div'), {
 						id: 'panel',
 						hidden: true,
 					});
+					return {
+						el: document.getElementById('universe'),
+						cache: new Map(),
+						prev: null,
+						space,
+						panel,
+					};
+				}
+				static #newFrame(html) {
+					return {
+						el: html,
+						state: new Map([
+							['zero', new Map()],
+							['fx', new Map()],
+							['one', new Map()],
+						]),
+					};
+				}
+				static #layouts = [
+					[false, true, true],
+					[false, false, true],
+					[false, false, false],
+				];
+				static wrap(arr, item, dir) {
+					return arr[
+						(arr.indexOf(item) + dir + arr.length) % arr.length
+					];
+				}
+				constructor() {
+					this.universe = Pathless.#newUniverse();
 					this.init();
+				}
+
+				get visible() {
+					return this.universe.space.flatMap((s, i) =>
+						s.el.hidden ? [] : [i],
+					);
 				}
 
 				wire(buf) {
@@ -186,7 +205,7 @@
 				}
 
 				async init() {
-					const [input, kb, ...rest] = this.wire(
+					const [input, ...rest] = this.wire(
 						await fetch(window.apiUrl).then((r) => r.arrayBuffer()),
 					);
 					const inputEl = document.createElement('div');
@@ -195,79 +214,30 @@
 					this.exec(inputEl);
 					document.body.removeChild(inputEl);
 
-					this.panel.innerHTML = this.#td.decode(kb.data);
-					document.body.appendChild(this.panel);
-					this.exec(this.panel);
-
-					this.universe.frames = rest.map((e) => ({
-						html: this.#td.decode(e.data),
-					}));
-					if (this.universe.frames.length) this.render();
+					this.universe.frames = rest.map((e) =>
+						Pathless.#newFrame(this.#td.decode(e.data)),
+					);
+					if (this.universe.frames.length) {
+						const first = this.universe.frames[0];
+						this.universe.space.forEach((s) => (s.frame = first));
+						this.sync();
+					}
 				}
-
-				set focused(v) {
-					let i = v % 3;
-					while (this.spaces[i].el.hidden) i = (i + 1) % 3;
-					this.universe.focused = i;
-					this.universe.el.dataset.focused = i;
-					this.spaces.forEach((s, j) => {
-						s.el.inert = !s.el.hidden && j !== i;
-					});
-					this.keyboard?.update();
+				read(i) {
+					const s = this.universe.space[i];
+					return s.frame.state.get(s.el.id);
 				}
-				set view([l, v]) {
-					this.universe.prev = [
-						this.universe.layout,
-						this.universe.variant,
-					];
-					this.universe.layout = l;
-					this.universe.variant = v;
-					this.universe.el.dataset.layout = l;
-					this.universe.el.dataset.variant = v;
-					this.keyboard?.update();
+				write(k, v, i) {
+					const s = this.universe.space[i];
+					s.frame.state.get(s.el.id).set(k, v);
 				}
-
-				read(i = this.rendering ?? this.universe.focused) {
-					const s = this.spaces[i];
-					return s.state.get(s.frame) ?? new Map();
-				}
-
-				write(k, v, i = this.rendering ?? this.universe.focused) {
-					const { frame, state } = this.spaces[i];
-					if (!state.has(frame)) state.set(frame, new Map());
-					state.get(frame).set(k, v);
-				}
-
-				scope(i = this.rendering ?? this.universe.focused) {
-					return {
-						read: () => this.read(i),
-						write: (k, v) => this.write(k, v, i),
-						bind: (handlers) => {
-							this.spaces[i].taps = handlers;
-						},
-					};
-				}
-
-				sync() {
-					const { layout, focused } = this.universe;
-					this.spaces.forEach((s, i) => {
-						s.el.hidden = layout === 0 ? i !== focused : i > layout;
-					});
-					this.focused = focused;
-					this.spaces.forEach((s, i) => {
-						if (!s.el.hidden) this.render(i);
+				sync(...indices) {
+					(indices.length ? indices : this.visible).forEach((i) => {
+						const s = this.universe.space[i];
+						s.el.innerHTML = s.frame.el;
+						this.exec(s.el);
 					});
 				}
-
-				render(i = this.universe.focused) {
-					const s = this.spaces[i];
-					s.taps = null;
-					this.rendering = i;
-					s.el.innerHTML = this.universe.frames[s.frame].html;
-					this.exec(s.el);
-					this.rendering = null;
-				}
-
 				exec(el) {
 					for (const old of el.querySelectorAll('script, style')) {
 						const fresh = document.createElement(old.localName);
@@ -277,56 +247,37 @@
 						old.replaceWith(fresh);
 					}
 				}
-
-				cycle(layout = this.universe.layout) {
-					if (layout !== this.universe.layout) {
-						this.view = [layout, 0];
-					} else if (layout === 0) {
-						if (!this.universe.prev) return;
-						this.view = this.universe.prev;
-					} else {
-						this.view = [
-							this.universe.layout,
-							(this.universe.variant + 1) %
-								[1, 2, 4][this.universe.layout],
-						];
-						return this.render();
-					}
+				layout(l, v = 0) {
+					if (l > 0) this.universe.prev = [l, v];
+					this.universe.el.dataset.layout = l;
+					this.universe.el.dataset.variant = v;
+					Pathless.#layouts[l].forEach(
+						(h, i) => (this.universe.space[i].el.hidden = h),
+					);
 					this.sync();
 				}
-
-				focus(i = this.universe.focused + 1, rerender = true) {
-					const prev = this.universe.focused;
-					this.focused = i;
-					if (rerender && this.universe.focused !== prev)
-						this.render();
+				cycle(l = +this.universe.el.dataset.layout) {
+					if (l === 0 && this.universe.prev)
+						return this.layout(...this.universe.prev);
+					const { layout, variant } = this.universe.el.dataset;
+					const v = l === +layout ? (+variant + 1) % [1, 2, 4][l] : 0;
+					this.layout(l, v);
 				}
 
-				nav(dir, i = this.universe.focused) {
-					const s = this.spaces[i];
-					s.frame =
-						(s.frame + dir + this.universe.frames.length) %
-						this.universe.frames.length;
-					this.render(i);
-				}
-
-				tap(i, side) {
-					this.spaces[i].taps?.[side]?.();
-				}
-
-				toggle() {
-					this.panel.hidden = !this.panel.hidden;
-					if (!this.panel.hidden) this.keyboard.update();
+				nav(dir, i) {
+					const s = this.universe.space[i];
+					s.frame = Pathless.wrap(this.universe.frames, s.frame, dir);
+					this.sync(i);
 				}
 			}
 
 			document.addEventListener('DOMContentLoaded', () => {
-				window.pathless = new Universe();
+				window.pathless = new Pathless();
 			});
 		</script>
 	</head>
 	<body>
-		<div id="universe" data-layout="0" data-variant="0" data-focused="0">
+		<div id="universe" data-layout="0" data-variant="0">
 			<div id="zero"></div>
 			<div id="fx" hidden></div>
 			<div id="one" hidden></div>
