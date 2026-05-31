@@ -1,0 +1,231 @@
+<!doctype html>
+<meta charset="UTF-8" />
+<meta
+	name="viewport"
+	content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<style>
+	/* Apply to the gesture surface. touch-action:none hands all gestures to JS;
+   use pan-y instead if you want native vertical scroll alongside. */
+	.gesture-surface {
+		touch-action: none;
+		overscroll-behavior: none; /* no pull-to-refresh / scroll chaining */
+		user-select: none;
+		-webkit-user-select: none;
+		-webkit-touch-callout: none; /* no iOS long-press callout/magnifier */
+		-webkit-tap-highlight-color: transparent;
+	}
+</style>
+<script>
+	class Coordinates {
+		constructor(el) {
+			this.el = el;
+			this.measure();
+		}
+		measure() {
+			const r = this.el.getBoundingClientRect();
+			this.L = r.left;
+			this.T = r.top;
+			this.W = r.width || 1;
+			this.H = r.height || 1;
+			this.origin = { x: this.L + this.W / 2, y: this.T + this.H / 2 };
+			this._dirty = false;
+		}
+		invalidate() {
+			this._dirty = true;
+		}
+		at(clientX, clientY) {
+			if (this._dirty) this.measure();
+			const u = (clientX - this.L) / this.W,
+				v = (clientY - this.T) / this.H;
+			return { x: 2 * u - 1, y: 1 - 2 * v };
+		}
+		distance(a, b) {
+			return Math.hypot(b.x - a.x, b.y - a.y);
+		}
+		direction(a, b) {
+			const dx = b.x - a.x,
+				dy = b.y - a.y;
+			return Math.abs(dx) >= Math.abs(dy)
+				? dx > 0
+					? 'RIGHT'
+					: 'LEFT'
+				: dy > 0
+					? 'UP'
+					: 'DOWN';
+		}
+	}
+
+	class Input {
+		constructor(el, opts = {}) {
+			this.el = el;
+			this.co = new Coordinates(el);
+			this.starts = new Map();
+			this.emit = opts.emit || (() => {});
+			Object.assign(
+				this,
+				{
+					TAP_MS: 250,
+					TOL: 0.05,
+					SWIPE: 0.2,
+					SWIPE_V: 0.001,
+					SWIPE_FAR: 0.4,
+					HOLD: [500, 1200],
+					DBL_MS: 300,
+				},
+				opts,
+			);
+			const inval = () => this.co.invalidate();
+			for (const ev of ['resize', 'scroll', 'orientationchange'])
+				addEventListener(ev, inval, { passive: true });
+			const o = { passive: true };
+			el.addEventListener('pointerdown', (e) => this._down(e), o);
+			el.addEventListener('pointermove', (e) => this._move(e), o);
+			el.addEventListener('pointerup', (e) => this._up(e), o);
+			el.addEventListener('pointercancel', (e) => this._cancel(e), o);
+		}
+		_down(e) {
+			const c = this.co.at(e.clientX, e.clientY);
+			const s = { c, t: e.timeStamp, moved: false, stage: 0, timers: [] };
+			s.timers = this.HOLD.map((ms, i) =>
+				setTimeout(() => {
+					s.stage = i + 1;
+					this.emit('longpress', {
+						at: s.c,
+						stage: s.stage,
+						id: e.pointerId,
+					});
+				}, ms),
+			);
+			this.el.setPointerCapture?.(e.pointerId);
+			this.starts.set(e.pointerId, s);
+		}
+		_move(e) {
+			const s = this.starts.get(e.pointerId);
+			if (!s) return;
+			const pts = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
+			const last = pts && pts.length ? pts[pts.length - 1] : e;
+			const c = this.co.at(last.clientX, last.clientY);
+			if (this.co.distance(s.c, c) > this.TOL) s.moved = true;
+		}
+		_up(e) {
+			const s = this.starts.get(e.pointerId);
+			if (s) s.timers.forEach(clearTimeout);
+			this.starts.delete(e.pointerId);
+			if (!s) return;
+			const c = this.co.at(e.clientX, e.clientY);
+			const dist = this.co.distance(s.c, c),
+				dur = e.timeStamp - s.t || 1,
+				speed = dist / dur;
+			if (
+				dist >= this.SWIPE &&
+				(speed >= this.SWIPE_V || dist >= this.SWIPE_FAR)
+			) {
+				this.emit('swipe', {
+					start: s.c,
+					end: c,
+					direction: this.co.direction(s.c, c),
+					speed,
+					id: e.pointerId,
+				});
+				return;
+			}
+			if (s.moved) return;
+			if (dur >= this.TAP_MS) {
+				this.emit('press', { at: c, dur, id: e.pointerId });
+				return;
+			}
+			const now = performance.now(),
+				dbl = this._lastTap && now - this._lastTap < this.DBL_MS;
+			this._lastTap = dbl ? 0 : now;
+			this.emit('tap', { at: c, id: e.pointerId });
+			if (dbl) this.emit('doubletap', { at: c, id: e.pointerId });
+		}
+		_cancel(e) {
+			const s = this.starts.get(e.pointerId);
+			if (s) s.timers.forEach(clearTimeout);
+			this.starts.delete(e.pointerId);
+			if (s) {
+				const c = this.co.at(e.clientX, e.clientY);
+				const dist = this.co.distance(s.c, c);
+				if (dist >= this.SWIPE_FAR)
+					this.emit('swipe', {
+						start: s.c,
+						end: c,
+						direction: this.co.direction(s.c, c),
+						speed: dist / (e.timeStamp - s.t || 1),
+						id: e.pointerId,
+						viaCancel: true,
+					});
+			}
+		}
+	}
+
+	class Output {
+		constructor(target, opts = {}) {
+			this.h = {};
+			this.input =
+				target instanceof Input ? target : new Input(target, opts);
+			this.input.emit = (name, info) => this.fire(name, info);
+			this.EDGE = opts.EDGE ?? 0.6;
+			this.ZONE = opts.ZONE ?? 0.34;
+		}
+		on(name, fn) {
+			(this.h[name] ||= new Set()).add(fn);
+			return this;
+		}
+		off(name, fn) {
+			if (fn) this.h[name]?.delete(fn);
+			else delete this.h[name];
+			return this;
+		}
+		fire(name, info) {
+			const s = this.h[name];
+			if (s) for (const f of s) f(info);
+		}
+		get raw() {
+			return this.input;
+		}
+		reveal({ onReveal, onDismiss, edge = 'bottom' } = {}) {
+			const M = {
+				bottom: ['UP', 'DOWN', (x, y) => y <= -this.EDGE],
+				top: ['DOWN', 'UP', (x, y) => y >= this.EDGE],
+				left: ['RIGHT', 'LEFT', (x, y) => x <= -this.EDGE],
+				right: ['LEFT', 'RIGHT', (x, y) => x >= this.EDGE],
+			};
+			const [rev, dis, near] = M[edge];
+			this.on('swipe', (i) => {
+				const { x, y } = i.start;
+				if (i.direction === rev && near(x, y)) onReveal?.(i);
+				else if (i.direction === dis) onDismiss?.(i);
+			});
+			return this;
+		}
+		swipeNav({ prev, next } = {}) {
+			this.on('swipe', (i) => {
+				if (i.direction === 'LEFT') next?.(i);
+				else if (i.direction === 'RIGHT') prev?.(i);
+			});
+			return this;
+		}
+		tapNav({ prev, next } = {}) {
+			this.on('tap', (i) => {
+				if (i.at.x <= -this.ZONE) prev?.(i);
+				else if (i.at.x >= this.ZONE) next?.(i);
+			});
+			return this;
+		}
+		pullToRefresh(onRefresh) {
+			this.on('swipe', (i) => {
+				if (i.start.y >= this.EDGE && i.direction === 'DOWN')
+					onRefresh?.(i);
+			});
+			return this;
+		}
+		contextMenu(onOpen) {
+			this.on('longpress', (i) => {
+				if (i.stage === 1) onOpen?.(i);
+			});
+			return this;
+		}
+	}
+</script>
