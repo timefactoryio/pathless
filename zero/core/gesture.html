@@ -1,21 +1,27 @@
-<!doctype html>
-<meta charset="UTF-8" />
-<meta
-	name="viewport"
-	content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <style>
-	/* Apply to the gesture surface. touch-action:none hands all gestures to JS;
-   use pan-y instead if you want native vertical scroll alongside. */
 	.gesture-surface {
 		touch-action: none;
-		overscroll-behavior: none; /* no pull-to-refresh / scroll chaining */
+		overscroll-behavior: none;
 		user-select: none;
 		-webkit-user-select: none;
-		-webkit-touch-callout: none; /* no iOS long-press callout/magnifier */
+		-webkit-touch-callout: none;
 		-webkit-tap-highlight-color: transparent;
 	}
 </style>
 <script>
+	class Input {
+		constructor(el) {
+			const co = new Coordinates(el);
+			const g = new Gesture(co);
+			for (const name of Object.getOwnPropertyNames(
+				Coordinates.prototype,
+			))
+				if (name !== 'constructor') this[name] = co[name].bind(co);
+			for (const name of Object.getOwnPropertyNames(Gesture.prototype))
+				if (name !== 'constructor') this[name] = g[name].bind(g);
+		}
+	}
+
 	class Coordinates {
 		constructor(el) {
 			this.el = el;
@@ -33,141 +39,88 @@
 		invalidate() {
 			this._dirty = true;
 		}
-		at(clientX, clientY) {
+		at(clientX, clientY, t) {
 			if (this._dirty) this.measure();
 			const u = (clientX - this.L) / this.W,
 				v = (clientY - this.T) / this.H;
-			return { x: 2 * u - 1, y: 1 - 2 * v };
+			return { x: 2 * u - 1, y: 1 - 2 * v, t };
 		}
-		distance(a, b) {
-			return Math.hypot(b.x - a.x, b.y - a.y);
+		delta(a, b) {
+			return { x: b.x - a.x, y: b.y - a.y, t: b.t - a.t };
 		}
-		direction(a, b) {
-			const dx = b.x - a.x,
-				dy = b.y - a.y;
-			return Math.abs(dx) >= Math.abs(dy)
-				? dx > 0
+		distance(d) {
+			return Math.hypot(d.x, d.y);
+		}
+		direction(d) {
+			return Math.abs(d.x) >= Math.abs(d.y)
+				? d.x > 0
 					? 'RIGHT'
 					: 'LEFT'
-				: dy > 0
+				: d.y > 0
 					? 'UP'
 					: 'DOWN';
 		}
 	}
 
-	class Input {
-		constructor(el, opts = {}) {
+	class Gesture {
+		constructor(el) {
 			this.el = el;
 			this.co = new Coordinates(el);
 			this.starts = new Map();
-			this.emit = opts.emit || (() => {});
-			Object.assign(
-				this,
-				{
-					TAP_MS: 250,
-					TOL: 0.05,
-					SWIPE: 0.2,
-					SWIPE_V: 0.001,
-					SWIPE_FAR: 0.4,
-					HOLD: [500, 1200],
-					DBL_MS: 300,
-				},
-				opts,
-			);
+			this.h = {};
+			this.TAP_MS = 150;
+			this.TOL = 0.05;
+			this.EDGE = 0.6;
+			this.ZONE = 0.34;
 			const inval = () => this.co.invalidate();
 			for (const ev of ['resize', 'scroll', 'orientationchange'])
 				addEventListener(ev, inval, { passive: true });
 			const o = { passive: true };
-			el.addEventListener('pointerdown', (e) => this._down(e), o);
-			el.addEventListener('pointermove', (e) => this._move(e), o);
-			el.addEventListener('pointerup', (e) => this._up(e), o);
-			el.addEventListener('pointercancel', (e) => this._cancel(e), o);
+			el.addEventListener('pointerdown', this, o);
+			el.addEventListener('pointermove', this, o);
+			el.addEventListener('pointerup', this, o);
+			el.addEventListener('pointercancel', this, o);
 		}
-		_down(e) {
-			const c = this.co.at(e.clientX, e.clientY);
-			const s = { c, t: e.timeStamp, moved: false, stage: 0, timers: [] };
-			s.timers = this.HOLD.map((ms, i) =>
-				setTimeout(() => {
-					s.stage = i + 1;
-					this.emit('longpress', {
-						at: s.c,
-						stage: s.stage,
-						id: e.pointerId,
-					});
-				}, ms),
-			);
-			this.el.setPointerCapture?.(e.pointerId);
-			this.starts.set(e.pointerId, s);
-		}
-		_move(e) {
-			const s = this.starts.get(e.pointerId);
+		handleEvent(e) {
+			const { type, pointerId, clientX, clientY, timeStamp } = e;
+			if (type === 'pointerdown') {
+				const c = this.co.at(clientX, clientY, timeStamp);
+				this.el.setPointerCapture?.(pointerId);
+				this.starts.set(pointerId, { c, last: c });
+				return;
+			}
+			const s = this.starts.get(pointerId);
 			if (!s) return;
-			const pts = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
-			const last = pts && pts.length ? pts[pts.length - 1] : e;
-			const c = this.co.at(last.clientX, last.clientY);
-			if (this.co.distance(s.c, c) > this.TOL) s.moved = true;
-		}
-		_up(e) {
-			const s = this.starts.get(e.pointerId);
-			if (s) s.timers.forEach(clearTimeout);
-			this.starts.delete(e.pointerId);
-			if (!s) return;
-			const c = this.co.at(e.clientX, e.clientY);
-			const dist = this.co.distance(s.c, c),
-				dur = e.timeStamp - s.t || 1,
-				speed = dist / dur;
-			if (
-				dist >= this.SWIPE &&
-				(speed >= this.SWIPE_V || dist >= this.SWIPE_FAR)
-			) {
-				this.emit('swipe', {
+			if (type === 'pointermove') {
+				const pts = e.getCoalescedEvents?.();
+				const ev = pts?.length ? pts[pts.length - 1] : e;
+				s.last = this.co.at(ev.clientX, ev.clientY, ev.timeStamp);
+				return;
+			}
+			this.starts.delete(pointerId);
+			const end = this.co.at(clientX, clientY, timeStamp);
+			const d = this.co.delta(s.c, end);
+			const dl = this.co.delta(s.c, s.last);
+			const moved = this.co.distance(dl) > this.TOL;
+			if (moved) {
+				const dist = this.co.distance(d);
+				const info = {
 					start: s.c,
-					end: c,
-					direction: this.co.direction(s.c, c),
-					speed,
-					id: e.pointerId,
-				});
+					end,
+					direction: this.co.direction(d),
+					speed: dist / (d.t || 1),
+					id: pointerId,
+				};
+				if (type === 'pointercancel') info.viaCancel = true;
+				this.fire('swipe', info);
 				return;
 			}
-			if (s.moved) return;
-			if (dur >= this.TAP_MS) {
-				this.emit('press', { at: c, dur, id: e.pointerId });
+			if (type === 'pointercancel') return;
+			if (d.t >= this.TAP_MS) {
+				this.fire('press', { at: end, dur: d.t, id: pointerId });
 				return;
 			}
-			const now = performance.now(),
-				dbl = this._lastTap && now - this._lastTap < this.DBL_MS;
-			this._lastTap = dbl ? 0 : now;
-			this.emit('tap', { at: c, id: e.pointerId });
-			if (dbl) this.emit('doubletap', { at: c, id: e.pointerId });
-		}
-		_cancel(e) {
-			const s = this.starts.get(e.pointerId);
-			if (s) s.timers.forEach(clearTimeout);
-			this.starts.delete(e.pointerId);
-			if (s) {
-				const c = this.co.at(e.clientX, e.clientY);
-				const dist = this.co.distance(s.c, c);
-				if (dist >= this.SWIPE_FAR)
-					this.emit('swipe', {
-						start: s.c,
-						end: c,
-						direction: this.co.direction(s.c, c),
-						speed: dist / (e.timeStamp - s.t || 1),
-						id: e.pointerId,
-						viaCancel: true,
-					});
-			}
-		}
-	}
-
-	class Output {
-		constructor(target, opts = {}) {
-			this.h = {};
-			this.input =
-				target instanceof Input ? target : new Input(target, opts);
-			this.input.emit = (name, info) => this.fire(name, info);
-			this.EDGE = opts.EDGE ?? 0.6;
-			this.ZONE = opts.ZONE ?? 0.34;
+			this.fire('tap', { at: end, id: pointerId });
 		}
 		on(name, fn) {
 			(this.h[name] ||= new Set()).add(fn);
@@ -181,9 +134,6 @@
 		fire(name, info) {
 			const s = this.h[name];
 			if (s) for (const f of s) f(info);
-		}
-		get raw() {
-			return this.input;
 		}
 		reveal({ onReveal, onDismiss, edge = 'bottom' } = {}) {
 			const M = {
@@ -221,10 +171,22 @@
 			});
 			return this;
 		}
-		contextMenu(onOpen) {
-			this.on('longpress', (i) => {
-				if (i.stage === 1) onOpen?.(i);
-			});
+		scroll(axis = 'y') {
+			const pct = ((1 - this.EDGE) / 2) * 100;
+			const mid = this.EDGE * 100;
+			const y = axis === 'y';
+			this.el.style.cssText += ';position:relative;touch-action:auto';
+			for (const [a, b, action] of [
+				[0, pct, 'none'],
+				[pct, mid, `pan-${axis}`],
+				[100 - pct, pct, 'none'],
+			]) {
+				const d = document.createElement('div');
+				d.style.cssText = y
+					? `position:absolute;left:0;width:100%;top:${a}%;height:${b}%;touch-action:${action}`
+					: `position:absolute;top:0;height:100%;left:${a}%;width:${b}%;touch-action:${action}`;
+				this.el.appendChild(d);
+			}
 			return this;
 		}
 	}
