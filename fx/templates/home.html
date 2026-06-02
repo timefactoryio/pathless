@@ -59,7 +59,7 @@
 			constructor() {
 				this.button = document.querySelector('.home button');
 				this.button.addEventListener('click', () => {
-					pathless.toggle();
+					pathless.panel.hidden = !pathless.panel.hidden;
 					this.update();
 				});
 
@@ -69,6 +69,7 @@
 				if (logoImg) {
 					const src = logoImg.dataset.src;
 					const blobKey = src + '#blob';
+					const cache = pathless.universe.cache;
 					if (cache.has(blobKey)) {
 						logoImg.src = cache.get(blobKey);
 					} else {
@@ -86,11 +87,12 @@
 			}
 
 			update() {
+				const { space, frames, el } = pathless.universe;
+				const isFirst = space[0].frame === frames?.[0];
+				const isRoot = +el.dataset.layout === 0;
 				this.button.classList.toggle(
 					'show',
-					pathless.panel.hidden &&
-						pathless.spaces[state.focused].frame === 0 &&
-						state.layout === 0,
+					pathless.panel.hidden && isFirst && isRoot,
 				);
 			}
 		}

@@ -10,6 +10,8 @@
 		margin-inline: auto;
 		color: #f3f3f3;
 		scroll-behavior: auto;
+		touch-action: pan-y;
+		overscroll-behavior-y: contain;
 	}
 	a {
 		color: inherit;
@@ -134,24 +136,27 @@
 </style>
 <script>
 	{
+		const spaceEl = document.currentScript.closest('#zero, #fx, #one');
+		const i = pathless.universe.space.findIndex((s) => s.el === spaceEl);
+
 		class Text {
 			constructor() {
 				this.el = document.querySelector('.text');
-				const ctx = pathless.scope(); // capture this space
+				const state = pathless.read(i);
 
-				const s = ctx.read();
 				requestAnimationFrame(() => {
-					if (s.get('scroll') != null)
-						this.el.scrollTop = s.get('scroll');
+					if (state.get('scroll') != null)
+						this.el.scrollTop = state.get('scroll');
 				});
 
 				this.el.addEventListener(
 					'scroll',
-					() => ctx.write('scroll', this.el.scrollTop),
+					() => pathless.write('scroll', this.el.scrollTop, i),
 					{ passive: true },
 				);
 			}
 		}
+
 		new Text();
 	}
 </script>

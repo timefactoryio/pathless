@@ -114,6 +114,13 @@
 			#universe[data-layout='2'][data-variant='3'] #fx {
 				border-right: var(--b);
 			}
+			#panel {
+				position: fixed;
+				inset: 0;
+				z-index: 10;
+				touch-action: none;
+				overscroll-behavior: none;
+			}
 		</style>
 		<script>
 			window.apiUrl = '{{.APIURL}}';
@@ -128,8 +135,10 @@
 						id: 'panel',
 						hidden: true,
 					});
+					const el = document.getElementById('universe');
+					el.appendChild(panel);
 					return {
-						el: document.getElementById('universe'),
+						el,
 						cache: new Map(),
 						prev: null,
 						space,
@@ -165,6 +174,9 @@
 					return this.universe.space.flatMap((s, i) =>
 						s.el.hidden ? [] : [i],
 					);
+				}
+				get panel() {
+					return this.universe.panel;
 				}
 
 				wire(buf) {
@@ -212,6 +224,8 @@
 					);
 					const inputEl = document.createElement('div');
 					inputEl.innerHTML = this.#td.decode(input.data);
+					for (const style of inputEl.querySelectorAll('style'))
+						document.head.appendChild(style);
 					document.body.appendChild(inputEl);
 					this.exec(inputEl);
 					document.body.removeChild(inputEl);

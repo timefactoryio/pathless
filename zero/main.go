@@ -15,7 +15,7 @@ var pathlessHtml string
 //go:embed core/keyboard.html
 var keyboardHtml []byte
 
-//go:embed core/input.html
+//go:embed core/gesture.html
 var inputHtml []byte
 
 type Zero struct {

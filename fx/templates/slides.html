@@ -19,19 +19,20 @@
 
 <script>
 	{
+		const spaceEl = document.currentScript.closest('#zero, #fx, #one');
+		const i = pathless.universe.space.findIndex((s) => s.el === spaceEl);
 		const prefix = '{{.PREFIX}}';
 		const url = '{{.URL}}';
-		const ctx = pathless.scope(); // captures this space at construction
 
 		class Slides {
 			constructor() {
 				this.img = document.querySelector('.slides img');
 				this.entries = [];
-				this.index = ctx.read().get(prefix) || 0;
+				this.index = pathless.read(i).get(prefix) || 0;
 
-				ctx.bind({
-					left: () => this.show(this.index - 1),
-					right: () => this.show(this.index + 1),
+				pathless.input.tapNav(i, {
+					prev: () => this.show(this.index - 1),
+					next: () => this.show(this.index + 1),
 				});
 
 				pathless.source(url).then((entries) => {
@@ -45,12 +46,12 @@
 				});
 			}
 
-			show(i) {
+			show(n) {
 				if (!this.entries.length) return;
 				this.index =
-					((i % this.entries.length) + this.entries.length) %
+					((n % this.entries.length) + this.entries.length) %
 					this.entries.length;
-				ctx.write(prefix, this.index);
+				pathless.write(prefix, this.index, i);
 				this.img.src = this.entries[this.index].url;
 				this.img.alt = this.entries[this.index].name;
 			}

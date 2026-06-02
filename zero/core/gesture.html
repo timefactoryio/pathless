@@ -1,13 +1,3 @@
-<style>
-	.gesture-surface {
-		touch-action: none;
-		overscroll-behavior: none;
-		user-select: none;
-		-webkit-user-select: none;
-		-webkit-touch-callout: none;
-		-webkit-tap-highlight-color: transparent;
-	}
-</style>
 <script>
 	{
 		class Coordinates {
@@ -15,7 +5,7 @@
 				return { x, y };
 			}
 			constructor() {
-				this.limit = 0.9;
+				this.limit = 0.75;
 				this.unit = 0.1;
 			}
 
@@ -82,20 +72,32 @@
 		}
 
 		class Input {
-			constructor(el) {
-				this.el = el;
-				this.co = new Coordinates();
-				this.co.measure(el);
-				this.active = new Map();
+			constructor() {
+				const { el, space, panel } = pathless.universe;
+				this.space = space;
+				this.panel = panel;
+				this.co = space.map((s) => {
+					const c = new Coordinates();
+					c.measure(s.el);
+					return c;
+				});
+				this.active = new Map(); // pointerId → { t0, i }
 				this.h = new Map();
 				const o = { passive: true };
 				el.addEventListener('pointerdown', this, o);
 				el.addEventListener('pointerup', this, o);
 				el.addEventListener('pointercancel', this, o);
-				for (const ev of ['resize', 'scroll', 'orientationchange'])
-					addEventListener(ev, () => this.co.measure(el), {
-						passive: true,
-					});
+				for (const ev of ['resize', 'orientationchange'])
+					addEventListener(
+						ev,
+						() => this.co.forEach((c, i) => c.measure(space[i].el)),
+						{ passive: true },
+					);
+				this.#wire();
+			}
+			#indexOf(target) {
+				const el = target.closest('#zero, #fx, #one');
+				return el ? this.space.findIndex((s) => s.el === el) : -1;
 			}
 
 			handleEvent(e) {
@@ -104,19 +106,26 @@
 				else if (e.type === 'pointercancel') this.cancel(e);
 			}
 
-			down({ pointerId, clientX, clientY }) {
-				this.el.setPointerCapture?.(pointerId);
-				this.active.set(pointerId, this.co.at(clientX, clientY));
+			down({ pointerId, clientX, clientY, target }) {
+				const i = this.#indexOf(target);
+				if (i === -1) return;
+				this.active.set(pointerId, {
+					t0: this.co[i].at(clientX, clientY),
+					i,
+				});
 			}
-
 			up({ pointerId, clientX, clientY }) {
-				const t0 = this.active.get(pointerId);
-				if (!t0) return;
+				const a = this.active.get(pointerId);
+				if (!a) return;
 				this.active.delete(pointerId);
-				const result = this.co.read(t0, this.co.at(clientX, clientY));
+				const result = this.co[a.i].read(
+					a.t0,
+					this.co[a.i].at(clientX, clientY),
+				);
 				this.fire(result.gesture ? 'swipe' : 'tap', {
 					...result,
 					id: pointerId,
+					i: a.i,
 				});
 			}
 
@@ -151,57 +160,25 @@
 				if (s) for (const f of s) f(info);
 			}
 
-			reveal({ onReveal, onDismiss } = {}) {
-				this.on('swipe', (i) => {
-					if (i.zone === 'bottom' && i.direction === 'up')
-						onReveal?.(i);
-					else if (i.direction === 'down') onDismiss?.(i);
+			#wire() {
+				this.on('swipe', (e) => {
+					if (e.direction === 'left') pathless.nav(1, e.i);
+					else if (e.direction === 'right') pathless.nav(-1, e.i);
+					else if (e.zone === 'bottom' && e.direction === 'up')
+						this.panel.hidden = false;
+					else if (e.direction === 'down') this.panel.hidden = true;
 				});
-				return this;
 			}
 
-			swipeNav({ prev, next } = {}) {
-				this.on('swipe', (i) => {
-					if (i.direction === 'left') next?.(i);
-					else if (i.direction === 'right') prev?.(i);
+			tapNav(i, { prev, next } = {}) {
+				this.on('tap', (e) => {
+					if (e.i !== i) return;
+					if (e.zone === 'left') prev?.(e);
+					else if (e.zone === 'right') next?.(e);
 				});
-				return this;
-			}
-
-			tapNav({ prev, next } = {}) {
-				this.on('tap', (i) => {
-					if (i.zone === 'left') prev?.(i);
-					else if (i.zone === 'right') next?.(i);
-				});
-				return this;
-			}
-
-			pullToRefresh(onRefresh) {
-				this.on('swipe', (i) => {
-					if (i.zone === 'top' && i.direction === 'down')
-						onRefresh?.(i);
-				});
-				return this;
-			}
-
-			scroll(axis = 'y') {
-				const y = axis === 'y';
-				const edge = ((1 - this.co.limit) / 2) * 100;
-				const mid = 100 - 2 * edge;
-				this.el.style.cssText += ';position:relative;touch-action:auto';
-				for (const [a, b, action] of [
-					[0, edge, 'none'],
-					[edge, mid, `pan-${axis}`],
-					[100 - edge, edge, 'none'],
-				]) {
-					const d = document.createElement('div');
-					d.style.cssText = y
-						? `position:absolute;left:0;width:100%;top:${a}%;height:${b}%;touch-action:${action}`
-						: `position:absolute;top:0;height:100%;left:${a}%;width:${b}%;touch-action:${action}`;
-					this.el.appendChild(d);
-				}
 				return this;
 			}
 		}
+		pathless.input = new Input();
 	}
 </script>
