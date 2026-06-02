@@ -9,185 +9,199 @@
 	}
 </style>
 <script>
-	class Input {
-		constructor(el) {
-			const co = new Coordinates(el);
-			const g = new Gesture(co);
-			for (const name of Object.getOwnPropertyNames(
-				Coordinates.prototype,
-			))
-				if (name !== 'constructor') this[name] = co[name].bind(co);
-			for (const name of Object.getOwnPropertyNames(Gesture.prototype))
-				if (name !== 'constructor') this[name] = g[name].bind(g);
-		}
-	}
-
-	class Coordinates {
-		constructor(el) {
-			this.el = el;
-			this.measure();
-		}
-		measure() {
-			const r = this.el.getBoundingClientRect();
-			this.L = r.left;
-			this.T = r.top;
-			this.W = r.width || 1;
-			this.H = r.height || 1;
-			this.origin = { x: this.L + this.W / 2, y: this.T + this.H / 2 };
-			this._dirty = false;
-		}
-		invalidate() {
-			this._dirty = true;
-		}
-		at(clientX, clientY, t) {
-			if (this._dirty) this.measure();
-			const u = (clientX - this.L) / this.W,
-				v = (clientY - this.T) / this.H;
-			return { x: 2 * u - 1, y: 1 - 2 * v, t };
-		}
-		delta(a, b) {
-			return { x: b.x - a.x, y: b.y - a.y, t: b.t - a.t };
-		}
-		distance(d) {
-			return Math.hypot(d.x, d.y);
-		}
-		direction(d) {
-			return Math.abs(d.x) >= Math.abs(d.y)
-				? d.x > 0
-					? 'RIGHT'
-					: 'LEFT'
-				: d.y > 0
-					? 'UP'
-					: 'DOWN';
-		}
-	}
-
-	class Gesture {
-		constructor(el) {
-			this.el = el;
-			this.co = new Coordinates(el);
-			this.starts = new Map();
-			this.h = {};
-			this.TAP_MS = 150;
-			this.TOL = 0.05;
-			this.EDGE = 0.6;
-			this.ZONE = 0.34;
-			const inval = () => this.co.invalidate();
-			for (const ev of ['resize', 'scroll', 'orientationchange'])
-				addEventListener(ev, inval, { passive: true });
-			const o = { passive: true };
-			el.addEventListener('pointerdown', this, o);
-			el.addEventListener('pointermove', this, o);
-			el.addEventListener('pointerup', this, o);
-			el.addEventListener('pointercancel', this, o);
-		}
-		handleEvent(e) {
-			const { type, pointerId, clientX, clientY, timeStamp } = e;
-			if (type === 'pointerdown') {
-				const c = this.co.at(clientX, clientY, timeStamp);
-				this.el.setPointerCapture?.(pointerId);
-				this.starts.set(pointerId, { c, last: c });
-				return;
+	{
+		class Coordinates {
+			static zero(x = null, y = null) {
+				return { x, y };
 			}
-			const s = this.starts.get(pointerId);
-			if (!s) return;
-			if (type === 'pointermove') {
-				const pts = e.getCoalescedEvents?.();
-				const ev = pts?.length ? pts[pts.length - 1] : e;
-				s.last = this.co.at(ev.clientX, ev.clientY, ev.timeStamp);
-				return;
+			constructor() {
+				this.limit = 0.9;
+				this.unit = 0.1;
 			}
-			this.starts.delete(pointerId);
-			const end = this.co.at(clientX, clientY, timeStamp);
-			const d = this.co.delta(s.c, end);
-			const dl = this.co.delta(s.c, s.last);
-			const moved = this.co.distance(dl) > this.TOL;
-			if (moved) {
-				const dist = this.co.distance(d);
-				const info = {
-					start: s.c,
-					end,
-					direction: this.co.direction(d),
-					speed: dist / (d.t || 1),
-					id: pointerId,
+
+			measure(el) {
+				const r = el.getBoundingClientRect();
+				this.L = r.left;
+				this.T = r.top;
+				this.W = r.width || 1;
+				this.H = r.height || 1;
+				this.origin = [this.L + this.W / 2, this.T + this.H / 2];
+			}
+
+			at(clientX, clientY) {
+				const u = (clientX - this.L) / this.W,
+					v = (clientY - this.T) / this.H;
+				return Coordinates.zero(2 * u - 1, 1 - 2 * v);
+			}
+			zone(p) {
+				const ax = Math.abs(p.x),
+					ay = Math.abs(p.y);
+				if (ax <= this.limit && ay <= this.limit) return 'center';
+				return ax >= ay
+					? p.x > 0
+						? 'right'
+						: 'left'
+					: p.y > 0
+						? 'top'
+						: 'bottom';
+			}
+
+			tap(delta) {
+				return (
+					Math.abs(delta.x) <= this.unit &&
+					Math.abs(delta.y) <= this.unit
+				);
+			}
+
+			direction(d) {
+				const ax = Math.abs(d.x),
+					ay = Math.abs(d.y);
+				return ax >= ay
+					? d.x > 0
+						? 'right'
+						: 'left'
+					: d.y > 0
+						? 'up'
+						: 'down';
+			}
+
+			read(t0, t1) {
+				const delta = { x: t1.x - t0.x, y: t1.y - t0.y };
+				const zone = this.zone(t0);
+				if (this.tap(delta))
+					return { t0, t1, delta, zone, gesture: false };
+				return {
+					t0,
+					t1,
+					delta,
+					zone,
+					gesture: true,
+					direction: this.direction(delta),
 				};
-				if (type === 'pointercancel') info.viaCancel = true;
-				this.fire('swipe', info);
-				return;
 			}
-			if (type === 'pointercancel') return;
-			if (d.t >= this.TAP_MS) {
-				this.fire('press', { at: end, dur: d.t, id: pointerId });
-				return;
+		}
+
+		class Input {
+			constructor(el) {
+				this.el = el;
+				this.co = new Coordinates();
+				this.co.measure(el);
+				this.active = new Map();
+				this.h = new Map();
+				const o = { passive: true };
+				el.addEventListener('pointerdown', this, o);
+				el.addEventListener('pointerup', this, o);
+				el.addEventListener('pointercancel', this, o);
+				for (const ev of ['resize', 'scroll', 'orientationchange'])
+					addEventListener(ev, () => this.co.measure(el), {
+						passive: true,
+					});
 			}
-			this.fire('tap', { at: end, id: pointerId });
-		}
-		on(name, fn) {
-			(this.h[name] ||= new Set()).add(fn);
-			return this;
-		}
-		off(name, fn) {
-			if (fn) this.h[name]?.delete(fn);
-			else delete this.h[name];
-			return this;
-		}
-		fire(name, info) {
-			const s = this.h[name];
-			if (s) for (const f of s) f(info);
-		}
-		reveal({ onReveal, onDismiss, edge = 'bottom' } = {}) {
-			const M = {
-				bottom: ['UP', 'DOWN', (x, y) => y <= -this.EDGE],
-				top: ['DOWN', 'UP', (x, y) => y >= this.EDGE],
-				left: ['RIGHT', 'LEFT', (x, y) => x <= -this.EDGE],
-				right: ['LEFT', 'RIGHT', (x, y) => x >= this.EDGE],
-			};
-			const [rev, dis, near] = M[edge];
-			this.on('swipe', (i) => {
-				const { x, y } = i.start;
-				if (i.direction === rev && near(x, y)) onReveal?.(i);
-				else if (i.direction === dis) onDismiss?.(i);
-			});
-			return this;
-		}
-		swipeNav({ prev, next } = {}) {
-			this.on('swipe', (i) => {
-				if (i.direction === 'LEFT') next?.(i);
-				else if (i.direction === 'RIGHT') prev?.(i);
-			});
-			return this;
-		}
-		tapNav({ prev, next } = {}) {
-			this.on('tap', (i) => {
-				if (i.at.x <= -this.ZONE) prev?.(i);
-				else if (i.at.x >= this.ZONE) next?.(i);
-			});
-			return this;
-		}
-		pullToRefresh(onRefresh) {
-			this.on('swipe', (i) => {
-				if (i.start.y >= this.EDGE && i.direction === 'DOWN')
-					onRefresh?.(i);
-			});
-			return this;
-		}
-		scroll(axis = 'y') {
-			const pct = ((1 - this.EDGE) / 2) * 100;
-			const mid = this.EDGE * 100;
-			const y = axis === 'y';
-			this.el.style.cssText += ';position:relative;touch-action:auto';
-			for (const [a, b, action] of [
-				[0, pct, 'none'],
-				[pct, mid, `pan-${axis}`],
-				[100 - pct, pct, 'none'],
-			]) {
-				const d = document.createElement('div');
-				d.style.cssText = y
-					? `position:absolute;left:0;width:100%;top:${a}%;height:${b}%;touch-action:${action}`
-					: `position:absolute;top:0;height:100%;left:${a}%;width:${b}%;touch-action:${action}`;
-				this.el.appendChild(d);
+
+			handleEvent(e) {
+				if (e.type === 'pointerdown') this.down(e);
+				else if (e.type === 'pointerup') this.up(e);
+				else if (e.type === 'pointercancel') this.cancel(e);
 			}
-			return this;
+
+			down({ pointerId, clientX, clientY }) {
+				this.el.setPointerCapture?.(pointerId);
+				this.active.set(pointerId, this.co.at(clientX, clientY));
+			}
+
+			up({ pointerId, clientX, clientY }) {
+				const t0 = this.active.get(pointerId);
+				if (!t0) return;
+				this.active.delete(pointerId);
+				const result = this.co.read(t0, this.co.at(clientX, clientY));
+				this.fire(result.gesture ? 'swipe' : 'tap', {
+					...result,
+					id: pointerId,
+				});
+			}
+
+			cancel({ pointerId, clientX, clientY }) {
+				const t0 = this.active.get(pointerId);
+				if (!t0) return;
+				this.active.delete(pointerId);
+				const result = this.co.read(t0, this.co.at(clientX, clientY));
+				if (result.gesture)
+					this.fire('swipe', {
+						...result,
+						id: pointerId,
+						viaCancel: true,
+					});
+			}
+
+			on(name, fn) {
+				let s = this.h.get(name);
+				if (!s) this.h.set(name, (s = new Set()));
+				s.add(fn);
+				return this;
+			}
+
+			off(name, fn) {
+				if (fn) this.h.get(name)?.delete(fn);
+				else this.h.delete(name);
+				return this;
+			}
+
+			fire(name, info) {
+				const s = this.h.get(name);
+				if (s) for (const f of s) f(info);
+			}
+
+			reveal({ onReveal, onDismiss } = {}) {
+				this.on('swipe', (i) => {
+					if (i.zone === 'bottom' && i.direction === 'up')
+						onReveal?.(i);
+					else if (i.direction === 'down') onDismiss?.(i);
+				});
+				return this;
+			}
+
+			swipeNav({ prev, next } = {}) {
+				this.on('swipe', (i) => {
+					if (i.direction === 'left') next?.(i);
+					else if (i.direction === 'right') prev?.(i);
+				});
+				return this;
+			}
+
+			tapNav({ prev, next } = {}) {
+				this.on('tap', (i) => {
+					if (i.zone === 'left') prev?.(i);
+					else if (i.zone === 'right') next?.(i);
+				});
+				return this;
+			}
+
+			pullToRefresh(onRefresh) {
+				this.on('swipe', (i) => {
+					if (i.zone === 'top' && i.direction === 'down')
+						onRefresh?.(i);
+				});
+				return this;
+			}
+
+			scroll(axis = 'y') {
+				const y = axis === 'y';
+				const edge = ((1 - this.co.limit) / 2) * 100;
+				const mid = 100 - 2 * edge;
+				this.el.style.cssText += ';position:relative;touch-action:auto';
+				for (const [a, b, action] of [
+					[0, edge, 'none'],
+					[edge, mid, `pan-${axis}`],
+					[100 - edge, edge, 'none'],
+				]) {
+					const d = document.createElement('div');
+					d.style.cssText = y
+						? `position:absolute;left:0;width:100%;top:${a}%;height:${b}%;touch-action:${action}`
+						: `position:absolute;top:0;height:100%;left:${a}%;width:${b}%;touch-action:${action}`;
+					this.el.appendChild(d);
+				}
+				return this;
+			}
 		}
 	}
 </script>

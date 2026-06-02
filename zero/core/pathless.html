@@ -33,7 +33,7 @@
 				flex-direction: column;
 				border: var(--b);
 				border-radius: 5px;
-				touch-action: pan-y;
+				touch-action: none;
 			}
 			#universe {
 				flex: 1;
@@ -48,6 +48,8 @@
 				isolation: isolate;
 				display: flex;
 				flex-direction: column;
+				touch-action: none;
+				overscroll-behavior: none;
 			}
 			:is(#zero, #fx, #one) > * {
 				width: 100%;
