@@ -83,6 +83,7 @@
 				});
 				this.active = new Map(); // pointerId → { t0, i }
 				this.h = new Map();
+				this.tapFns = new Map();
 				const o = { passive: true };
 				el.addEventListener('pointerdown', this, o);
 				el.addEventListener('pointerup', this, o);
@@ -130,14 +131,18 @@
 			}
 
 			cancel({ pointerId, clientX, clientY }) {
-				const t0 = this.active.get(pointerId);
-				if (!t0) return;
+				const a = this.active.get(pointerId);
+				if (!a) return;
 				this.active.delete(pointerId);
-				const result = this.co.read(t0, this.co.at(clientX, clientY));
+				const result = this.co[a.i].read(
+					a.t0,
+					this.co[a.i].at(clientX, clientY),
+				);
 				if (result.gesture)
 					this.fire('swipe', {
 						...result,
 						id: pointerId,
+						i: a.i,
 						viaCancel: true,
 					});
 			}
@@ -171,14 +176,18 @@
 			}
 
 			tapNav(i, { prev, next } = {}) {
-				this.on('tap', (e) => {
+				const old = this.tapFns.get(i);
+				if (old) this.off('tap', old);
+				const fn = (e) => {
 					if (e.i !== i) return;
 					if (e.zone === 'left') prev?.(e);
 					else if (e.zone === 'right') next?.(e);
-				});
+				};
+				this.tapFns.set(i, fn);
+				this.on('tap', fn);
 				return this;
 			}
 		}
-		pathless.input = new Input();
+		pathless.Input = Input;
 	}
 </script>

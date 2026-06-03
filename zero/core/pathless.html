@@ -167,6 +167,7 @@
 				}
 				constructor() {
 					this.universe = Pathless.#newUniverse();
+					this.input = null;
 					this.init();
 				}
 
@@ -224,11 +225,11 @@
 					);
 					const inputEl = document.createElement('div');
 					inputEl.innerHTML = this.#td.decode(input.data);
-					for (const style of inputEl.querySelectorAll('style'))
-						document.head.appendChild(style);
 					document.body.appendChild(inputEl);
 					this.exec(inputEl);
 					document.body.removeChild(inputEl);
+					this.input = new this.Input();
+					delete this.Input;
 
 					this.universe.frames = rest.map((e) =>
 						Pathless.#newFrame(this.#td.decode(e.data)),
@@ -255,13 +256,11 @@
 					});
 				}
 				exec(el) {
-					for (const old of el.querySelectorAll('script, style')) {
-						const fresh = document.createElement(old.localName);
-						for (const { name, value } of old.attributes)
-							fresh.setAttribute(name, value);
-						fresh.textContent = old.textContent;
-						old.replaceWith(fresh);
-					}
+					el.replaceChildren(
+						document
+							.createRange()
+							.createContextualFragment(el.innerHTML),
+					);
 				}
 				layout(l, v = 0) {
 					if (l > 0) this.universe.prev = [l, v];

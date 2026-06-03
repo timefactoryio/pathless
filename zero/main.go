@@ -7,22 +7,21 @@ import (
 	"html/template"
 	"regexp"
 	"strings"
+
+	"github.com/timefactoryio/pathless/zero/templates"
 )
 
 //go:embed core/pathless.html
 var pathlessHtml string
 
-//go:embed core/keyboard.html
-var keyboardHtml []byte
-
-//go:embed core/gesture.html
+//go:embed core/input.html
 var inputHtml []byte
 
 type Zero struct {
-	One      []byte
-	Input    []byte
-	Keyboard []byte
-	APIURL   string
+	One    []byte
+	Input  []byte
+	APIURL string
+	*templates.Templates
 }
 
 func NewZero(apiURL string) *Zero {
@@ -30,9 +29,9 @@ func NewZero(apiURL string) *Zero {
 		apiURL = "http://localhost:1001"
 	}
 	z := &Zero{
-		APIURL:   apiURL,
-		Keyboard: keyboardHtml,
-		Input:    inputHtml,
+		APIURL:    apiURL,
+		Input:     inputHtml,
+		Templates: templates.Init(),
 	}
 	tmpl, err := template.New("pathless").Parse(pathlessHtml)
 	if err != nil {
