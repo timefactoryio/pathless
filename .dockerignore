@@ -3,5 +3,11 @@
 
 # But include these specific files
 !go.mod
+!go.sum
 !main.go
-!pathless.html
+!one/
+!one/**
+!zero/
+!zero/**
+!fx/
+!fx/**

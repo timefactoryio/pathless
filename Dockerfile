@@ -4,14 +4,13 @@ WORKDIR /src
 
 ARG TARGETARCH
 
-# Copy only the required files
-COPY go.mod .
-COPY main.go .
-COPY pathless.html .
+COPY go.mod go.sum ./
 
-# Cache Go modules
+# Cache Go module downloads
 RUN --mount=type=cache,target=/go/pkg/mod \
-    true
+    go mod download
+
+COPY . .
 
 # Build static binary
 RUN --mount=type=cache,target=/go/pkg/mod \
