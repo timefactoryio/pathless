@@ -5,11 +5,11 @@ import (
 )
 
 type Pathless struct {
-	one *one.One
+	*one.One
 }
 
 func NewPathless(apiUrl string) *Pathless {
 	return &Pathless{
-		one: one.NewOne(apiUrl),
+		One: one.NewOne(apiUrl),
 	}
 }
