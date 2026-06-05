@@ -24,7 +24,7 @@
 			zone(p) {
 				const ax = Math.abs(p.x),
 					ay = Math.abs(p.y);
-				if (ax <= this.limit && ay <= this.limit) return 'center';
+				if (ax <= 0.75 && ay <= 0.75) return 'center';
 				return ax >= ay
 					? p.x > 0
 						? 'right'
@@ -34,10 +34,7 @@
 						: 'bottom';
 			}
 			tap(delta) {
-				return (
-					Math.abs(delta.x) <= this.unit &&
-					Math.abs(delta.y) <= this.unit
-				);
+				return Math.abs(delta.x) <= 0.1 && Math.abs(delta.y) <= 0.1;
 			}
 			direction(d) {
 				const ax = Math.abs(d.x),
