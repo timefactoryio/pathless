@@ -19,23 +19,26 @@
 
 <script>
 	{
-		const spaceEl = document.currentScript.closest('#zero, #fx, #one');
-		const i = pathless.universe.space.findIndex((s) => s.el === spaceEl);
 		const prefix = '{{.PREFIX}}';
-		const url = '{{.URL}}';
+		const url = window.circuit + '/' + prefix;
 
 		class Slides {
-			constructor() {
-				this.img = document.querySelector('.slides img');
+			constructor(p) {
+				const { el } = p.space;
+				const i = p.focused;
+				this.p = p;
+				this.img = el.querySelector('.slides img');
 				this.entries = [];
-				this.index = pathless.read(i).get(prefix) || 0;
-
-				pathless.input.tapNav(i, {
+				this.index = p.read().get(prefix) || 0;
+				p.input.tapNav(i, {
 					prev: () => this.show(this.index - 1),
 					next: () => this.show(this.index + 1),
 				});
-
-				pathless.source(url).then((entries) => {
+				p.kb.keyNav(i, {
+					a: { down: () => this.show(this.index - 1) },
+					d: { down: () => this.show(this.index + 1) },
+				});
+				p.source(url).then((entries) => {
 					for (const e of entries)
 						if (!e.url)
 							e.url = URL.createObjectURL(
@@ -45,18 +48,17 @@
 					if (this.entries.length) this.show(this.index);
 				});
 			}
-
 			show(n) {
 				if (!this.entries.length) return;
 				this.index =
 					((n % this.entries.length) + this.entries.length) %
 					this.entries.length;
-				pathless.write(prefix, this.index, i);
+				this.p.write(prefix, this.index);
 				this.img.src = this.entries[this.index].url;
 				this.img.alt = this.entries[this.index].name;
 			}
 		}
 
-		new Slides();
+		new Slides(pathless);
 	}
 </script>

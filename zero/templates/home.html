@@ -56,24 +56,23 @@
 <script>
 	{
 		class Home {
-			constructor() {
-				this.button = document.querySelector('.home button');
+			constructor(p) {
+				const { el } = p.space;
+				this.button = el.querySelector('.home button');
 				this.button.addEventListener('click', () => {
-					pathless.panel.hidden = !pathless.panel.hidden;
+					p.toggle();
 					this.update();
 				});
 
-				const logoImg = document.querySelector(
-					'.home .logo img[data-src]',
-				);
+				const logoImg = el.querySelector('.home .logo img[data-src]');
 				if (logoImg) {
 					const src = logoImg.dataset.src;
 					const blobKey = src + '#blob';
-					const cache = pathless.universe.cache;
+					const cache = p.universe.cache;
 					if (cache.has(blobKey)) {
 						logoImg.src = cache.get(blobKey);
 					} else {
-						pathless.source(src).then(([entry]) => {
+						p.source(src).then(([entry]) => {
 							const url = URL.createObjectURL(
 								new Blob([entry.data], { type: entry.type }),
 							);
@@ -83,20 +82,19 @@
 					}
 				}
 
+				this.update = () => {
+					const { space, frames, el: u } = p.universe;
+					this.button.classList.toggle(
+						'show',
+						p.panel.hidden &&
+							space[0].frame === frames?.[0] &&
+							+u.dataset.layout === 0,
+					);
+				};
 				this.update();
-			}
-
-			update() {
-				const { space, frames, el } = pathless.universe;
-				const isFirst = space[0].frame === frames?.[0];
-				const isRoot = +el.dataset.layout === 0;
-				this.button.classList.toggle(
-					'show',
-					pathless.panel.hidden && isFirst && isRoot,
-				);
 			}
 		}
 
-		new Home();
+		new Home(pathless);
 	}
 </script>

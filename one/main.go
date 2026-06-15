@@ -10,98 +10,60 @@ import (
 type One struct {
 	*zero.Zero
 	*fx.Fx
-	Pathless *http.ServeMux
-	Frame    *http.ServeMux
-	Hello    []byte
+	pathless *http.ServeMux
+	gateway  *http.ServeMux
 }
 
-func NewOne(apiUrl string) *One {
+func NewOne(z *zero.Zero, f *fx.Fx) *One {
 	o := &One{
-		Zero:     zero.NewZero(apiUrl),
-		Fx:       fx.NewFx(apiUrl),
-		Pathless: http.NewServeMux(),
-		Frame:    http.NewServeMux(),
+		Zero:     z,
+		Fx:       f,
+		pathless: http.NewServeMux(),
+		gateway:  http.NewServeMux(),
 	}
-	o.Pathless.HandleFunc("/", o.HandlePathless)
+	o.pathless.HandleFunc("/", o.handlePathless)
 	return o
 }
 
-//	func binaryHandler(data []byte) http.HandlerFunc {
-//		return func(w http.ResponseWriter, r *http.Request) {
-//			w.Header().Set("Content-Type", "application/octet-stream")
-//			w.Header().Set("Content-Encoding", "gzip")
-//			w.Write(data)
-//		}
-//	}
-// func binaryHandler(data []byte) http.HandlerFunc {
-// 	return func(w http.ResponseWriter, r *http.Request) {
-// 		if origin := r.Header.Get("Origin"); strings.HasPrefix(origin, "http://localhost") {
-// 			w.Header().Set("Access-Control-Allow-Origin", origin)
-// 		}
-// 		w.Header().Set("Content-Type", "application/octet-stream")
-// 		w.Header().Set("Content-Encoding", "gzip")
-// 		w.Write(data)
-// 	}
-// }
-
-func binaryHandler(data []byte) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "*")
-
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Encoding", "gzip")
-		w.Write(data)
-	}
-}
-func (o *One) HandlePathless(w http.ResponseWriter, r *http.Request) {
+func (o *One) handlePathless(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" || r.URL.RawQuery != "" {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "*")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Encoding", "gzip")
-	w.Write(o.Zero.One)
+	w.Write(o.One)
 }
 
-// func (o *One) BuildHello() {
-// 	var values []*fx.Value
-// 	for _, b := range o.Frames() {
-// 		values = append(values, &fx.Value{Data: b})
-// 	}
-// 	o.Hello = fx.Compress(fx.Encode(values))
-// }
+func (o *One) wire(path string, data []byte) {
+	o.gateway.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Write(data)
+	})
+}
 
-func (o *One) BuildHello() {
-	values := []*fx.Value{
-		{Data: o.Input},
-		// {Data: o.Keyboard},
-	}
-	for _, b := range o.Frames() {
-		values = append(values, &fx.Value{Data: b})
-	}
-	o.Hello = fx.Compress(fx.Encode(values))
+func (o *One) cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", o.Origin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (o *One) Serve() {
-	o.BuildHello()
-	o.Frame.Handle("/", binaryHandler(o.Hello))
-	o.Register()
-	go http.ListenAndServe(":1001", o.Frame)
-	http.ListenAndServe(":1000", o.Pathless)
-}
-
-func (o *One) Register() {
-	for key, data := range o.Fx.Routes {
-		o.Frame.Handle("/"+key, binaryHandler(data))
+	values := []*fx.Value{{Data: o.Input}, {Data: o.Keyboard}}
+	for _, b := range o.Frames() {
+		values = append(values, &fx.Value{Data: b})
 	}
+	o.wire("/", fx.Compress(fx.Wire(values)))
+	for key, data := range o.Fx.Routes {
+		o.wire("/"+key, data)
+	}
+	go http.ListenAndServe(":1001", o.cors(o.gateway))
+	http.ListenAndServe(":1000", o.pathless)
 }

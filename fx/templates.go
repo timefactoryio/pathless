@@ -45,7 +45,6 @@ func (fx *Fx) Slides(dir string) {
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, map[string]string{
 		"PREFIX": base,
-		"URL":    fx.APIURL + "/" + base,
 	}); err != nil {
 		return
 	}
@@ -88,7 +87,7 @@ func (fx *Fx) Logo(path string) template.HTML {
 	base := filepath.Base(path)
 	alt := strings.TrimSuffix(base, filepath.Ext(base))
 	return template.HTML(fmt.Sprintf(`<img data-src="%s" alt="%s">`,
-		html.EscapeString(fx.APIURL+"/"+base),
+		html.EscapeString(fx.Origin+"/"+base),
 		html.EscapeString(alt),
 	))
 }

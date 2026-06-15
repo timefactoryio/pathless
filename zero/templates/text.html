@@ -136,27 +136,52 @@
 </style>
 <script>
 	{
-		const spaceEl = document.currentScript.closest('#zero, #fx, #one');
-		const i = pathless.universe.space.findIndex((s) => s.el === spaceEl);
-
 		class Text {
-			constructor() {
-				this.el = document.querySelector('.text');
-				const state = pathless.read(i);
-
+			#timerW = null;
+			#timerS = null;
+			constructor(p) {
+				this.el = p.space.el.querySelector('.text');
+				const state = p.read();
 				requestAnimationFrame(() => {
 					if (state.get('scroll') != null)
 						this.el.scrollTop = state.get('scroll');
 				});
-
 				this.el.addEventListener(
 					'scroll',
-					() => pathless.write('scroll', this.el.scrollTop, i),
+					() => p.write('scroll', this.el.scrollTop),
 					{ passive: true },
 				);
+				p.kb.keyNav(p.focused, {
+					w: {
+						down: () => {
+							if (!this.#timerW)
+								this.#timerW = setInterval(
+									() => this.el.scrollBy(0, -12),
+									16,
+								);
+						},
+						up: () => {
+							clearInterval(this.#timerW);
+							this.#timerW = null;
+						},
+					},
+					s: {
+						down: () => {
+							if (!this.#timerS)
+								this.#timerS = setInterval(
+									() => this.el.scrollBy(0, 12),
+									16,
+								);
+						},
+						up: () => {
+							clearInterval(this.#timerS);
+							this.#timerS = null;
+						},
+					},
+				});
 			}
 		}
 
-		new Text();
+		new Text(pathless);
 	}
 </script>

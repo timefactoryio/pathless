@@ -100,6 +100,7 @@
 			down({ pointerId, clientX, clientY, target }) {
 				const i = this.#indexOf(target);
 				if (i === -1) return;
+				pathless.universe.focused = i;
 				this.active.set(pointerId, {
 					t0: this.co[i].at(clientX, clientY),
 					i,
@@ -155,8 +156,8 @@
 					if (e.direction === 'left') pathless.nav(1, e.i);
 					else if (e.direction === 'right') pathless.nav(-1, e.i);
 					else if (e.zone === 'bottom' && e.direction === 'up')
-						this.panel.hidden = false;
-					else if (e.direction === 'down') this.panel.hidden = true;
+						pathless.toggle();
+					else if (e.direction === 'down') pathless.toggle();
 				});
 			}
 			tapNav(i, { prev, next } = {}) {
@@ -174,28 +175,45 @@
 		}
 
 		class Keyboard {
+			#frameFns = new Map();
 			constructor() {
-				const f = () => pathless.universe.focused;
 				const K = {
 					1: () => pathless.cycle(0),
 					2: () => pathless.cycle(1),
 					3: () => pathless.cycle(2),
 					tab: (e) => (e.preventDefault(), pathless.focus()),
-					q: () => pathless.nav(-1, f()),
-					e: () => pathless.nav(1, f()),
+					q: () => pathless.nav(-1),
+					e: () => pathless.nav(1),
 					z: () => pathless.toggle(),
 				};
 				window.addEventListener('keydown', (e) => {
-					const fn = K[e.key.toLowerCase()];
-					if (!fn) return;
-					e.preventDefault();
-					this.#flash(e.key.toLowerCase(), true);
-					fn(e);
+					const key = e.key.toLowerCase();
+					if (K[key]) {
+						e.preventDefault();
+						this.#flash(key, true);
+						K[key](e);
+						return;
+					}
+					const bind = this.#frameFns.get(pathless.focused)?.[key];
+					if (bind?.down) {
+						e.preventDefault();
+						this.#flash(key, true);
+						bind.down();
+					}
 				});
-				window.addEventListener('keyup', (e) =>
-					this.#flash(e.key.toLowerCase(), false),
-				);
+				window.addEventListener('keyup', (e) => {
+					const key = e.key.toLowerCase();
+					this.#flash(key, false);
+					for (const binds of this.#frameFns.values())
+						binds[key]?.up?.();
+				});
 			}
+
+			keyNav(i, binds) {
+				this.#frameFns.set(i, binds);
+				return this;
+			}
+
 			#flash(key, on) {
 				window.dispatchEvent(
 					new CustomEvent('reflect', { detail: { key, state: on } }),

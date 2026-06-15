@@ -17,36 +17,47 @@ var pathlessHtml string
 //go:embed core/input.html
 var inputHtml []byte
 
+//go:embed templates/keyboard.html
+var keyboardHtml []byte
+
+// Zero holds the compiled HTML shell and shared assets.
+// Origin is the CORS-allowed root domain; Circuit is the API endpoint URL
+// baked into the HTML at build time.
 type Zero struct {
-	One    []byte
-	Input  []byte
-	APIURL string
+	One      []byte
+	Input    []byte
+	Keyboard []byte
+	Origin   string
+	Circuit  string
 	*templates.Templates
 }
 
-func NewZero(apiURL string) *Zero {
-	if apiURL == "" {
-		apiURL = "http://localhost:1001"
+// NewZero constructs Zero from a single host string.
+// See resolve for how origin and circuit are derived.
+func NewZero(origin, circuit string) *Zero {
+	if origin == "" {
+		origin = "*"
 	}
-	z := &Zero{
-		APIURL:    apiURL,
+	if circuit == "" {
+		circuit = "http://localhost:1001"
+	}
+	tmpl := template.Must(template.New("pathless").Parse(pathlessHtml))
+	var b strings.Builder
+	if err := tmpl.Execute(&b, map[string]string{"CIRCUIT": circuit}); err != nil {
+		panic(err)
+	}
+	return &Zero{
+		One:       minify(b.String()),
+		Origin:    origin,
+		Circuit:   circuit,
 		Input:     inputHtml,
+		Keyboard:  keyboardHtml,
 		Templates: templates.Init(),
 	}
-	tmpl, err := template.New("pathless").Parse(pathlessHtml)
-	if err != nil {
-		panic("template parse error: " + err.Error())
-	}
-	var b strings.Builder
-	if err := tmpl.Execute(&b, map[string]string{"APIURL": apiURL}); err != nil {
-		panic("template execute error: " + err.Error())
-	}
-	z.One = z.minify(b.String())
-	return z
 }
 
 // minify: <style> -> <script> -> <html>
-func (z *Zero) minify(html string) []byte {
+func minify(html string) []byte {
 	html = regexp.MustCompile(`<style>([\s\S]*?)</style>`).ReplaceAllStringFunc(html, func(s string) string {
 		s = regexp.MustCompile(`/\*[\s\S]*?\*/`).ReplaceAllString(s, "")
 		s = regexp.MustCompile(`\s*([{}:;,>+~])\s*`).ReplaceAllString(s, "$1")

@@ -12,10 +12,10 @@ type Fx struct {
 	Routes map[string][]byte
 }
 
-func NewFx(apiUrl string) *Fx {
+func NewFx(z *zero.Zero) *Fx {
 	return &Fx{
+		Zero:   z,
 		Forge:  NewForge().(*forge),
-		Zero:   zero.NewZero(apiUrl),
 		Routes: make(map[string][]byte),
 	}
 }

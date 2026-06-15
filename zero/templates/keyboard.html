@@ -164,12 +164,22 @@
 							state
 								? (el.dataset.state = 'true')
 								: delete el.dataset.state;
+							if (!state) this.update();
 						},
 					);
+
+					new MutationObserver(() => {
+						if (!panel.hidden) this.update();
+					}).observe(panel, {
+						attributes: true,
+						attributeFilter: ['hidden'],
+					});
 				}
 
 				update() {
-					const { layout, variant, focused } = pathless.universe;
+					const layout = +pathless.universe.el.dataset.layout;
+					const variant = +pathless.universe.el.dataset.variant;
+					const { focused } = pathless.universe;
 					this.#descs.slice(0, 3).forEach((desc, i) => {
 						const next =
 							i === layout ? (variant + 1) % [1, 2, 4][i] : 0;

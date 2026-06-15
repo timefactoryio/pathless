@@ -115,15 +115,21 @@
 				border-right: var(--b);
 			}
 			#panel {
-				position: fixed;
-				inset: 0;
-				z-index: 10;
+				height: 15vh;
+				border-top: var(--b);
 				touch-action: none;
 				overscroll-behavior: none;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				padding: 0.5em;
 			}
 		</style>
 		<script>
-			window.apiUrl = '{{.APIURL}}';
+			window.circuit = '{{.CIRCUIT}}'.replace(
+				'localhost',
+				location.hostname,
+			);
 			class Pathless {
 				#td = new TextDecoder();
 				static #newUniverse() {
@@ -136,11 +142,12 @@
 						hidden: true,
 					});
 					const el = document.getElementById('universe');
-					el.appendChild(panel);
+					document.body.appendChild(panel);
 					return {
 						el,
 						cache: new Map(),
 						prev: null,
+						focused: 0,
 						space,
 						panel,
 					};
@@ -178,6 +185,13 @@
 				}
 				get panel() {
 					return this.universe.panel;
+				}
+
+				get focused() {
+					return this.universe.focused;
+				}
+				get space() {
+					return this.universe.space[this.focused];
 				}
 
 				wire(buf) {
@@ -220,8 +234,10 @@
 				}
 
 				async init() {
-					const [input, ...rest] = this.wire(
-						await fetch(window.apiUrl).then((r) => r.arrayBuffer()),
+					const [input, panel, ...rest] = this.wire(
+						await fetch(window.circuit).then((r) =>
+							r.arrayBuffer(),
+						),
 					);
 					const inputEl = document.createElement('div');
 					inputEl.innerHTML = this.#td.decode(input.data);
@@ -230,6 +246,9 @@
 					document.body.removeChild(inputEl);
 					this.input = new this.Input();
 					delete this.Input;
+
+					this.universe.panel.innerHTML = this.#td.decode(panel.data);
+					this.exec(this.universe.panel);
 
 					this.universe.frames = rest.map((e) =>
 						Pathless.#newFrame(this.#td.decode(e.data)),
@@ -240,20 +259,23 @@
 						this.sync();
 					}
 				}
-				read(i) {
+				read(i = this.focused) {
 					const s = this.universe.space[i];
 					return s.frame.state.get(s.el.id);
 				}
-				write(k, v, i) {
+				write(k, v, i = this.focused) {
 					const s = this.universe.space[i];
 					s.frame.state.get(s.el.id).set(k, v);
 				}
 				sync(...indices) {
+					const prev = this.universe.focused;
 					(indices.length ? indices : this.visible).forEach((i) => {
 						const s = this.universe.space[i];
 						s.el.innerHTML = s.frame.el;
+						this.universe.focused = i;
 						this.exec(s.el);
 					});
+					this.universe.focused = prev;
 				}
 				exec(el) {
 					el.replaceChildren(
@@ -266,23 +288,42 @@
 					if (l > 0) this.universe.prev = [l, v];
 					this.universe.el.dataset.layout = l;
 					this.universe.el.dataset.variant = v;
-					Pathless.#layouts[l].forEach(
-						(h, i) => (this.universe.space[i].el.hidden = h),
-					);
+					if (l === 0) {
+						const f = this.universe.focused;
+						this.universe.space.forEach(
+							(s, i) => (s.el.hidden = i !== f),
+						);
+					} else {
+						Pathless.#layouts[l].forEach(
+							(h, i) => (this.universe.space[i].el.hidden = h),
+						);
+					}
 					this.sync();
 				}
 				cycle(l = +this.universe.el.dataset.layout) {
-					if (l === 0 && this.universe.prev)
+					const cur = +this.universe.el.dataset.layout;
+					if (cur === 0 && this.universe.prev)
 						return this.layout(...this.universe.prev);
-					const { layout, variant } = this.universe.el.dataset;
-					const v = l === +layout ? (+variant + 1) % [1, 2, 4][l] : 0;
+					const v =
+						l === cur
+							? (+this.universe.el.dataset.variant + 1) %
+								[1, 2, 4][l]
+							: 0;
 					this.layout(l, v);
 				}
 
-				nav(dir, i) {
+				nav(dir, i = this.focused) {
 					const s = this.universe.space[i];
 					s.frame = Pathless.wrap(this.universe.frames, s.frame, dir);
 					this.sync(i);
+				}
+				focus() {
+					const v = this.visible;
+					this.universe.focused =
+						v[(v.indexOf(this.focused) + 1) % v.length];
+				}
+				toggle() {
+					this.universe.panel.hidden = !this.universe.panel.hidden;
 				}
 			}
 

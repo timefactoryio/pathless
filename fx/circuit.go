@@ -22,7 +22,7 @@ type Value struct {
 	Data []byte `json:"-"`
 }
 
-func Encode(values []*Value) []byte {
+func Wire(values []*Value) []byte {
 	totalData := 0
 	for i, v := range values {
 		values[i].Size = uint32(len(v.Data))
@@ -57,7 +57,8 @@ func Compress(data []byte) []byte {
 
 // ToBytes fetches the content at input, either from an HTTP URL or a local file.
 func (fx *Fx) ToBytes(input string) ([]byte, error) {
-	if strings.HasPrefix(input, "http") {
+	if strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://") {
+
 		resp, err := http.Get(input)
 		if err != nil {
 			return nil, err
@@ -85,7 +86,7 @@ func (fx *Fx) Load(path string) {
 			values = []*Value{v}
 		}
 	}
-	fx.Routes[key] = Compress(Encode(values))
+	fx.Routes[key] = Compress(Wire(values))
 	for _, v := range values {
 		v.Data = nil
 	}
@@ -111,34 +112,39 @@ func (fx *Fx) read(path string) *Value {
 // If a sort.json file is present, it defines the blob order by name;
 // files not listed in sort.json are appended after the ordered entries.
 func (fx *Fx) walk(path string) []*Value {
-	var values []*Value
-	index := map[string]int{}
-
-	if data, err := os.ReadFile(filepath.Join(path, "sort.json")); err == nil {
-		var order []string
-		if json.Unmarshal(data, &order) == nil {
-			values = make([]*Value, len(order))
-			for i, name := range order {
-				values[i] = &Value{Name: name}
-				index[name] = i
-			}
-		}
-	}
-
+	var all []*Value
 	filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || filepath.Base(p) == "sort.json" {
 			return err
 		}
-		v := fx.read(p)
-		if v == nil {
-			return nil
-		}
-		if i, ok := index[v.Name]; ok {
-			values[i] = v
-		} else {
-			values = append(values, v)
+		if v := fx.read(p); v != nil {
+			all = append(all, v)
 		}
 		return nil
 	})
-	return values
+
+	if data, err := os.ReadFile(filepath.Join(path, "sort.json")); err == nil {
+		var order []string
+		if json.Unmarshal(data, &order) == nil {
+			byName := make(map[string]*Value, len(all))
+			for _, v := range all {
+				byName[v.Name] = v
+			}
+			out := make([]*Value, 0, len(all))
+			for _, name := range order {
+				if v, ok := byName[name]; ok {
+					out = append(out, v)
+					delete(byName, name)
+				}
+			}
+			for _, v := range all {
+				if _, ok := byName[v.Name]; ok {
+					out = append(out, v)
+				}
+			}
+			return out
+		}
+	}
+
+	return all
 }
