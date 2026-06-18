@@ -10,8 +10,6 @@ import (
 	"github.com/timefactoryio/markdown"
 )
 
-type Frame template.HTML
-
 var (
 	style  = regexp.MustCompile(`(?s)<style>(.*?)</style>`)
 	script = regexp.MustCompile(`(?s)<script>(.*?)</script>`)
@@ -19,27 +17,27 @@ var (
 
 func NewForge() Forge {
 	return &forge{
-		frames: []*Frame{},
+		frames: []*template.HTML{},
 		md:     markdown.New(""),
 	}
 }
 
 type forge struct {
-	frames []*Frame
+	frames []*template.HTML
 	md     *markdown.Markdown
 }
 
 type Forge interface {
-	HTML(raw string) *Frame
-	Build(class string, elements ...*Frame)
-	Builder(class string, elements ...*Frame) *Frame
-	Frames(frame ...*Frame) [][]byte
+	HTML(raw string) *template.HTML
+	Build(class string, elements ...*template.HTML)
+	Builder(class string, elements ...*template.HTML) *template.HTML
+	Frames(frame ...*template.HTML) [][]byte
 	Markdown() *markdown.Markdown
-	JS(js string) *Frame
-	CSS(css string) *Frame
-	Elem(tag, text string, attrs ...Attr) *Frame
-	Block(tag string, attrs Attr, children ...*Frame) *Frame
-	Void(tag string, attrs Attr) *Frame
+	JS(js string) *template.HTML
+	CSS(css string) *template.HTML
+	Elem(tag, text string, attrs ...Attr) *template.HTML
+	Block(tag string, attrs Attr, children ...*template.HTML) *template.HTML
+	Void(tag string, attrs Attr) *template.HTML
 }
 
 // Attr is a map of HTML attribute key-value pairs passed to any element builder.
@@ -47,16 +45,16 @@ type Attr map[string]string
 
 // HTML wraps a raw HTML string as a trusted Frame value without escaping.
 // Use only with content you control — caller is responsible for safety.
-func (f *forge) HTML(raw string) *Frame {
-	o := Frame(template.HTML(raw))
+func (f *forge) HTML(raw string) *template.HTML {
+	o := template.HTML(raw)
 	return &o
 }
 
-func (f *forge) Build(class string, elements ...*Frame) {
+func (f *forge) Build(class string, elements ...*template.HTML) {
 	f.Frames(f.Builder(class, elements...))
 }
 
-func (f *forge) Builder(class string, elements ...*Frame) *Frame {
+func (f *forge) Builder(class string, elements ...*template.HTML) *template.HTML {
 	var b strings.Builder
 	if class != "" {
 		fmt.Fprintf(&b, `<div class="%s">`, html.EscapeString(class))
@@ -68,11 +66,11 @@ func (f *forge) Builder(class string, elements ...*Frame) *Frame {
 		b.WriteString("</div>")
 	}
 	cleaned := f.consolidateAssets(b.String())
-	result := Frame(template.HTML(cleaned))
+	result := template.HTML(cleaned)
 	return &result
 }
 
-func (f *forge) Frames(frame ...*Frame) [][]byte {
+func (f *forge) Frames(frame ...*template.HTML) [][]byte {
 	if len(frame) > 0 && frame[0] != nil {
 		f.frames = append(f.frames, frame[0])
 	}
@@ -91,44 +89,44 @@ func (f *forge) Markdown() *markdown.Markdown {
 }
 
 // JS wraps a raw JavaScript string in a <script> tag without escaping.
-func (f *forge) JS(js string) *Frame {
+func (f *forge) JS(js string) *template.HTML {
 	var b strings.Builder
 	b.WriteString(`<script>`)
 	b.WriteString(js)
 	b.WriteString(`</script>`)
-	o := Frame(template.HTML(b.String()))
+	o := template.HTML(b.String())
 	return &o
 }
 
 // CSS wraps a raw CSS string in a <style> tag without escaping.
-func (f *forge) CSS(css string) *Frame {
+func (f *forge) CSS(css string) *template.HTML {
 	var b strings.Builder
 	b.WriteString(`<style>`)
 	b.WriteString(css)
 	b.WriteString(`</style>`)
-	o := Frame(template.HTML(b.String()))
+	o := template.HTML(b.String())
 	return &o
 }
 
 // Elem builds a paired tag with escaped text content: <tag attrs>text</tag>.
 // Covers h1-h6, p, span, strong, em, code, button, a, li, td, label, etc.
 // Attrs are optional.
-func (f *forge) Elem(tag, text string, attrs ...Attr) *Frame {
+func (f *forge) Elem(tag, text string, attrs ...Attr) *template.HTML {
 	a := Attr{}
 	if len(attrs) > 0 {
 		a = attrs[0]
 	}
-	o := Frame(template.HTML(fmt.Sprintf(
+	o := template.HTML(fmt.Sprintf(
 		"<%s%s>%s</%s>",
 		tag, renderAttrs(a), html.EscapeString(text), tag,
-	)))
+	))
 	return &o
 }
 
 // Block builds a paired tag with zero or more child Frame nodes: <tag attrs>children</tag>.
 // Covers div, section, article, nav, ul, ol, table, tr, video, audio, canvas, etc.
 // Pass nil for attrs when no attributes are needed.
-func (f *forge) Block(tag string, attrs Attr, children ...*Frame) *Frame {
+func (f *forge) Block(tag string, attrs Attr, children ...*template.HTML) *template.HTML {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<%s%s>", tag, renderAttrs(attrs))
 	for _, child := range children {
@@ -137,14 +135,14 @@ func (f *forge) Block(tag string, attrs Attr, children ...*Frame) *Frame {
 		}
 	}
 	fmt.Fprintf(&b, "</%s>", tag)
-	o := Frame(template.HTML(b.String()))
+	o := template.HTML(b.String())
 	return &o
 }
 
 // Void builds a self-closing tag with no children or text: <tag attrs/>.
 // Covers img, input, br, hr, meta, link, source, embed, etc.
-func (f *forge) Void(tag string, attrs Attr) *Frame {
-	o := Frame(template.HTML(fmt.Sprintf("<%s%s/>", tag, renderAttrs(attrs))))
+func (f *forge) Void(tag string, attrs Attr) *template.HTML {
+	o := template.HTML(fmt.Sprintf("<%s%s/>", tag, renderAttrs(attrs)))
 	return &o
 }
 

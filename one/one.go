@@ -32,7 +32,7 @@ func (o *One) handlePathless(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Encoding", "gzip")
-	w.Write(o.One)
+	w.Write(o.Pathless)
 }
 
 func (o *One) wire(path string, data []byte) {
@@ -56,11 +56,14 @@ func (o *One) cors(next http.Handler) http.Handler {
 }
 
 func (o *One) Serve() {
-	values := []*fx.Value{{Data: o.Input}, {Data: o.Keyboard}}
+	values := []*fx.Value{
+		{Data: o.Input},
+		{Data: o.Keyboard},
+	}
 	for _, b := range o.Frames() {
 		values = append(values, &fx.Value{Data: b})
 	}
-	o.wire("/", fx.Compress(fx.Wire(values)))
+	o.wire("/", o.Fx.Compress(o.Fx.Wire(values)))
 	for key, data := range o.Fx.Routes {
 		o.wire("/"+key, data)
 	}

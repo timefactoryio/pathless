@@ -23,13 +23,14 @@ var slidesHtml string
 var textHtml string
 
 func (o *One) Home(logo, heading string) {
-	tmpl := fx.Frame(template.HTML(homeHtml))
+	tmpl := template.HTML(homeHtml)
 	logoDiv := o.Block("div", fx.Attr{"class": "logo"}, o.HTML(string(o.Logo(logo))))
 	h1 := o.Elem("h1", heading)
 	kbd := o.Elem("kbd", "Z")
 	button := o.Block("button", nil, o.HTML("Press"), kbd)
 	o.Build("home", &tmpl, logoDiv, h1, button)
 }
+
 func (o *One) Text(path string) {
 	content, err := o.ToBytes(path)
 	if err != nil {
@@ -39,8 +40,8 @@ func (o *One) Text(path string) {
 	if err := o.Markdown().Convert(content, &buf); err != nil {
 		return
 	}
-	markdown := fx.Frame(template.HTML(buf.String()))
-	textTmpl := fx.Frame(template.HTML(textHtml))
+	markdown := template.HTML(buf.String())
+	textTmpl := template.HTML(textHtml)
 	o.Build("text", &markdown, &textTmpl)
 }
 
@@ -55,7 +56,7 @@ func (o *One) Slides(dir string) {
 	if err := tmpl.Execute(&buf, map[string]string{"PREFIX": base}); err != nil {
 		return
 	}
-	result := fx.Frame(template.HTML(buf.String()))
+	result := template.HTML(buf.String())
 	o.Build("slides", &result)
 }
 

@@ -1,0 +1,291 @@
+<style>
+	#universe {
+		flex: 1;
+		min-height: 0;
+		display: flex;
+	}
+	:is(#zero, #fx, #one) {
+		flex: 1;
+		overflow: hidden;
+		container-type: size;
+		position: relative;
+		isolation: isolate;
+		display: flex;
+		flex-direction: column;
+		touch-action: none;
+		overscroll-behavior: none;
+	}
+	:is(#zero, #fx, #one) > * {
+		width: 100%;
+	}
+	:is(#zero, #fx, #one) > :first-child {
+		flex: 1;
+		min-height: 0;
+	}
+	#zero {
+		grid-area: zero;
+		container-name: zero;
+	}
+	#fx {
+		grid-area: fx;
+		container-name: fx;
+	}
+	#one {
+		grid-area: one;
+		container-name: one;
+	}
+	#universe[data-layout='1'][data-variant='1'] {
+		flex-direction: column;
+	}
+	#universe[data-layout='2'] {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		grid-template-rows: 1fr 1fr;
+	}
+	#universe[data-layout='2'][data-variant='0'] {
+		grid-template-areas: 'zero fx' 'zero one';
+	}
+	#universe[data-layout='2'][data-variant='1'] {
+		grid-template-areas: 'zero zero' 'one  fx';
+	}
+	#universe[data-layout='2'][data-variant='2'] {
+		grid-template-areas: 'one  zero' 'fx   zero';
+	}
+	#universe[data-layout='2'][data-variant='3'] {
+		grid-template-areas: 'fx   one' 'zero zero';
+	}
+	#universe:not([data-layout='0'])[data-variant='0'] #zero {
+		border-right: var(--b);
+	}
+	#universe:not([data-layout='0'])[data-variant='1'] #zero {
+		border-bottom: var(--b);
+	}
+	#universe[data-layout='2'][data-variant='2'] #zero {
+		border-left: var(--b);
+	}
+	#universe[data-layout='2'][data-variant='3'] #zero {
+		border-top: var(--b);
+	}
+	#universe[data-layout='2'][data-variant='0'] #fx {
+		border-bottom: var(--b);
+	}
+	#universe[data-layout='2'][data-variant='1'] #fx {
+		border-left: var(--b);
+	}
+	#universe[data-layout='2'][data-variant='2'] #fx {
+		border-top: var(--b);
+	}
+	#universe[data-layout='2'][data-variant='3'] #fx {
+		border-right: var(--b);
+	}
+	#panel {
+		height: 15vh;
+		border-top: var(--b);
+		touch-action: none;
+		overscroll-behavior: none;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.5em;
+	}
+</style>
+
+<div id="universe" data-layout="0" data-variant="0">
+	<div id="zero"></div>
+	<div id="fx" hidden></div>
+	<div id="one" hidden></div>
+</div>
+
+<script>
+	window.circuit = '{{.CIRCUIT}}'.replace('localhost', location.hostname);
+	class Pathless {
+		#td = new TextDecoder();
+		static #newUniverse() {
+			const space = ['zero', 'fx', 'one'].map((id) => ({
+				el: document.getElementById(id),
+				frame: null,
+			}));
+			const panel = Object.assign(document.createElement('div'), {
+				id: 'panel',
+				hidden: true,
+			});
+			const el = document.getElementById('universe');
+			document.body.appendChild(panel);
+			return {
+				el,
+				cache: new Map(),
+				prev: null,
+				focused: 0,
+				space,
+				panel,
+			};
+		}
+		static #newFrame(html) {
+			return {
+				el: html,
+				state: new Map([
+					['zero', new Map()],
+					['fx', new Map()],
+					['one', new Map()],
+				]),
+			};
+		}
+		static #layouts = [
+			[false, true, true],
+			[false, false, true],
+			[false, false, false],
+		];
+		static wrap(arr, item, dir) {
+			return arr[(arr.indexOf(item) + dir + arr.length) % arr.length];
+		}
+		constructor() {
+			this.universe = Pathless.#newUniverse();
+			this.input = null;
+			this.init();
+		}
+
+		get visible() {
+			return this.universe.space.flatMap((s, i) =>
+				s.el.hidden ? [] : [i],
+			);
+		}
+		get panel() {
+			return this.universe.panel;
+		}
+
+		get focused() {
+			return this.universe.focused;
+		}
+		get space() {
+			return this.universe.space[this.focused];
+		}
+
+		wire(buf) {
+			const bytes = new Uint8Array(buf);
+			const count = (bytes[0] << 8) | bytes[1];
+			const values = new Array(count);
+			let pos = 2;
+			const str = (n) =>
+				n
+					? this.#td.decode(bytes.subarray(pos, (pos += n)))
+					: undefined;
+			const u32 = () =>
+				(bytes[pos++] << 24) |
+				(bytes[pos++] << 16) |
+				(bytes[pos++] << 8) |
+				bytes[pos++];
+			for (let i = 0; i < count; i++) {
+				const name = str(bytes[pos++]);
+				const type = str(bytes[pos++]);
+				const n = u32();
+				values[i] = {
+					name,
+					type,
+					data: bytes.subarray(pos, (pos += n)),
+				};
+			}
+			return values;
+		}
+
+		source(url) {
+			const { cache } = this.universe;
+			if (!cache.has(url))
+				cache.set(
+					url,
+					fetch(url)
+						.then((r) => r.arrayBuffer())
+						.then((buf) => this.wire(buf)),
+				);
+			return cache.get(url);
+		}
+
+		async init() {
+			const [input, panel, ...rest] = this.wire(
+				await fetch(window.circuit).then((r) => r.arrayBuffer()),
+			);
+			const inputEl = document.createElement('div');
+			inputEl.innerHTML = this.#td.decode(input.data);
+			document.body.appendChild(inputEl);
+			this.exec(inputEl);
+			document.body.removeChild(inputEl);
+			this.input = new this.Input();
+			delete this.Input;
+
+			this.universe.panel.innerHTML = this.#td.decode(panel.data);
+			this.exec(this.universe.panel);
+
+			this.universe.frames = rest.map((e) =>
+				Pathless.#newFrame(this.#td.decode(e.data)),
+			);
+			if (this.universe.frames.length) {
+				const first = this.universe.frames[0];
+				this.universe.space.forEach((s) => (s.frame = first));
+				this.sync();
+			}
+		}
+		read(i = this.focused) {
+			const s = this.universe.space[i];
+			return s.frame.state.get(s.el.id);
+		}
+		write(k, v, i = this.focused) {
+			const s = this.universe.space[i];
+			s.frame.state.get(s.el.id).set(k, v);
+		}
+		sync(...indices) {
+			const prev = this.universe.focused;
+			(indices.length ? indices : this.visible).forEach((i) => {
+				const s = this.universe.space[i];
+				s.el.innerHTML = s.frame.el;
+				this.universe.focused = i;
+				this.exec(s.el);
+			});
+			this.universe.focused = prev;
+		}
+		exec(el) {
+			el.replaceChildren(
+				document.createRange().createContextualFragment(el.innerHTML),
+			);
+		}
+		layout(l, v = 0) {
+			if (l > 0) this.universe.prev = [l, v];
+			this.universe.el.dataset.layout = l;
+			this.universe.el.dataset.variant = v;
+			if (l === 0) {
+				const f = this.universe.focused;
+				this.universe.space.forEach((s, i) => (s.el.hidden = i !== f));
+			} else {
+				Pathless.#layouts[l].forEach(
+					(h, i) => (this.universe.space[i].el.hidden = h),
+				);
+			}
+			this.sync();
+		}
+		cycle(l = +this.universe.el.dataset.layout) {
+			const cur = +this.universe.el.dataset.layout;
+			if (cur === 0 && this.universe.prev)
+				return this.layout(...this.universe.prev);
+			const v =
+				l === cur
+					? (+this.universe.el.dataset.variant + 1) % [1, 2, 4][l]
+					: 0;
+			this.layout(l, v);
+		}
+
+		nav(dir, i = this.focused) {
+			const s = this.universe.space[i];
+			s.frame = Pathless.wrap(this.universe.frames, s.frame, dir);
+			this.sync(i);
+		}
+		focus() {
+			const v = this.visible;
+			this.universe.focused = v[(v.indexOf(this.focused) + 1) % v.length];
+		}
+		toggle() {
+			this.universe.panel.hidden = !this.universe.panel.hidden;
+		}
+	}
+
+	document.addEventListener('DOMContentLoaded', () => {
+		window.pathless = new Pathless();
+	});
+</script>

@@ -13,6 +13,14 @@ import (
 	"strings"
 )
 
+type Circuit struct {
+	Routes map[string][]byte
+}
+
+func NewCircuit() *Circuit {
+	return &Circuit{Routes: make(map[string][]byte)}
+}
+
 // Value is the unit of work for encoding. Name and Type populate the manifest;
 // Data is the raw blob. Data is excluded from JSON and freed after encoding.
 type Value struct {
@@ -22,7 +30,7 @@ type Value struct {
 	Data []byte `json:"-"`
 }
 
-func Wire(values []*Value) []byte {
+func (c *Circuit) Wire(values []*Value) []byte {
 	totalData := 0
 	for i, v := range values {
 		values[i].Size = uint32(len(v.Data))
@@ -47,7 +55,7 @@ func Wire(values []*Value) []byte {
 // Compress gzip-compresses data at maximum compression.
 // Bundles are compressed once at build time and served directly
 // with Content-Encoding: gzip.
-func Compress(data []byte) []byte {
+func (c *Circuit) Compress(data []byte) []byte {
 	var buf bytes.Buffer
 	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
 	w.Write(data)
@@ -56,7 +64,7 @@ func Compress(data []byte) []byte {
 }
 
 // ToBytes fetches the content at input, either from an HTTP URL or a local file.
-func (fx *Fx) ToBytes(input string) ([]byte, error) {
+func (c *Circuit) ToBytes(input string) ([]byte, error) {
 	if strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://") {
 
 		resp, err := http.Get(input)
@@ -72,11 +80,11 @@ func (fx *Fx) ToBytes(input string) ([]byte, error) {
 // Load reads a file or directory at path, encodes and compresses the contents,
 // and stores the bundle in Routes keyed by the base name of path.
 // Raw data is freed from each Value after the bundle is stored.
-func (fx *Fx) Load(path string) {
+func (c *Circuit) Load(path string) {
 	key := filepath.Base(path)
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		if data, err := fx.ToBytes(path); err == nil {
-			fx.Routes[key] = Compress(data)
+		if data, err := c.ToBytes(path); err == nil {
+			c.Routes[key] = c.Compress(data)
 		}
 		return
 	}
@@ -86,13 +94,13 @@ func (fx *Fx) Load(path string) {
 	}
 	var values []*Value
 	if info.IsDir() {
-		values = fx.walk(path)
+		values = c.walk(path)
 	} else {
-		if v := fx.read(path); v != nil {
+		if v := c.read(path); v != nil {
 			values = []*Value{v}
 		}
 	}
-	fx.Routes[key] = Compress(Wire(values))
+	c.Routes[key] = c.Compress(c.Wire(values))
 	for _, v := range values {
 		v.Data = nil
 	}
@@ -100,7 +108,7 @@ func (fx *Fx) Load(path string) {
 
 // read loads a single file into a Value, inferring MIME type from extension
 // or content detection as a fallback.
-func (fx *Fx) read(path string) *Value {
+func (c *Circuit) read(path string) *Value {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
@@ -117,13 +125,13 @@ func (fx *Fx) read(path string) *Value {
 // walk reads all files in a directory into an ordered slice of Values.
 // If a sort.json file is present, it defines the blob order by name;
 // files not listed in sort.json are appended after the ordered entries.
-func (fx *Fx) walk(path string) []*Value {
+func (c *Circuit) walk(path string) []*Value {
 	var all []*Value
 	filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || filepath.Base(p) == "sort.json" {
 			return err
 		}
-		if v := fx.read(p); v != nil {
+		if v := c.read(p); v != nil {
 			all = append(all, v)
 		}
 		return nil

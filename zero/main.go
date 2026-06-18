@@ -22,7 +22,7 @@ var keyboardHtml []byte
 // Origin is the CORS-allowed root domain; Circuit is the API endpoint URL
 // baked into the HTML at build time.
 type Zero struct {
-	One      []byte
+	Pathless []byte
 	Input    []byte
 	Keyboard []byte
 	Origin   string
@@ -44,7 +44,7 @@ func NewZero(origin, circuit string) *Zero {
 		panic(err)
 	}
 	return &Zero{
-		One:      minify(b.String()),
+		Pathless: minify(b.String()),
 		Origin:   origin,
 		Circuit:  circuit,
 		Input:    inputHtml,

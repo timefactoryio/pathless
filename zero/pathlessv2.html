@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta
+			name="viewport"
+			content="width=device-width,initial-scale=1.0,viewport-fit=cover,user-scalable=no" />
+		<title>hello.universe</title>
+		<style>
+			:root {
+				--b: 1px solid blue;
+			}
+			*,
+			*::before,
+			*::after {
+				box-sizing: border-box;
+				margin: 0;
+				padding: 0;
+				user-select: none;
+				-webkit-user-select: none;
+				scrollbar-width: none;
+			}
+			[hidden] {
+				display: none !important;
+			}
+			body {
+				height: 100dvh;
+				overflow: hidden;
+				font-family: sans-serif;
+				background: #000;
+				color: #fff;
+				display: flex;
+				flex-direction: column;
+				border: var(--b);
+				border-radius: 5px;
+				touch-action: none;
+			}
+		</style>
+		<script>
+			window.circuit = '{{.CIRCUIT}}'.replace(
+				'localhost',
+				location.hostname,
+			);
+
+			function wire(buf) {
+				const td = new TextDecoder();
+				const bytes = new Uint8Array(buf);
+				const count = (bytes[0] << 8) | bytes[1];
+				const values = new Array(count);
+				let pos = 2;
+				const str = (n) =>
+					n ? td.decode(bytes.subarray(pos, (pos += n))) : undefined;
+				const u32 = () =>
+					(bytes[pos++] << 24) |
+					(bytes[pos++] << 16) |
+					(bytes[pos++] << 8) |
+					bytes[pos++];
+				for (let i = 0; i < count; i++) {
+					const name = str(bytes[pos++]);
+					const type = str(bytes[pos++]);
+					const n = u32();
+					values[i] = {
+						name,
+						type,
+						data: bytes.subarray(pos, (pos += n)),
+					};
+				}
+				return values;
+			}
+
+			class Pathless {
+				#cache = new Map();
+
+				constructor() {
+					this.init();
+				}
+
+				source(url) {
+					if (!this.#cache.has(url))
+						this.#cache.set(
+							url,
+							fetch(url)
+								.then((r) => r.arrayBuffer())
+								.then(wire),
+						);
+					return this.#cache.get(url);
+				}
+
+				async init() {
+					const [universe, input, keyboard, ...frames] =
+						await this.source(window.circuit);
+					this.input = new this.Input(input);
+					this.keyboard = new this.Keyboard(keyboard);
+					this.universe = new this.Universe(frames);
+				}
+			}
+
+			document.addEventListener('DOMContentLoaded', () => {
+				window.pathless = new Pathless();
+			});
+		</script>
+	</head>
+	<body>
+		<div id="universe" data-layout="0" data-variant="0">
+			<div id="zero"></div>
+			<div id="fx" hidden></div>
+			<div id="one" hidden></div>
+		</div>
+	</body>
+</html>

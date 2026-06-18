@@ -9,13 +9,13 @@ import (
 type Fx struct {
 	*zero.Zero
 	Forge
-	Routes map[string][]byte
+	*Circuit
 }
 
 func NewFx(z *zero.Zero) *Fx {
 	return &Fx{
-		Zero:   z,
-		Forge:  NewForge().(*forge),
-		Routes: make(map[string][]byte),
+		Zero:    z,
+		Forge:   NewForge().(*forge),
+		Circuit: NewCircuit(),
 	}
 }
