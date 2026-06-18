@@ -73,11 +73,17 @@ func (fx *Fx) ToBytes(input string) ([]byte, error) {
 // and stores the bundle in Routes keyed by the base name of path.
 // Raw data is freed from each Value after the bundle is stored.
 func (fx *Fx) Load(path string) {
+	key := filepath.Base(path)
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		if data, err := fx.ToBytes(path); err == nil {
+			fx.Routes[key] = Compress(data)
+		}
+		return
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return
 	}
-	key := filepath.Base(path)
 	var values []*Value
 	if info.IsDir() {
 		values = fx.walk(path)
