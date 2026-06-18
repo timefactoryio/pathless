@@ -11,7 +11,7 @@ type One struct {
 	*zero.Zero
 	*fx.Fx
 	pathless *http.ServeMux
-	gateway  *http.ServeMux
+	circuit  *http.ServeMux
 }
 
 func NewOne(z *zero.Zero, f *fx.Fx) *One {
@@ -19,7 +19,7 @@ func NewOne(z *zero.Zero, f *fx.Fx) *One {
 		Zero:     z,
 		Fx:       f,
 		pathless: http.NewServeMux(),
-		gateway:  http.NewServeMux(),
+		circuit:  http.NewServeMux(),
 	}
 	o.pathless.HandleFunc("/", o.handlePathless)
 	return o
@@ -36,7 +36,7 @@ func (o *One) handlePathless(w http.ResponseWriter, r *http.Request) {
 }
 
 func (o *One) wire(path string, data []byte) {
-	o.gateway.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+	o.circuit.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Write(data)
@@ -64,6 +64,6 @@ func (o *One) Serve() {
 	for key, data := range o.Fx.Routes {
 		o.wire("/"+key, data)
 	}
-	go http.ListenAndServe(":1001", o.cors(o.gateway))
+	go http.ListenAndServe(":1001", o.cors(o.circuit))
 	http.ListenAndServe(":1000", o.pathless)
 }

@@ -7,17 +7,15 @@ import (
 	"html/template"
 	"regexp"
 	"strings"
-
-	"github.com/timefactoryio/pathless/zero/templates"
 )
 
-//go:embed core/pathless.html
+//go:embed pathless.html
 var pathlessHtml string
 
-//go:embed core/input.html
+//go:embed input.html
 var inputHtml []byte
 
-//go:embed templates/keyboard.html
+//go:embed keyboard.html
 var keyboardHtml []byte
 
 // Zero holds the compiled HTML shell and shared assets.
@@ -29,7 +27,6 @@ type Zero struct {
 	Keyboard []byte
 	Origin   string
 	Circuit  string
-	*templates.Templates
 }
 
 // NewZero constructs Zero from a single host string.
@@ -47,12 +44,11 @@ func NewZero(origin, circuit string) *Zero {
 		panic(err)
 	}
 	return &Zero{
-		One:       minify(b.String()),
-		Origin:    origin,
-		Circuit:   circuit,
-		Input:     inputHtml,
-		Keyboard:  keyboardHtml,
-		Templates: templates.Init(),
+		One:      minify(b.String()),
+		Origin:   origin,
+		Circuit:  circuit,
+		Input:    inputHtml,
+		Keyboard: keyboardHtml,
 	}
 }
 
