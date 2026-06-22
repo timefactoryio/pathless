@@ -132,48 +132,28 @@
 			);
 			class Pathless {
 				#td = new TextDecoder();
-				static #newUniverse() {
-					const space = ['zero', 'fx', 'one'].map((id) => ({
-						el: document.getElementById(id),
-						frame: null,
-					}));
-					const panel = Object.assign(document.createElement('div'), {
-						id: 'panel',
-						hidden: true,
-					});
-					const el = document.getElementById('universe');
-					document.body.appendChild(panel);
-					return {
-						el,
-						cache: new Map(),
-						prev: null,
-						focused: 0,
-						space,
-						panel,
-					};
-				}
-				static #newFrame(html) {
-					return {
-						el: html,
-						state: new Map([
-							['zero', new Map()],
-							['fx', new Map()],
-							['one', new Map()],
-						]),
-					};
-				}
 				static #layouts = [
 					[false, true, true],
 					[false, false, true],
 					[false, false, false],
 				];
-				static wrap(arr, item, dir) {
-					return arr[
-						(arr.indexOf(item) + dir + arr.length) % arr.length
-					];
-				}
 				constructor() {
-					this.universe = Pathless.#newUniverse();
+					const panel = Object.assign(document.createElement('div'), {
+						id: 'panel',
+						hidden: true,
+					});
+					document.body.appendChild(panel);
+					this.universe = {
+						el: document.getElementById('universe'),
+						space: ['zero', 'fx', 'one'].map((id) => ({
+							el: document.getElementById(id),
+							frame: null,
+						})),
+						cache: new Map(),
+						prev: null,
+						focused: 0,
+						panel,
+					};
 					this.input = null;
 					this.init();
 				}
@@ -235,27 +215,31 @@
 
 				async init() {
 					const [input, panel, ...rest] = this.wire(
-						await fetch(window.circuit).then((r) =>
-							r.arrayBuffer(),
-						),
+						await (await fetch(window.circuit)).arrayBuffer(),
 					);
+
 					const inputEl = document.createElement('div');
 					inputEl.innerHTML = this.#td.decode(input.data);
 					document.body.appendChild(inputEl);
 					this.exec(inputEl);
 					document.body.removeChild(inputEl);
-					this.input = new this.Input();
-					delete this.Input;
 
 					this.universe.panel.innerHTML = this.#td.decode(panel.data);
 					this.exec(this.universe.panel);
 
-					this.universe.frames = rest.map((e) =>
-						Pathless.#newFrame(this.#td.decode(e.data)),
-					);
+					this.universe.frames = rest.map((e) => ({
+						el: this.#td.decode(e.data),
+						state: new Map([
+							['zero', new Map()],
+							['fx', new Map()],
+							['one', new Map()],
+						]),
+					}));
+
 					if (this.universe.frames.length) {
-						const first = this.universe.frames[0];
-						this.universe.space.forEach((s) => (s.frame = first));
+						this.universe.space.forEach(
+							(s) => (s.frame = this.universe.frames[0]),
+						);
 						this.sync();
 					}
 				}
@@ -314,7 +298,9 @@
 
 				nav(dir, i = this.focused) {
 					const s = this.universe.space[i];
-					s.frame = Pathless.wrap(this.universe.frames, s.frame, dir);
+					const f = this.universe.frames;
+					s.frame =
+						f[(f.indexOf(s.frame) + dir + f.length) % f.length];
 					this.sync(i);
 				}
 				focus() {
