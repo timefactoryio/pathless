@@ -18,7 +18,6 @@
 				padding: 0;
 				user-select: none;
 				-webkit-user-select: none;
-				scrollbar-width: none;
 			}
 			[hidden] {
 				display: none !important;
@@ -132,41 +131,33 @@
 			);
 			class Pathless {
 				#td = new TextDecoder();
-				static #layouts = [
-					[false, true, true],
-					[false, false, true],
-					[false, false, false],
-				];
+				static #spaces = ['zero', 'fx', 'one'];
+				static #layouts = [null, [0, 1], [0, 1, 2]];
+				static #variants = [1, 2, 4];
 				constructor() {
-					const panel = Object.assign(document.createElement('div'), {
-						id: 'panel',
-						hidden: true,
-					});
-					document.body.appendChild(panel);
 					this.universe = {
 						el: document.getElementById('universe'),
-						space: ['zero', 'fx', 'one'].map((id) => ({
+						space: Pathless.#spaces.map((id) => ({
 							el: document.getElementById(id),
 							frame: null,
 						})),
+						panel: document.getElementById('panel'),
 						cache: new Map(),
 						prev: null,
 						focused: 0,
-						panel,
+						frames: [],
+						visible: [0],
 					};
 					this.input = null;
 					this.init();
 				}
 
 				get visible() {
-					return this.universe.space.flatMap((s, i) =>
-						s.el.hidden ? [] : [i],
-					);
+					return this.universe.visible;
 				}
 				get panel() {
 					return this.universe.panel;
 				}
-
 				get focused() {
 					return this.universe.focused;
 				}
@@ -200,7 +191,6 @@
 					}
 					return values;
 				}
-
 				source(url) {
 					const { cache } = this.universe;
 					if (!cache.has(url))
@@ -212,36 +202,28 @@
 						);
 					return cache.get(url);
 				}
-
 				async init() {
-					const [input, panel, ...rest] = this.wire(
+					const [input, panel, ...frames] = this.wire(
 						await (await fetch(window.circuit)).arrayBuffer(),
 					);
-
-					const inputEl = document.createElement('div');
-					inputEl.innerHTML = this.#td.decode(input.data);
-					document.body.appendChild(inputEl);
-					this.exec(inputEl);
-					document.body.removeChild(inputEl);
-
-					this.universe.panel.innerHTML = this.#td.decode(panel.data);
-					this.exec(this.universe.panel);
-
-					this.universe.frames = rest.map((e) => ({
+					this.#inject(this.universe.panel, input.data);
+					this.#inject(this.universe.panel, panel.data);
+					this.universe.frames = frames.map((e) => ({
 						el: this.#td.decode(e.data),
-						state: new Map([
-							['zero', new Map()],
-							['fx', new Map()],
-							['one', new Map()],
-						]),
+						state: new Map(
+							Pathless.#spaces.map((k) => [k, new Map()]),
+						),
 					}));
-
 					if (this.universe.frames.length) {
 						this.universe.space.forEach(
 							(s) => (s.frame = this.universe.frames[0]),
 						);
 						this.sync();
 					}
+				}
+				#inject(el, data) {
+					el.innerHTML = this.#td.decode(data);
+					this.exec(el);
 				}
 				read(i = this.focused) {
 					const s = this.universe.space[i];
@@ -272,16 +254,15 @@
 					if (l > 0) this.universe.prev = [l, v];
 					this.universe.el.dataset.layout = l;
 					this.universe.el.dataset.variant = v;
-					if (l === 0) {
-						const f = this.universe.focused;
-						this.universe.space.forEach(
-							(s, i) => (s.el.hidden = i !== f),
-						);
-					} else {
-						Pathless.#layouts[l].forEach(
-							(h, i) => (this.universe.space[i].el.hidden = h),
-						);
-					}
+					const visible = new Set(
+						l === 0
+							? [this.universe.focused]
+							: Pathless.#layouts[l],
+					);
+					this.universe.space.forEach(
+						(s, i) => (s.el.hidden = !visible.has(i)),
+					);
+					this.universe.visible = [...visible].sort((a, b) => a - b);
 					this.sync();
 				}
 				cycle(l = +this.universe.el.dataset.layout) {
@@ -291,11 +272,10 @@
 					const v =
 						l === cur
 							? (+this.universe.el.dataset.variant + 1) %
-								[1, 2, 4][l]
+								Pathless.#variants[l]
 							: 0;
 					this.layout(l, v);
 				}
-
 				nav(dir, i = this.focused) {
 					const s = this.universe.space[i];
 					const f = this.universe.frames;
@@ -324,5 +304,6 @@
 			<div id="fx" hidden></div>
 			<div id="one" hidden></div>
 		</div>
+		<div id="panel" hidden></div>
 	</body>
 </html>

@@ -62,16 +62,6 @@
 <div class="keyboard">
 	<script>
 		{
-			const KEYS = [
-				{ key: '1' },
-				{ key: '2' },
-				{ key: '3' },
-				{ key: 'tab' },
-				{ key: 'q', desc: 'back' },
-				{ key: 'e', desc: 'next' },
-				{ key: 'z' },
-			];
-
 			class Keyboard {
 				static #svgs = (() => {
 					const el = (inner, fill) =>
@@ -137,36 +127,64 @@
 					}
 				})();
 
-				#els = new Map();
+				#K;
 				#descs;
+				#frameFns = new Map();
 
 				constructor(panel) {
 					this.el = panel;
 					const kb = panel.querySelector('.keyboard');
-					KEYS.forEach((k) => {
+
+					this.#K = {
+						1: { fn: () => pathless.cycle(0) },
+						2: { fn: () => pathless.cycle(1) },
+						3: { fn: () => pathless.cycle(2) },
+						tab: {
+							fn: (e) => (e.preventDefault(), pathless.focus()),
+						},
+						q: { desc: 'back', fn: () => pathless.nav(-1) },
+						e: { desc: 'next', fn: () => pathless.nav(1) },
+						z: { fn: () => pathless.toggle() },
+					};
+
+					for (const [key, k] of Object.entries(this.#K)) {
 						const el = kb.appendChild(
 							document.createElement('div'),
 						);
 						el.className = 'key';
-						el.dataset.key = k.key;
-						el.innerHTML = `<div>${k.key}</div><div>${k.desc ?? ''}</div>`;
-						this.#els.set(k.key, el);
-					});
+						el.dataset.key = key;
+						el.innerHTML = `<div>${key}</div><div>${k.desc ?? ''}</div>`;
+						k.el = el;
+					}
+
 					this.#descs = ['1', '2', '3', 'tab'].map(
-						(key) => this.#els.get(key).lastElementChild,
+						(key) => this.#K[key].el.lastElementChild,
 					);
 
-					window.addEventListener(
-						'reflect',
-						({ detail: { key, state } }) => {
-							const el = this.#els.get(key);
-							if (!el) return;
-							state
-								? (el.dataset.state = 'true')
-								: delete el.dataset.state;
-							if (!state) this.update();
-						},
-					);
+					window.addEventListener('keydown', (e) => {
+						const key = e.key.toLowerCase();
+						const k = this.#K[key];
+						if (k) {
+							e.preventDefault();
+							this.#flash(key, true);
+							k.fn(e);
+							return;
+						}
+						const bind = this.#frameFns.get(pathless.focused)?.[
+							key
+						];
+						if (bind?.down) {
+							e.preventDefault();
+							this.#flash(key, true);
+							bind.down();
+						}
+					});
+					window.addEventListener('keyup', (e) => {
+						const key = e.key.toLowerCase();
+						this.#flash(key, false);
+						for (const binds of this.#frameFns.values())
+							binds[key]?.up?.();
+					});
 
 					new MutationObserver(() => {
 						if (!panel.hidden) this.update();
@@ -174,6 +192,20 @@
 						attributes: true,
 						attributeFilter: ['hidden'],
 					});
+				}
+
+				keyNav(i, binds) {
+					this.#frameFns.set(i, binds);
+					return this;
+				}
+
+				#flash(key, on) {
+					const k = this.#K[key];
+					if (k?.el)
+						on
+							? (k.el.dataset.state = 'true')
+							: delete k.el.dataset.state;
+					if (!on) this.update();
 				}
 
 				update() {
@@ -189,8 +221,9 @@
 						Keyboard.#svgs[layout][variant][focused + 1];
 				}
 			}
-			pathless.keyboard = new Keyboard(pathless.panel);
-			pathless.keyboard.update();
+
+			pathless.kb = new Keyboard(pathless.panel);
+			pathless.kb.update();
 		}
 	</script>
 </div>

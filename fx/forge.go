@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"html/template"
+	"os"
 	"regexp"
 	"strings"
 
@@ -33,7 +34,7 @@ type Forge interface {
 	Builder(class string, elements ...*template.HTML) *template.HTML
 	Frames(frame ...*template.HTML) [][]byte
 	Markdown() *markdown.Markdown
-	JS(js string) *template.HTML
+	JS(path string) *template.HTML
 	CSS(css string) *template.HTML
 	Elem(tag, text string, attrs ...Attr) *template.HTML
 	Block(tag string, attrs Attr, children ...*template.HTML) *template.HTML
@@ -89,12 +90,12 @@ func (f *forge) Markdown() *markdown.Markdown {
 }
 
 // JS wraps a raw JavaScript string in a <script> tag without escaping.
-func (f *forge) JS(js string) *template.HTML {
-	var b strings.Builder
-	b.WriteString(`<script>`)
-	b.WriteString(js)
-	b.WriteString(`</script>`)
-	o := template.HTML(b.String())
+func (f *forge) JS(path string) *template.HTML {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+	o := template.HTML("<script>{" + string(data) + "}</script>")
 	return &o
 }
 

@@ -5,7 +5,6 @@
 				return { x, y };
 			}
 			constructor() {
-				this.limit = 0.75;
 				this.unit = 0.1;
 			}
 			measure(el) {
@@ -14,27 +13,17 @@
 				this.T = r.top;
 				this.W = r.width || 1;
 				this.H = r.height || 1;
-				this.origin = [this.L + this.W / 2, this.T + this.H / 2];
 			}
 			at(clientX, clientY) {
 				const u = (clientX - this.L) / this.W,
 					v = (clientY - this.T) / this.H;
 				return Coordinates.zero(2 * u - 1, 1 - 2 * v);
 			}
-			zone(p) {
-				const ax = Math.abs(p.x),
-					ay = Math.abs(p.y);
-				if (ax <= 0.75 && ay <= 0.75) return 'center';
-				return ax >= ay
-					? p.x > 0
-						? 'right'
-						: 'left'
-					: p.y > 0
-						? 'top'
-						: 'bottom';
-			}
 			tap(delta) {
-				return Math.abs(delta.x) <= 0.1 && Math.abs(delta.y) <= 0.1;
+				return (
+					Math.abs(delta.x) <= this.unit &&
+					Math.abs(delta.y) <= this.unit
+				);
 			}
 			direction(d) {
 				const ax = Math.abs(d.x),
@@ -49,14 +38,11 @@
 			}
 			read(t0, t1) {
 				const delta = { x: t1.x - t0.x, y: t1.y - t0.y };
-				const zone = this.zone(t0);
-				if (this.tap(delta))
-					return { t0, t1, delta, zone, gesture: false };
+				if (this.tap(delta)) return { t0, t1, delta, gesture: false };
 				return {
 					t0,
 					t1,
 					delta,
-					zone,
 					gesture: true,
 					direction: this.direction(delta),
 				};
@@ -65,9 +51,8 @@
 
 		class Input {
 			constructor() {
-				const { el, space, panel } = pathless.universe;
+				const { el, space } = pathless.universe;
 				this.space = space;
-				this.panel = panel;
 				this.co = space.map((s) => {
 					const c = new Coordinates();
 					c.measure(s.el);
@@ -76,6 +61,7 @@
 				this.active = new Map();
 				this.h = new Map();
 				this.tapFns = new Map();
+				this.timers = new Map();
 				const o = { passive: true };
 				el.addEventListener('pointerdown', this, o);
 				el.addEventListener('pointerup', this, o);
@@ -96,16 +82,36 @@
 				if (e.type === 'pointerdown') this.down(e);
 				else if (e.type === 'pointerup') this.up(e);
 				else if (e.type === 'pointercancel') this.cancel(e);
+				else if (e.type === 'pointermove') this.move(e);
 			}
 			down({ pointerId, clientX, clientY, target }) {
 				const i = this.#indexOf(target);
 				if (i === -1) return;
 				pathless.universe.focused = i;
-				this.active.set(pointerId, {
-					t0: this.co[i].at(clientX, clientY),
-					i,
-				});
+				const t0 = this.co[i].at(clientX, clientY);
+				this.active.set(pointerId, { t0, i });
+				const timer = setTimeout(() => {
+					this.timers.delete(pointerId);
+					this.active.delete(pointerId);
+					pathless.toggle();
+				}, 500);
+				this.timers.set(pointerId, timer);
 			}
+
+			move({ pointerId, clientX, clientY }) {
+				const t = this.timers.get(pointerId);
+				if (!t) return;
+				const a = this.active.get(pointerId);
+				if (!a) return;
+				const cur = this.co[a.i].at(clientX, clientY);
+				if (
+					!this.co[a.i].tap({ x: cur.x - a.t0.x, y: cur.y - a.t0.y })
+				) {
+					clearTimeout(t);
+					this.timers.delete(pointerId);
+				}
+			}
+
 			up({ pointerId, clientX, clientY }) {
 				const a = this.active.get(pointerId);
 				if (!a) return;
@@ -119,6 +125,8 @@
 					id: pointerId,
 					i: a.i,
 				});
+				clearTimeout(this.timers.get(pointerId));
+				this.timers.delete(pointerId);
 			}
 			cancel({ pointerId, clientX, clientY }) {
 				const a = this.active.get(pointerId);
@@ -135,6 +143,8 @@
 						i: a.i,
 						viaCancel: true,
 					});
+				clearTimeout(this.timers.get(pointerId));
+				this.timers.delete(pointerId);
 			}
 			on(name, fn) {
 				let s = this.h.get(name);
@@ -155,9 +165,6 @@
 				this.on('swipe', (e) => {
 					if (e.direction === 'left') pathless.nav(1, e.i);
 					else if (e.direction === 'right') pathless.nav(-1, e.i);
-					else if (e.zone === 'bottom' && e.direction === 'up')
-						pathless.toggle();
-					else if (e.direction === 'down') pathless.toggle();
 				});
 			}
 			tapNav(i, { prev, next } = {}) {
@@ -165,8 +172,8 @@
 				if (old) this.off('tap', old);
 				const fn = (e) => {
 					if (e.i !== i) return;
-					if (e.zone === 'left') prev?.(e);
-					else if (e.zone === 'right') next?.(e);
+					if (e.t0.x < 0) prev?.(e);
+					else if (e.t0.x > 0) next?.(e);
 				};
 				this.tapFns.set(i, fn);
 				this.on('tap', fn);
@@ -174,54 +181,6 @@
 			}
 		}
 
-		class Keyboard {
-			#frameFns = new Map();
-			constructor() {
-				const K = {
-					1: () => pathless.cycle(0),
-					2: () => pathless.cycle(1),
-					3: () => pathless.cycle(2),
-					tab: (e) => (e.preventDefault(), pathless.focus()),
-					q: () => pathless.nav(-1),
-					e: () => pathless.nav(1),
-					z: () => pathless.toggle(),
-				};
-				window.addEventListener('keydown', (e) => {
-					const key = e.key.toLowerCase();
-					if (K[key]) {
-						e.preventDefault();
-						this.#flash(key, true);
-						K[key](e);
-						return;
-					}
-					const bind = this.#frameFns.get(pathless.focused)?.[key];
-					if (bind?.down) {
-						e.preventDefault();
-						this.#flash(key, true);
-						bind.down();
-					}
-				});
-				window.addEventListener('keyup', (e) => {
-					const key = e.key.toLowerCase();
-					this.#flash(key, false);
-					for (const binds of this.#frameFns.values())
-						binds[key]?.up?.();
-				});
-			}
-
-			keyNav(i, binds) {
-				this.#frameFns.set(i, binds);
-				return this;
-			}
-
-			#flash(key, on) {
-				window.dispatchEvent(
-					new CustomEvent('reflect', { detail: { key, state: on } }),
-				);
-			}
-		}
-
 		pathless.input = new Input();
-		pathless.kb = new Keyboard();
 	}
 </script>
