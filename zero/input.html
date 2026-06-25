@@ -4,6 +4,7 @@
 			#active = new Map();
 			#press = null;
 			#latched = false;
+			#taps = new Map();
 
 			static MOVE = 0.1;
 			static SWIPE = 0.25;
@@ -72,6 +73,13 @@
 					this.#latched = false;
 					return;
 				}
+				const co = this.space[a.i].co;
+				const start = co.at(a.sx, a.sy);
+				const end = co.at(a.x, a.y);
+				if (co.distance(start, end) < Input.MOVE) {
+					this.#taps.get(a.i)?.(end);
+					return;
+				}
 				this.#swipe(a);
 			}
 			pointercancel({ pointerId }) {
@@ -80,6 +88,9 @@
 				this.#active.delete(pointerId);
 				this.#clear();
 				if (this.#latched) this.#latched = false;
+			}
+			tap(i, fn) {
+				this.#taps.set(i, fn);
 			}
 			#swipe(a) {
 				const co = this.space[a.i].co;

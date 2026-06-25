@@ -30,14 +30,15 @@
 				this.img = el.querySelector('.slides img');
 				this.entries = [];
 				this.index = p.read().get(prefix) || 0;
-				p.input.tapNav(i, {
-					prev: () => this.show(this.index - 1),
-					next: () => this.show(this.index + 1),
+
+				p.input.tap(i, ([x]) => {
+					this.show(x < 0 ? this.index - 1 : this.index + 1);
 				});
 				p.kb.keyNav(i, {
 					a: { down: () => this.show(this.index - 1) },
 					d: { down: () => this.show(this.index + 1) },
 				});
+
 				p.source(url).then((entries) => {
 					for (const e of entries)
 						if (!e.url)
