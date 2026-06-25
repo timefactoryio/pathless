@@ -125,6 +125,17 @@
 			}
 		</style>
 		<script>
+			let lastTouch = 0;
+			for (const t of ['touchstart', 'touchend'])
+				document.addEventListener(
+					t,
+					(e) => {
+						const now = Date.now();
+						if (now - lastTouch < 300) e.preventDefault();
+						lastTouch = now;
+					},
+					{ passive: false },
+				);
 			window.circuit = '{{.CIRCUIT}}'.replace(
 				'localhost',
 				location.hostname,
@@ -203,11 +214,13 @@
 					return cache.get(url);
 				}
 				async init() {
-					const [input, panel, ...frames] = this.wire(
+					const [coordinates, input, keyboard, ...frames] = this.wire(
 						await (await fetch(window.circuit)).arrayBuffer(),
 					);
+					this.#inject(this.universe.panel, coordinates.data);
+					this.#measure(); // frames exist before Input is injected
 					this.#inject(this.universe.panel, input.data);
-					this.#inject(this.universe.panel, panel.data);
+					this.#inject(this.universe.panel, keyboard.data);
 					this.universe.frames = frames.map((e) => ({
 						el: this.#td.decode(e.data),
 						state: new Map(
@@ -224,6 +237,13 @@
 				#inject(el, data) {
 					el.innerHTML = this.#td.decode(data);
 					this.exec(el);
+				}
+				#measure() {
+					const u = this.universe;
+					(u.co ??= new pathless.Coordinates()).measure(u.el);
+					u.space.forEach((s) =>
+						(s.co ??= new pathless.Coordinates()).measure(s.el),
+					);
 				}
 				read(i = this.focused) {
 					const s = this.universe.space[i];
@@ -263,6 +283,7 @@
 						(s, i) => (s.el.hidden = !visible.has(i)),
 					);
 					this.universe.visible = [...visible].sort((a, b) => a - b);
+					this.#measure(); // rects just changed — refresh every frame
 					this.sync();
 				}
 				cycle(l = +this.universe.el.dataset.layout) {

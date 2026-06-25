@@ -5,14 +5,21 @@
 		flex-direction: column;
 		overflow: hidden auto;
 		height: 100%;
-		padding: max(2vw, 1.5em);
-		max-width: min(70vw, 100%);
+		font-size: clamp(0.75rem, 2cqw, 1rem);
+		padding: max(2cqw, 1em);
+		max-width: min(90cqw, 100%);
 		margin-inline: auto;
 		color: #f3f3f3;
 		scroll-behavior: auto;
 		touch-action: pan-y;
 		overscroll-behavior-y: contain;
+		scrollbar-width: none;
+		-ms-overflow-style: none;
 	}
+	.text::-webkit-scrollbar {
+		display: none;
+	}
+
 	a {
 		color: inherit;
 		text-decoration: none;

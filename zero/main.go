@@ -18,15 +18,19 @@ var inputHtml []byte
 //go:embed keyboard.html
 var keyboardHtml []byte
 
+//go:embed coordinates.html
+var coordinatesHtml []byte
+
 // Zero holds the compiled HTML shell and shared assets.
 // Origin is the CORS-allowed root domain; Circuit is the API endpoint URL
 // baked into the HTML at build time.
 type Zero struct {
-	Pathless []byte
-	Input    []byte
-	Keyboard []byte
-	Origin   string
-	Circuit  string
+	Pathless    []byte
+	Input       []byte
+	Keyboard    []byte
+	Coordinates []byte
+	Origin      string
+	Circuit     string
 }
 
 // NewZero constructs Zero from a single host string.
@@ -44,11 +48,12 @@ func NewZero(origin, circuit string) *Zero {
 		panic(err)
 	}
 	return &Zero{
-		Pathless: minify(b.String()),
-		Origin:   origin,
-		Circuit:  circuit,
-		Input:    inputHtml,
-		Keyboard: keyboardHtml,
+		Pathless:    minify(b.String()),
+		Origin:      origin,
+		Circuit:     circuit,
+		Input:       inputHtml,
+		Keyboard:    keyboardHtml,
+		Coordinates: coordinatesHtml,
 	}
 }
 

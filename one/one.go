@@ -57,6 +57,7 @@ func (o *One) cors(next http.Handler) http.Handler {
 
 func (o *One) Serve() {
 	values := []*fx.Value{
+		{Data: o.Coordinates},
 		{Data: o.Input},
 		{Data: o.Keyboard},
 	}

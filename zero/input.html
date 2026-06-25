@@ -1,186 +1,105 @@
 <script>
 	{
-		class Coordinates {
-			static zero(x = null, y = null) {
-				return { x, y };
-			}
-			constructor() {
-				this.unit = 0.1;
-			}
-			measure(el) {
-				const r = el.getBoundingClientRect();
-				this.L = r.left;
-				this.T = r.top;
-				this.W = r.width || 1;
-				this.H = r.height || 1;
-			}
-			at(clientX, clientY) {
-				const u = (clientX - this.L) / this.W,
-					v = (clientY - this.T) / this.H;
-				return Coordinates.zero(2 * u - 1, 1 - 2 * v);
-			}
-			tap(delta) {
-				return (
-					Math.abs(delta.x) <= this.unit &&
-					Math.abs(delta.y) <= this.unit
-				);
-			}
-			direction(d) {
-				const ax = Math.abs(d.x),
-					ay = Math.abs(d.y);
-				return ax >= ay
-					? d.x > 0
-						? 'right'
-						: 'left'
-					: d.y > 0
-						? 'up'
-						: 'down';
-			}
-			read(t0, t1) {
-				const delta = { x: t1.x - t0.x, y: t1.y - t0.y };
-				if (this.tap(delta)) return { t0, t1, delta, gesture: false };
-				return {
-					t0,
-					t1,
-					delta,
-					gesture: true,
-					direction: this.direction(delta),
-				};
-			}
-		}
-
 		class Input {
-			constructor() {
-				const { el, space } = pathless.universe;
-				this.space = space;
-				this.co = space.map((s) => {
-					const c = new Coordinates();
-					c.measure(s.el);
-					return c;
-				});
-				this.active = new Map();
-				this.h = new Map();
-				this.tapFns = new Map();
-				this.timers = new Map();
+			#active = new Map();
+			#press = null;
+			#latched = false;
+
+			static MOVE = 0.1;
+			static SWIPE = 0.25;
+			static HOLD = 300;
+
+			constructor(universe) {
+				this.universe = universe;
+				this.space = universe.space;
 				const o = { passive: true };
-				el.addEventListener('pointerdown', this, o);
-				el.addEventListener('pointerup', this, o);
-				el.addEventListener('pointercancel', this, o);
-				for (const ev of ['resize', 'orientationchange'])
-					addEventListener(
-						ev,
-						() => this.co.forEach((c, i) => c.measure(space[i].el)),
-						{ passive: true },
-					);
-				this.#wire();
-			}
-			#indexOf(target) {
-				const el = target.closest('#zero, #fx, #one');
-				return el ? this.space.findIndex((s) => s.el === el) : -1;
-			}
-			handleEvent(e) {
-				if (e.type === 'pointerdown') this.down(e);
-				else if (e.type === 'pointerup') this.up(e);
-				else if (e.type === 'pointercancel') this.cancel(e);
-				else if (e.type === 'pointermove') this.move(e);
-			}
-			down({ pointerId, clientX, clientY, target }) {
-				const i = this.#indexOf(target);
-				if (i === -1) return;
-				pathless.universe.focused = i;
-				const t0 = this.co[i].at(clientX, clientY);
-				this.active.set(pointerId, { t0, i });
-				const timer = setTimeout(() => {
-					this.timers.delete(pointerId);
-					this.active.delete(pointerId);
-					pathless.toggle();
-				}, 500);
-				this.timers.set(pointerId, timer);
+				for (const t of [
+					'pointerdown',
+					'pointermove',
+					'pointerup',
+					'pointercancel',
+				])
+					universe.el.addEventListener(t, this, o);
 			}
 
-			move({ pointerId, clientX, clientY }) {
-				const t = this.timers.get(pointerId);
-				if (!t) return;
-				const a = this.active.get(pointerId);
+			handleEvent(e) {
+				this[e.type](e);
+			}
+			#index(t) {
+				return this.space.findIndex((s) => s.el.contains(t));
+			}
+
+			pointerdown({ pointerId, clientX, clientY, target }) {
+				const i = this.#index(target);
+				if (i === -1) return;
+				this.universe.focused = i;
+				this.#active.set(pointerId, {
+					i,
+					sx: clientX,
+					sy: clientY,
+					x: clientX,
+					y: clientY,
+				});
+				this.#press = setTimeout(() => {
+					this.#press = null;
+					this.#latched = true;
+					navigator.vibrate?.(10);
+					pathless.toggle();
+				}, Input.HOLD);
+			}
+
+			pointermove({ pointerId, clientX, clientY }) {
+				const a = this.#active.get(pointerId);
 				if (!a) return;
-				const cur = this.co[a.i].at(clientX, clientY);
-				if (
-					!this.co[a.i].tap({ x: cur.x - a.t0.x, y: cur.y - a.t0.y })
-				) {
-					clearTimeout(t);
-					this.timers.delete(pointerId);
+				a.x = clientX;
+				a.y = clientY;
+				if (this.#press) {
+					const co = this.space[a.i].co;
+					if (
+						co.distance(co.at(a.sx, a.sy), co.at(a.x, a.y)) >
+						Input.MOVE
+					)
+						this.#clear();
 				}
 			}
 
-			up({ pointerId, clientX, clientY }) {
-				const a = this.active.get(pointerId);
+			pointerup({ pointerId }) {
+				const a = this.#active.get(pointerId);
 				if (!a) return;
-				this.active.delete(pointerId);
-				const result = this.co[a.i].read(
-					a.t0,
-					this.co[a.i].at(clientX, clientY),
-				);
-				this.fire(result.gesture ? 'swipe' : 'tap', {
-					...result,
-					id: pointerId,
-					i: a.i,
-				});
-				clearTimeout(this.timers.get(pointerId));
-				this.timers.delete(pointerId);
+				this.#active.delete(pointerId);
+				this.#clear();
+				if (this.#latched) {
+					this.#latched = false;
+					return;
+				}
+				this.#swipe(a);
 			}
-			cancel({ pointerId, clientX, clientY }) {
-				const a = this.active.get(pointerId);
+			pointercancel({ pointerId }) {
+				const a = this.#active.get(pointerId);
 				if (!a) return;
-				this.active.delete(pointerId);
-				const result = this.co[a.i].read(
-					a.t0,
-					this.co[a.i].at(clientX, clientY),
-				);
-				if (result.gesture)
-					this.fire('swipe', {
-						...result,
-						id: pointerId,
-						i: a.i,
-						viaCancel: true,
-					});
-				clearTimeout(this.timers.get(pointerId));
-				this.timers.delete(pointerId);
+				this.#active.delete(pointerId);
+				this.#clear();
+				if (this.#latched) this.#latched = false;
 			}
-			on(name, fn) {
-				let s = this.h.get(name);
-				if (!s) this.h.set(name, (s = new Set()));
-				s.add(fn);
-				return this;
+			#swipe(a) {
+				const co = this.space[a.i].co;
+				const start = co.at(a.sx, a.sy);
+				const end = co.at(a.x, a.y);
+				const dx = end[0] - start[0];
+				const dy = end[1] - start[1];
+				if (Math.abs(dx) < Input.SWIPE || Math.abs(dy) > Math.abs(dx))
+					return;
+				navigator.vibrate?.(5);
+				pathless.nav(dx < 0 ? -1 : 1, a.i);
 			}
-			off(name, fn) {
-				if (fn) this.h.get(name)?.delete(fn);
-				else this.h.delete(name);
-				return this;
-			}
-			fire(name, info) {
-				const s = this.h.get(name);
-				if (s) for (const f of s) f(info);
-			}
-			#wire() {
-				this.on('swipe', (e) => {
-					if (e.direction === 'left') pathless.nav(1, e.i);
-					else if (e.direction === 'right') pathless.nav(-1, e.i);
-				});
-			}
-			tapNav(i, { prev, next } = {}) {
-				const old = this.tapFns.get(i);
-				if (old) this.off('tap', old);
-				const fn = (e) => {
-					if (e.i !== i) return;
-					if (e.t0.x < 0) prev?.(e);
-					else if (e.t0.x > 0) next?.(e);
-				};
-				this.tapFns.set(i, fn);
-				this.on('tap', fn);
-				return this;
+			#clear() {
+				if (this.#press) {
+					clearTimeout(this.#press);
+					this.#press = null;
+				}
 			}
 		}
 
-		pathless.input = new Input();
+		pathless.input = new Input(pathless.universe);
 	}
 </script>
