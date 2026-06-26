@@ -2,6 +2,7 @@ package one
 
 import (
 	"bytes"
+	"os"
 
 	_ "embed"
 	"fmt"
@@ -60,6 +61,15 @@ func (o *One) Slides(dir string) {
 	o.Build("slides", &result)
 }
 
+func (o *One) CustomHTML(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	class := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	raw := template.HTML(data)
+	o.Build(class, &raw)
+}
 func (o *One) Logo(path string) template.HTML {
 	if strings.ToLower(filepath.Ext(path)) == ".svg" {
 		if b, err := o.ToBytes(path); err == nil {

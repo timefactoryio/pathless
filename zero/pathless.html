@@ -202,25 +202,26 @@
 					}
 					return values;
 				}
-				source(url) {
+				source(path) {
 					const { cache } = this.universe;
-					if (!cache.has(url))
+					if (!cache.has(path))
 						cache.set(
-							url,
-							fetch(url)
+							path,
+							fetch(`${window.circuit}${path}`)
 								.then((r) => r.arrayBuffer())
 								.then((buf) => this.wire(buf)),
 						);
-					return cache.get(url);
+					return cache.get(path);
 				}
 				async init() {
 					const [coordinates, input, keyboard, ...frames] = this.wire(
 						await (await fetch(window.circuit)).arrayBuffer(),
 					);
-					this.#inject(this.universe.panel, coordinates.data);
-					this.#measure(); // frames exist before Input is injected
-					this.#inject(this.universe.panel, input.data);
-					this.#inject(this.universe.panel, keyboard.data);
+					const p = this.universe.panel;
+					this.#inject(p, coordinates.data);
+					this.#measure();
+					for (const { data } of [input, keyboard])
+						this.#inject(p, data);
 					this.universe.frames = frames.map((e) => ({
 						el: this.#td.decode(e.data),
 						state: new Map(
@@ -245,12 +246,15 @@
 						(s.co ??= new pathless.Coordinates()).measure(s.el),
 					);
 				}
-				read(i = this.focused) {
-					const s = this.universe.space[i];
+				#s(i = this.focused) {
+					return this.universe.space[i];
+				}
+				read(i) {
+					const s = this.#s(i);
 					return s.frame.state.get(s.el.id);
 				}
-				write(k, v, i = this.focused) {
-					const s = this.universe.space[i];
+				write(k, v, i) {
+					const s = this.#s(i);
 					s.frame.state.get(s.el.id).set(k, v);
 				}
 				sync(...indices) {
@@ -271,31 +275,27 @@
 					);
 				}
 				layout(l, v = 0) {
-					if (l > 0) this.universe.prev = [l, v];
-					this.universe.el.dataset.layout = l;
-					this.universe.el.dataset.variant = v;
-					const visible = new Set(
-						l === 0
-							? [this.universe.focused]
-							: Pathless.#layouts[l],
+					const u = this.universe;
+					if (l > 0) u.prev = [l, v];
+					u.el.dataset.layout = l;
+					u.el.dataset.variant = v;
+					u.visible = l === 0 ? [u.focused] : Pathless.#layouts[l];
+					u.space.forEach(
+						(s, i) => (s.el.hidden = !u.visible.includes(i)),
 					);
-					this.universe.space.forEach(
-						(s, i) => (s.el.hidden = !visible.has(i)),
-					);
-					this.universe.visible = [...visible].sort((a, b) => a - b);
-					this.#measure(); // rects just changed — refresh every frame
+					this.#measure();
 					this.sync();
 				}
 				cycle(l = +this.universe.el.dataset.layout) {
-					const cur = +this.universe.el.dataset.layout;
-					if (cur === 0 && this.universe.prev)
-						return this.layout(...this.universe.prev);
-					const v =
-						l === cur
-							? (+this.universe.el.dataset.variant + 1) %
-								Pathless.#variants[l]
-							: 0;
-					this.layout(l, v);
+					const { el, prev } = this.universe;
+					const cur = +el.dataset.layout;
+					if (cur === 0 && prev) return this.layout(...prev);
+					this.layout(
+						l,
+						cur === l
+							? (+el.dataset.variant + 1) % Pathless.#variants[l]
+							: 0,
+					);
 				}
 				nav(dir, i = this.focused) {
 					const s = this.universe.space[i];

@@ -1,310 +1,353 @@
-# pathless — Mechanics
 
-## What is pathless?
+# Building with pathless
 
-pathless is a Go + HTML framework for building keyboard-driven, fullscreen applications delivered as a single compressed binary payload over HTTP. There is no JavaScript build step, no bundler, no framework runtime. The server sends gzipped binary; the browser decodes and renders it.
+## What pathless is
 
-The visual surface is a `#universe` div containing three **spaces**: `#zero`, `#fx`, `#one`. Each space holds one **frame** at a time. Frames are plain HTML fragments — `<style>`, `<script>`, markup — injected via `innerHTML` and re-executed on every render.
+pathless is a Go + HTML framework. You write a Go `main.go` that configures content, call `Serve()`, and the browser receives a single binary payload containing everything. No build step, no bundler, no JS framework.
+
+**What pathless handles for you:**
+- The HTML shell — served once, bootstraps itself
+- The input system — swipe, long-press, tap, keyboard, mobile panel
+- Navigation between frames — swipe or keyboard, automatic
+- Layout switching — single, double, and triple views, with optional panel
+- Wire encoding — all content, regardless of origin, encoded into one binary format and served locally
+- State persistence — per-space key/value Map, survives re-render
+- Built-in frame types — `Home`, `Text`, `Slides`, `CustomHTML`
+
+**What pathless does not handle:**
+- What a frame displays or how it behaves internally
+- Routing, URLs, browser history
+- Authentication or sessions
 
 ---
 
-## Server Architecture
+## Setup
 
-pathless runs two HTTP servers:
+```go
+package main
 
-- `:1000` — serves `pathless.html`, the application shell. One response, never changes.
-- `:1001` — serves the hello bundle (`/`), all frame HTML, and all binary asset routes.
+import "github.com/timefactoryio/pathless"
 
-`pathless.html` is templated with `window.apiUrl = '{{.APIURL}}'` which resolves to the API server address (default `http://localhost:1001`). Every client fetch — including the initial hello bundle — goes to `:1001`. The shell and the API are deliberately separate servers.
-
----
-
-## Client Runtime
-
-`pathless.html` is served once at page load and never changes. It provides:
-
-- The global `state` object
-- The global `cache` Map
-- `window.pathless` — the `Universe` instance (available after `DOMContentLoaded`)
-
-### `state`
-
-```js
-state = {
-    layout: 0,       // 0=single, 1=split, 2=quad
-    variant: 0,      // layout variant index
-    focused: 0,      // index of the focused space (0=zero, 1=fx, 2=one)
-    prev: null,      // [layout, variant] before last change
-    frames: [],      // [{ html, binds }] — all loaded frames
-    spaces: [        // one entry per space
-        { frameIndex: 0, frameState: [] },
-        { frameIndex: 0, frameState: [] },
-        { frameIndex: 0, frameState: [] },
-    ],
+func main() {
+    p := pathless.NewPathless()
+    p.Home("https://cdn.example.com/logo.svg", "my app")
+    p.Text("https://raw.githubusercontent.com/org/repo/main/readme.md")
+    p.Slides("./images")
+    p.CustomHTML("./dashboard.html")
+    p.Serve()
 }
 ```
 
-### `cache`
+`NewPathless()` — development. Runs on `localhost:1000` (shell) and `localhost:1001` (wire gateway). CORS is open.
 
-A `Map` shared across all frames. Use it to cache fetched assets, blob URLs, or any computed value that should survive a frame re-render.
+`NewPathless("origin.com", "api.origin.com")` — production. HTTPS assumed. CORS on the gateway restricted to origin.
+
+`Serve()` blocks on `:1000`. The wire gateway runs on `:1001` in a goroutine.
+
+---
+
+## Content Sources
+
+All content in pathless is resolved at startup on the Go side — either read from the local filesystem or fetched over HTTPS. Once resolved, it is encoded into the wire format and served through the wire gateway. The client always fetches from the same local origin, regardless of where the content originally came from.
+
+**Local path** — read from disk at startup:
+```go
+p.Text("./readme.md")
+p.Slides("./images")
+p.Load("./audio.mp3")
+```
+
+**HTTPS URL** — fetched from the network at startup, then served locally:
+```go
+p.Text("https://raw.githubusercontent.com/org/repo/main/readme.md")
+p.Slides("https://cdn.example.com/slides")
+p.Load("https://cdn.example.com/assets")
+```
+
+Both resolve to the same thing from the client's perspective: a wire-encoded binary route on the gateway. `CustomHTML` is the only exception — it accepts local paths only.
+
+---
+
+## The Wire Format
+
+The wire format is how pathless packages all known content — frames, assets, and the input system — into binary payloads served over HTTP.
+
+At startup, `Serve()` assembles the hello bundle: the coordinates script, the input script, the panel script, then all frame HTML strings, encoded in order. This single gzip'd binary is served at `/`. The client fetches it once, decodes it, and has everything needed to bootstrap.
+
+Asset routes (registered via `Load`) are each encoded as a named bundle — a manifest of `{ name, type, size }` entries followed by the raw blobs — gzip'd and served at `/:key`.
+
+In a frame, `p.source(url)` fetches a route from the gateway, wire-decodes it, and caches the Promise by URL. The decoded entries have `{ name, type, size, data: Uint8Array }`:
 
 ```js
-cache.set('myKey', value);
-cache.get('myKey');
-cache.has('myKey');
-```
-
-### `window.pathless` API
-
-| Method / Property                        | Description                                                                                         |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `pathless.read()`                        | Returns a shallow copy of the current frame's persisted state                                       |
-| `pathless.write(k, v)`                   | Persists a key/value into the current frame's state (survives re-render)                            |
-| `pathless.bind(key, down, { up, desc })` | Registers a keyboard binding for the current frame                                                  |
-| `pathless.source(url)`                   | Fetches a binary asset route, decodes it via `wire()`, returns a Promise of entries. Cached by URL. |
-| `pathless.toggle()`                      | Shows/hides the keyboard panel                                                                      |
-
----
-
-## Frame Lifecycle
-
-1. `render(i)` is called for space `i`
-2. `space.innerHTML = frame.html` — the raw HTML string is injected
-3. `exec(el)` clones all `<script>` and `<style>` tags so they execute fresh
-4. The frame's constructor code runs synchronously
-5. `frame.binds` is reset to `[]` on every render — keys must be re-bound each time
-6. On the next `render()`, the DOM is replaced — no cleanup callbacks exist
-
-**Frames have no persistent DOM.** State must be saved via `pathless.write()` before render, and restored via `pathless.read()` at construction.
-
----
-
-## Canonical Frame Pattern
-
-A frame is an HTML fragment with three parts: `<style>`, `<script>` with a block-scoped class, and markup.
-
-```html
-<style>
-    .frame-name {
-        display: flex;
-        flex-direction: column;
-        /* Only declare internal layout. The space handles all sizing. */
-    }
-</style>
-<script>
-    {
-        class FrameName {
-            constructor() {
-                // 1. Query DOM
-                this.root = document.querySelector('.frame-name');
-
-                // 2. Restore persisted state
-                const s = pathless.read();
-                this.index = s.index ?? 0;
-
-                // 3. Bind keys synchronously
-                pathless.bind('j', () => this.next());
-                pathless.bind('k', () => this.prev());
-
-                // 4. Load data (async, non-blocking)
-                pathless.source('/my-data').then(entries => {
-                    this.data = entries;
-                    this.render();
-                });
-            }
-
-            next() {
-                this.index = (this.index + 1) % this.data.length;
-                pathless.write('index', this.index);
-                this.render();
-            }
-
-            render() { /* update DOM */ }
-        }
-
-        new FrameName();
-    }
-</script>
-<div class="frame-name">
-    <!-- markup -->
-</div>
-```
-
-### Rules
-
-- Always use a **block scope** `{ }` — frame scripts share the global scope
-- Use a **class** — it makes the constructor phases explicit and readable
-- Never use `id` on frame elements — IDs must be unique in the document and frames re-render
-- Use **classes** for all selectors
-- Restore state before binding keys so key handlers have correct initial values
-- Load async data in `.then()` after synchronous setup is complete
-- If multiple instances of the same frame type exist, use a unique key prefix with `pathless.write` to avoid state collisions
-
----
-
-## CSS — The Space Handles Sizing
-
-The space (`#zero`, `#fx`, `#one`) already sets everything the frame root needs:
-
-```css
-:is(#zero, #fx, #one) {
-    flex: 1; overflow: hidden; container-type: size;
-    position: relative; isolation: isolate;
-    display: flex; flex-direction: column;
-}
-:is(#zero, #fx, #one) > * { width: 100%; }
-:is(#zero, #fx, #one) > :first-child { flex: 1; min-height: 0; }
-```
-
-The frame root is the first child of the space. It inherits:
-
-- `width: 100%` — from `> *`
-- Full height via `flex: 1; min-height: 0` — from `> :first-child`
-- `box-sizing: border-box` — global rule
-- `overflow: hidden`, `position: relative`, `isolation: isolate` — from the space
-
-**The frame root needs no required CSS.** Only declare properties that define the frame's own internal layout:
-
-```css
-.frame-name {
-    display: flex;
-    flex-direction: column;
-    padding: 2cqw;
-    /* nothing else needed */
-}
-```
-
-Use `cqw`/`cqh` for all responsive sizing. Each space has a `container-name` (zero, fx, one) and `container-type: size`. Since the frame root fills the space exactly, `cqw`/`cqh` inside the frame resolve to the frame's own dimensions. Prefer `cqw`/`cqh` over `vw`/`vh` — container units stay correct when the universe layout changes and spaces are resized.
-
----
-
-## Wire Protocol
-
-All asset routes are served as `Content-Type: application/octet-stream` + `Content-Encoding: gzip`. The client calls `pathless.source(url)` which fetches, decodes, and caches the result.
-
-### Two formats, one `wire()` method
-
-`bytes[0]` is a flag byte:
-
-**`0x00` — meta format** (named asset bundles, served at `/assetname`)
-```
-[0x00][4B: manifest-len][JSON: [{name, type, size}, ...]][blob]...[blob]
-```
-Returns entries with `{ name, type, size, data }`.
-
-**`0x01` — positional format** (hello bundle, served at `/`)
-```
-[0x01][4B: size][blob][4B: size][blob]...
-```
-Returns entries with `{ data }` only — positions are meaningful, names are not.
-
-The client `wire()` handles both transparently:
-
-```js
-wire(buf) {
-    const bytes = new Uint8Array(buf);
-    const view = new DataView(buf);
-    let pos = 1;
-    if (bytes[0] === 0x00) {
-        pos += 4 + view.getUint32(1);
-        return JSON.parse(this.#td.decode(bytes.subarray(5, pos)))
-            .map(e => ({ ...e, data: bytes.subarray(pos, (pos += e.size)) }));
-    }
-    const result = [];
-    while (pos < bytes.length) {
-        const size = view.getUint32(pos);
-        result.push({ data: bytes.subarray((pos += 4), (pos += size)) });
-    }
-    return result;
-}
-```
-
-### Hello bundle structure (`0x01`)
-
-The bundle at `"/"` is positional. Entry 0 is always the keyboard panel HTML. Entries 1..n are frame HTML strings in order. The universe `init()` decodes them by position — no manifest needed.
-
----
-
-## Frame-Specific Backends
-
-A frame is not coupled to pathless's own data layer. It only needs a URL. The frame is built specifically around the known structure of what that URL returns — the schema is implicit, co-designed between the frame and its backend.
-
-Regardless of where data comes from, the frame is a full citizen of the universe. It always has access to `pathless.read()`, `pathless.write()`, `pathless.bind()`, `state`, `cache`, and the rest of the Universe API. The backend is just a data source — state management, key handling, and lifecycle are all provided by the shell.
-
-**Served through pathless** (registered on the same server, returns the wire format):
-
-```js
-// pathless.source() fetches, decodes wire format, caches by URL
-pathless.source('/my-data').then(entries => {
-    this.items = JSON.parse(new TextDecoder().decode(entries[0].data));
-    this.render();
+p.source('/images').then(entries => {
+    for (const e of entries)
+        e.url = URL.createObjectURL(new Blob([e.data], { type: e.type }));
+    this.entries = entries;
 });
 ```
 
-**External service** (any URL outside the pathless build — JSON API, WebSocket, anything):
+Multiple calls to `p.source()` with the same URL make one fetch. Use `p.universe.cache` to persist blob URLs across re-renders:
 
 ```js
-// wire() is not involved — fetch and handle the response directly
-fetch('https://api.example.com/data')
-    .then(r => r.json())
-    .then(data => {
-        this.items = data.items;
-        pathless.write('index', this.index);
-        this.render();
-    });
+const key = name + '#blob';
+if (p.universe.cache.has(key)) return p.universe.cache.get(key);
+const url = URL.createObjectURL(new Blob([data], { type }));
+p.universe.cache.set(key, url);
 ```
-
-No changes to the pathless repo are needed in either case. The backend can aggregate from any source — databases, external APIs, file systems, message queues — and shape the response to exactly what the frame expects. The frame defines the contract; the backend delivers it; the universe manages everything else.
 
 ---
 
-## Assets and Blob URLs
+## Frames and Spaces
 
-`pathless.source(url)` returns a Promise of decoded entries and caches the Promise by URL. Calling it multiple times with the same URL makes only one fetch.
+A **frame** is a unit of content — an HTML string held in memory. All frames are registered at startup and form a finite pool. The user navigates between them; all frames exist simultaneously.
 
-For binary assets that need a `src` attribute (images, audio), convert to a blob URL and cache it in `cache`:
+A **space** is a display slot — one of three (`#zero`, `#fx`, `#one`). Each space shows one frame at a time and holds its own independent state. If the same frame appears in two spaces simultaneously, each space has entirely separate state.
+
+Navigation (swipe, keyboard `q`/`e`) moves a space through the frame pool. Layout controls how many spaces are visible at once. Frame authors don't implement any of this — it's automatic. A frame's only job is to render correctly and manage its own state within the space it's given.
+
+### Layout reference
+
+| layout | spaces visible  | variants                  |
+| ------ | --------------- | ------------------------- |
+| `0`    | zero only       | 1                         |
+| `1`    | zero + fx       | 2 (side-by-side, stacked) |
+| `2`    | zero + fx + one | 4 (arrangement variants)  |
+
+`prev` is a `[l, v]` tuple saved on `universe` whenever `layout(l > 0)` is called. `cycle()` with no argument reads the current layout. If the current layout is `0` and `prev` exists, it restores the previous layout instead of advancing — this is the fullscreen→restore cycle.
+
+### Frame lifecycle
+
+1. `sync(i)` is called for space `i`
+2. `space.el.innerHTML = frame.el` — raw HTML string injected
+3. `exec(space.el)` — all `<script>` and `<style>` tags cloned fresh and executed
+4. Frame constructor runs synchronously
+5. On next `sync()`, the DOM is fully replaced — no cleanup callbacks
+
+**Frames have no persistent DOM.** State that must survive re-renders goes in `p.write()`, not in instance variables or the DOM.
+
+---
+
+## Built-in Frame Types
+
+Register frames in order. Navigation wraps through them in registration order.
+
+### `p.Home(logo, heading string)`
+
+Centered logo and title. Shows a toggle button when the panel is hidden and layout is fullscreen.
+
+- `logo` — local `.svg` → inlined; local file → blob via `data-src`; `https://` URL → `<img src>`
+- `heading` — rendered as `<h1>`
+
+### `p.Text(path string)`
+
+Markdown rendered to HTML. Full typographic CSS included (`h1`–`h4`, `p`, `pre`, `code`, `table`, `blockquote`, `hr`, images). Keyboard scroll (`w`/`s`). Scroll position persisted per space.
+
+- `path` — local file path or `https://` URL, fetched once at startup
+
+### `p.Slides(dir string)`
+
+Full-screen image viewer. Tap left/right half to navigate, or keyboard `a`/`d`. Images fetched, blob URL'd, and cached. Slide index persisted per space.
+
+- `dir` — local directory path or `https://` URL to an asset bundle, fetched once at startup
+
+### `p.CustomHTML(path string)`
+
+Loads an arbitrary local HTML file as a frame. The filename without extension becomes the wrapper div's class — `dashboard.html` → `<div class="dashboard">`.
+
+- `path` — local file path only
+- The file provides only `<style>`, markup, and `<script>` — no outer wrapper div needed
+
+---
+
+## Writing a Custom Frame
+
+A frame file is a fragment: style, markup, script. The wrapper div is injected automatically by `CustomHTML`. Interaction is handled entirely through `p.input.tap` and `p.kb.keyNav` — the space is the interaction surface, not individual elements within it.
+
+```html
+<style>
+    .dashboard {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 3cqh;
+        font-size: clamp(1rem, 3cqw, 2rem);
+    }
+    .dashboard h1 { font-size: clamp(1.5rem, 5cqw, 3rem); }
+    .dashboard .hint { font-size: clamp(0.7rem, 1.8cqw, 1rem); opacity: 0.4; }
+</style>
+
+<h1>Dashboard</h1>
+<p class="value">0</p>
+<p class="hint">tap · a / d</p>
+
+<script>
+    {
+        class Dashboard {
+            constructor(p) {
+                this.count = p.read().get('count') ?? 0;
+                this.display = p.space.el.querySelector('.dashboard .value');
+                this.display.textContent = this.count;
+
+                p.input.tap(p.focused, ([x]) => this.#adjust(x < 0 ? -1 : 1, p));
+
+                p.kb.keyNav(p.focused, {
+                    a: { down: () => this.#adjust(-1, p) },
+                    d: { down: () => this.#adjust(1, p) },
+                });
+            }
+            #adjust(delta, p) {
+                this.count += delta;
+                p.write('count', this.count);
+                this.display.textContent = this.count;
+            }
+        }
+        new Dashboard(pathless);
+    }
+</script>
+```
+
+**Rules:**
+- Always wrap in a block scope `{ }` — all frame scripts share global scope
+- Never use `id` attributes — IDs must be unique; frames re-render
+- Query DOM from `p.space.el`, not `document` — the same frame can appear in multiple spaces simultaneously
+- Use `p.input.tap` for touch and `p.kb.keyNav` for keyboard — input.html owns the event listeners; frames register callbacks into the existing pipeline, never create their own
+- Read state before registering input; write state before any `sync()`
+- Load async data in `.then()` after all synchronous setup
+
+---
+
+## The Frame Environment
+
+Every frame constructor receives `pathless` as `window.pathless`. It runs synchronously immediately after the frame's HTML is injected into the space.
+
+### Internal shapes
 
 ```js
-const src = img.dataset.src;
-const blobKey = src + '#blob';
-if (cache.has(blobKey)) {
-    img.src = cache.get(blobKey);
-} else {
-    pathless.source(src).then(([entry]) => {
-        const url = URL.createObjectURL(new Blob([entry.data], { type: entry.type }));
-        cache.set(blobKey, url);
-        img.src = url;
-    });
+universe = {
+    el,      // #universe element
+    cache,   // Map — shared blob/fetch cache across all frames
+    prev,    // [l, v] | null — last non-zero layout
+    space,   // [{ el, frame, co }, ...]
+    panel,   // #panel element
+    frames,  // [{ el: htmlString, state: Map<spaceId, Map> }]
+}
+
+frame = {
+    el,     // raw HTML string
+    state,  // Map<spaceId, Map<k, v>> — independent state per space
 }
 ```
 
-The `#blob` suffix prevents key collision between the wire Promise and the blob URL string.
+### Method reference
+
+| Method               | Description                                                                                  |
+| -------------------- | -------------------------------------------------------------------------------------------- |
+| `p.layout(l, v = 0)` | Go to layout `l`, variant `v`. Saves `prev` if `l > 0`.                                      |
+| `p.cycle(l?)`        | Advance variant for layout `l`. Restores `prev` if `l === 0` and `prev` exists.              |
+| `p.nav(dir, i?)`     | Move space `i` forward/back through frames. Wraps.                                           |
+| `p.read(i?)`         | Returns the state `Map` for space `i`'s current frame.                                       |
+| `p.write(k, v, i?)`  | Sets `k → v` in space `i`'s frame state.                                                     |
+| `p.source(url)`      | Fetch + wire-decode a binary route. Cached. Returns a Promise.                               |
+| `p.sync(...i?)`      | Re-render spaces. No args = all visible spaces.                                              |
+| `p.bindPanel(node)`  | Register a DOM node as panel content for the current frame. Restored to default on nav away. |
+
+### `pathless.space`
+
+The current space — shorthand for `universe.space[focused]`:
+
+```js
+p.space.el    // the space's DOM element — query all frame DOM from here
+p.space.co    // Coordinates instance for this space
+p.space.frame // the current frame object
+```
+
+### State API
+
+State is a `Map` owned by the space's current frame assignment. It persists across re-renders and layout changes. It is independent per space — the same frame in two spaces has two separate state Maps.
+
+```js
+const saved = p.read().get('key') ?? defaultValue;
+
+p.write('key', value);
+
+// Both default to focused space; pass index to target another
+p.read(1).get('key');
+p.write('key', value, 1);
+```
+
+### Re-render
+
+```js
+p.sync()      // re-render all visible spaces
+p.sync(i)     // re-render space i only
+```
 
 ---
 
-## Go Package Reference
+## Input
 
+input.html installs one set of event listeners on the universe at startup. It handles all gesture recognition — swipe detection, long-press timing, movement thresholds, touch-action conflicts — before any frame loads. Frames never create their own event listeners; they register callbacks into the pipeline that's already running.
+
+### What's automatic
+
+| Gesture / Key                       | Action                                 |
+| ----------------------------------- | -------------------------------------- |
+| Horizontal swipe (≥25% space width) | `nav(±1)` on the swiped space          |
+| Long press (300ms, no movement)     | `toggle()` — show/hide panel           |
+| Keyboard `q` / `e`                  | `nav(-1)` / `nav(+1)` on focused space |
+| Keyboard `1` / `2` / `3`            | Cycle layouts                          |
+| Keyboard `tab`                      | Cycle focused space                    |
+| Keyboard `z`                        | `toggle()`                             |
+| Mobile panel ← / →                  | `nav(-1)` / `nav(+1)`                  |
+
+### `p.input.tap(i, fn)` — touch interaction
+
+Register a tap handler for space `i`. Fires when a touch ends with minimal movement — mutually exclusive from swipe. Coordinates are normalized `[x, y, z]` in `[-1, 1]` space:
+
+```js
+p.input.tap(p.focused, ([x]) => {
+    this.show(x < 0 ? this.index - 1 : this.index + 1);
+});
 ```
-fx/
-  main.go      — Fx struct, NewFx(), Routes map
-  circuit.go   — Encode(), Compress(), Load(), ToBytes(), read(), walk()
-  forge.go     — Forge interface, One type, Build(), Builder(), Frames(),
-                 element helpers, consolidateAssets()
-  templates.go — Home(), Text(), Slides(), App(), Logo()
-  templates/   — frame HTML templates (home, slides, text, app)
-one/
-  main.go      — One struct, binaryHandler, BuildHello(), Register(), Serve()
-zero/
-  main.go      — Zero struct, pathless.html minification + gzip
-  core/
-    pathless.html — universe shell
-    keyboard.html — keyboard panel HTML
+
+`x < 0` is the left half, `x > 0` is the right half. One handler per space index.
+
+### `p.kb.keyNav(i, binds)` — keyboard interaction
+
+Register key bindings for space `i`. Only active when that space is focused:
+
+```js
+p.kb.keyNav(p.focused, {
+    w: { down: () => this.#scroll(-1), up: () => this.#stop() },
+    s: { down: () => this.#scroll(1),  up: () => this.#stop() },
+    a: { down: () => this.prev() },
+    d: { down: () => this.next() },
+});
 ```
 
-### Two asset registries
+`down` fires on keydown and repeats while held. `up` fires on keyup. Both are optional.
 
-**`fx.Routes`** (`map[string][]byte`) holds binary asset bundles. `fx.Load(path)` reads a file or directory, encodes with `meta=true` (`0x00` format), compresses, and stores keyed by base name. `Register()` mounts every entry in `Routes` via `binaryHandler` on the API server.
+---
 
-**`forge.frames`** (`[]*One`) holds HTML frame strings. `Build()` and `Builder()` append to this slice. `Frames()` returns all accumulated frames as `[][]byte`. `BuildHello()` reads from `Frames()` — not from `Routes` — to assemble the hello bundle.
+## CSS Rules
 
-`BuildHello()` encodes with `Encode(values, false)` (`0x01` format) — keyboard panel HTML first, then all frame HTML blobs in order.
+The space handles all sizing for the frame root. You get these for free:
+
+```css
+:is(#zero, #fx, #one) > * { width: 100%; }
+:is(#zero, #fx, #one) > :first-child { flex: 1; min-height: 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+```
+
+The frame root needs only internal layout:
+
+```css
+.my-frame {
+    display: flex;
+    flex-direction: column;
+    padding: 2cqw;
+}
+```
+
+**Always use `cqw`/`cqh` for responsive sizing.** Each space has `container-type: size` and a container name (zero, fx, one). Container units resolve to the space's own dimensions and stay correct when layouts resize spaces. `vw`/`vh` will give wrong values in double or triple layouts.
