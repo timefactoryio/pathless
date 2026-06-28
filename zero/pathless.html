@@ -207,9 +207,19 @@
 					if (!cache.has(path))
 						cache.set(
 							path,
-							fetch(`${window.circuit}${path}`)
+							fetch(`${window.circuit}/${path}`)
 								.then((r) => r.arrayBuffer())
-								.then((buf) => this.wire(buf)),
+								.then((buf) =>
+									this.wire(buf).map((e) =>
+										Object.assign(e, {
+											url: URL.createObjectURL(
+												new Blob([e.data], {
+													type: e.type,
+												}),
+											),
+										}),
+									),
+								),
 						);
 					return cache.get(path);
 				}

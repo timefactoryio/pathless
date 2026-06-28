@@ -15,51 +15,37 @@
 	}
 </style>
 
-<img src="" alt="" />
-
 <script>
-	{
-		const prefix = '{{.PREFIX}}';
-		const url = window.circuit + '/' + prefix;
-
-		class Slides {
-			constructor(p) {
-				const { el } = p.space;
-				const i = p.focused;
-				this.p = p;
-				this.img = el.querySelector('.slides img');
-				this.entries = [];
-				this.index = p.read().get(prefix) || 0;
-
-				p.input.tap(i, ([x]) => {
-					this.show(x < 0 ? this.index - 1 : this.index + 1);
-				});
-				p.kb.keyNav(i, {
-					a: { down: () => this.show(this.index - 1) },
-					d: { down: () => this.show(this.index + 1) },
-				});
-
-				p.source(url).then((entries) => {
-					for (const e of entries)
-						if (!e.url)
-							e.url = URL.createObjectURL(
-								new Blob([e.data], { type: e.type }),
-							);
-					this.entries = entries;
-					if (this.entries.length) this.show(this.index);
-				});
-			}
-			show(n) {
-				if (!this.entries.length) return;
-				this.index =
-					((n % this.entries.length) + this.entries.length) %
-					this.entries.length;
-				this.p.write(prefix, this.index);
-				this.img.src = this.entries[this.index].url;
-				this.img.alt = this.entries[this.index].name;
-			}
+	const prefix = '{{.PREFIX}}';
+	class Slides {
+		constructor(p) {
+			this.element = Object.assign(document.createElement('div'), {
+				className: 'slides',
+				innerHTML: '<img>',
+			});
+			this.img = this.element.firstChild;
+			p.space.el.append(this.element);
+			this.entries = [];
+			this.index = p.read().get(prefix) || 0;
+			p.input.tap(([x]) => this.show(this.index + (x < 0 ? -1 : 1)));
+			p.kb.keyNav({
+				a: { down: () => this.show(this.index - 1) },
+				d: { down: () => this.show(this.index + 1) },
+			});
+			p.source(prefix).then((entries) => {
+				this.entries = entries;
+				if (this.entries.length) this.show(this.index);
+			});
 		}
-
-		new Slides(pathless);
+		show(n) {
+			if (!this.entries.length) return;
+			this.index =
+				((n % this.entries.length) + this.entries.length) %
+				this.entries.length;
+			pathless.write(prefix, this.index);
+			const { url, name } = this.entries[this.index];
+			Object.assign(this.img, { src: url, alt: name });
+		}
 	}
+	new Slides(pathless);
 </script>

@@ -58,7 +58,7 @@ func (o *One) Slides(dir string) {
 		return
 	}
 	result := template.HTML(buf.String())
-	o.Build("slides", &result)
+	o.Build("", &result)
 }
 
 func (o *One) CustomHTML(path string) {

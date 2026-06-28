@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -161,4 +162,23 @@ func (c *Circuit) walk(path string) []*Value {
 	}
 
 	return all
+}
+
+// Save decompresses the bundle stored in Routes at key and writes it to a file named key+".bin".
+// used to get raw bytes to be stored in an S3 bucket.
+func (c *Circuit) Save(key string) error {
+	data, ok := c.Routes[key]
+	if !ok {
+		return fmt.Errorf("save: route %q not found", key)
+	}
+	r, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("save: %w", err)
+	}
+	defer r.Close()
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		return fmt.Errorf("save: %w", err)
+	}
+	return os.WriteFile(key+".bin", raw, 0644)
 }

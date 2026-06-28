@@ -194,11 +194,10 @@
 					});
 				}
 
-				keyNav(i, binds) {
-					this.#frameFns.set(i, binds);
+				keyNav(binds) {
+					this.#frameFns.set(pathless.focused, binds);
 					return this;
 				}
-
 				#flash(key, on) {
 					const k = this.#K[key];
 					if (k?.el)

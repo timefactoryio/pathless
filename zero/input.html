@@ -2,13 +2,10 @@
 	{
 		class Input {
 			#active = new Map();
-			#press = null;
-			#latched = false;
 			#taps = new Map();
 
 			static MOVE = 0.1;
 			static SWIPE = 0.25;
-			static HOLD = 300;
 
 			constructor(universe) {
 				this.universe = universe;
@@ -26,12 +23,9 @@
 			handleEvent(e) {
 				this[e.type](e);
 			}
-			#index(t) {
-				return this.space.findIndex((s) => s.el.contains(t));
-			}
 
 			pointerdown({ pointerId, clientX, clientY, target }) {
-				const i = this.#index(target);
+				const i = this.space.findIndex((s) => s.el.contains(target));
 				if (i === -1) return;
 				this.universe.focused = i;
 				this.#active.set(pointerId, {
@@ -41,12 +35,6 @@
 					x: clientX,
 					y: clientY,
 				});
-				this.#press = setTimeout(() => {
-					this.#press = null;
-					this.#latched = true;
-					navigator.vibrate?.(10);
-					pathless.toggle();
-				}, Input.HOLD);
 			}
 
 			pointermove({ pointerId, clientX, clientY }) {
@@ -54,25 +42,12 @@
 				if (!a) return;
 				a.x = clientX;
 				a.y = clientY;
-				if (this.#press) {
-					const co = this.space[a.i].co;
-					if (
-						co.distance(co.at(a.sx, a.sy), co.at(a.x, a.y)) >
-						Input.MOVE
-					)
-						this.#clear();
-				}
 			}
 
 			pointerup({ pointerId }) {
 				const a = this.#active.get(pointerId);
 				if (!a) return;
 				this.#active.delete(pointerId);
-				this.#clear();
-				if (this.#latched) {
-					this.#latched = false;
-					return;
-				}
 				const co = this.space[a.i].co;
 				const start = co.at(a.sx, a.sy);
 				const end = co.at(a.x, a.y);
@@ -80,34 +55,23 @@
 					this.#taps.get(a.i)?.(end);
 					return;
 				}
-				this.#swipe(a);
-			}
-			pointercancel({ pointerId }) {
-				const a = this.#active.get(pointerId);
-				if (!a) return;
-				this.#active.delete(pointerId);
-				this.#clear();
-				if (this.#latched) this.#latched = false;
-			}
-			tap(i, fn) {
-				this.#taps.set(i, fn);
-			}
-			#swipe(a) {
-				const co = this.space[a.i].co;
-				const start = co.at(a.sx, a.sy);
-				const end = co.at(a.x, a.y);
 				const dx = end[0] - start[0];
 				const dy = end[1] - start[1];
-				if (Math.abs(dx) < Input.SWIPE || Math.abs(dy) > Math.abs(dx))
-					return;
-				navigator.vibrate?.(5);
-				pathless.nav(dx < 0 ? -1 : 1, a.i);
-			}
-			#clear() {
-				if (this.#press) {
-					clearTimeout(this.#press);
-					this.#press = null;
+				if (
+					Math.abs(dx) >= Input.SWIPE &&
+					Math.abs(dy) <= Math.abs(dx)
+				) {
+					navigator.vibrate?.(5);
+					pathless.nav(dx < 0 ? -1 : 1, a.i);
 				}
+			}
+
+			pointercancel({ pointerId }) {
+				this.#active.delete(pointerId);
+			}
+
+			tap(fn) {
+				this.#taps.set(pathless.focused, fn);
 			}
 		}
 

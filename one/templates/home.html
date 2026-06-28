@@ -58,40 +58,12 @@
 		class Home {
 			constructor(p) {
 				const { el } = p.space;
-				this.button = el.querySelector('.home button');
-				this.button.addEventListener('click', () => {
-					p.toggle();
-					this.update();
-				});
-
 				const logoImg = el.querySelector('.home .logo img[data-src]');
 				if (logoImg) {
-					const src = logoImg.dataset.src;
-					const blobKey = src + '#blob';
-					const cache = p.universe.cache;
-					if (cache.has(blobKey)) {
-						logoImg.src = cache.get(blobKey);
-					} else {
-						p.source(src).then(([entry]) => {
-							const url = URL.createObjectURL(
-								new Blob([entry.data], { type: entry.type }),
-							);
-							cache.set(blobKey, url);
-							logoImg.src = url;
-						});
-					}
+					p.source(logoImg.dataset.src).then(([entry]) => {
+						logoImg.src = entry.url;
+					});
 				}
-
-				this.update = () => {
-					const { space, frames, el: u } = p.universe;
-					this.button.classList.toggle(
-						'show',
-						p.panel.hidden &&
-							space[0].frame === frames?.[0] &&
-							+u.dataset.layout === 0,
-					);
-				};
-				this.update();
 			}
 		}
 
