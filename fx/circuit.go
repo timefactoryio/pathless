@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
@@ -22,33 +21,35 @@ func NewCircuit() *Circuit {
 	return &Circuit{Routes: make(map[string][]byte)}
 }
 
-// Value is the unit of work for encoding. Name and Type populate the manifest;
-// Data is the raw blob. Data is excluded from JSON and freed after encoding.
 type Value struct {
-	Name string `json:"name,omitempty"`
-	Type string `json:"type,omitempty"`
-	Size uint32 `json:"size"`
-	Data []byte `json:"-"`
+	Name string
+	Type string
 }
 
-func (c *Circuit) Wire(values []*Value) []byte {
+type Response struct {
+	Values []*Value
+	Data   [][]byte
+}
+
+func (c *Circuit) Wire(r *Response) []byte {
+	n := len(r.Values)
 	totalData := 0
-	for i, v := range values {
-		values[i].Size = uint32(len(v.Data))
-		totalData += len(v.Data)
+	for _, d := range r.Data {
+		totalData += len(d)
 	}
-	buf := bytes.NewBuffer(make([]byte, 0, 2+6*len(values)+totalData))
-	buf.WriteByte(byte(len(values) >> 8))
-	buf.WriteByte(byte(len(values)))
+	buf := bytes.NewBuffer(make([]byte, 0, 2+6*n+totalData))
+	buf.WriteByte(byte(n >> 8))
+	buf.WriteByte(byte(n))
 	var hdr [4]byte
-	for _, v := range values {
+	for i, v := range r.Values {
 		buf.WriteByte(byte(len(v.Name)))
 		buf.WriteString(v.Name)
 		buf.WriteByte(byte(len(v.Type)))
 		buf.WriteString(v.Type)
-		binary.BigEndian.PutUint32(hdr[:], v.Size)
+		data := r.Data[i]
+		binary.BigEndian.PutUint32(hdr[:], uint32(len(data)))
 		buf.Write(hdr[:])
-		buf.Write(v.Data)
+		buf.Write(data)
 	}
 	return buf.Bytes()
 }
@@ -93,26 +94,26 @@ func (c *Circuit) Load(path string) {
 	if err != nil {
 		return
 	}
-	var values []*Value
+	var r *Response
 	if info.IsDir() {
-		values = c.walk(path)
+		r = c.walk(path)
 	} else {
-		if v := c.read(path); v != nil {
-			values = []*Value{v}
+		if v, data := c.read(path); v != nil {
+			r = &Response{Values: []*Value{v}, Data: [][]byte{data}}
 		}
 	}
-	c.Routes[key] = c.Compress(c.Wire(values))
-	for _, v := range values {
-		v.Data = nil
+	if r != nil {
+		c.Routes[key] = c.Compress(c.Wire(r))
+		r.Data = nil
 	}
 }
 
 // read loads a single file into a Value, inferring MIME type from extension
 // or content detection as a fallback.
-func (c *Circuit) read(path string) *Value {
+func (c *Circuit) read(path string) (*Value, []byte) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	base := filepath.Base(path)
 	ext := filepath.Ext(base)
@@ -120,48 +121,49 @@ func (c *Circuit) read(path string) *Value {
 	if ct == "" {
 		ct = http.DetectContentType(data)
 	}
-	return &Value{Name: base[:len(base)-len(ext)], Size: uint32(len(data)), Type: ct, Data: data}
+	return &Value{Name: base[:len(base)-len(ext)], Type: ct}, data
 }
 
 // walk reads all files in a directory into an ordered slice of Values.
 // If a sort.json file is present, it defines the blob order by name;
 // files not listed in sort.json are appended after the ordered entries.
-func (c *Circuit) walk(path string) []*Value {
-	var all []*Value
+func (c *Circuit) walk(path string) *Response {
+	var r Response
 	filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || filepath.Base(p) == "sort.json" {
+		if err != nil || d.IsDir() || filepath.Base(p) == "sort.txt" {
 			return err
 		}
-		if v := c.read(p); v != nil {
-			all = append(all, v)
+		if v, data := c.read(p); v != nil {
+			r.Values = append(r.Values, v)
+			r.Data = append(r.Data, data)
 		}
 		return nil
 	})
-
-	if data, err := os.ReadFile(filepath.Join(path, "sort.json")); err == nil {
-		var order []string
-		if json.Unmarshal(data, &order) == nil {
-			byName := make(map[string]*Value, len(all))
-			for _, v := range all {
-				byName[v.Name] = v
-			}
-			out := make([]*Value, 0, len(all))
-			for _, name := range order {
-				if v, ok := byName[name]; ok {
-					out = append(out, v)
-					delete(byName, name)
-				}
-			}
-			for _, v := range all {
-				if _, ok := byName[v.Name]; ok {
-					out = append(out, v)
-				}
-			}
-			return out
+	if raw, err := os.ReadFile(filepath.Join(path, "sort.txt")); err == nil {
+		order := strings.Split(strings.TrimSpace(string(raw)), "\n")
+		byName := make(map[string]int, len(r.Values))
+		for i, v := range r.Values {
+			byName[v.Name] = i
 		}
+		outV := make([]*Value, 0, len(r.Values))
+		outD := make([][]byte, 0, len(r.Data))
+		seen := make(map[int]bool)
+		for _, name := range order {
+			if idx, ok := byName[strings.TrimSpace(name)]; ok && !seen[idx] {
+				outV = append(outV, r.Values[idx])
+				outD = append(outD, r.Data[idx])
+				seen[idx] = true
+			}
+		}
+		for i := range r.Values {
+			if !seen[i] {
+				outV = append(outV, r.Values[i])
+				outD = append(outD, r.Data[i])
+			}
+		}
+		r.Values, r.Data = outV, outD
 	}
-
-	return all
+	return &r
 }
 
 // Save decompresses the bundle stored in Routes at key and writes it to a file named key+".bin".

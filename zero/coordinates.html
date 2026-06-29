@@ -54,27 +54,30 @@
 			at(clientX, clientY) {
 				const u = (clientX - this.L) / this.W,
 					v = (clientY - this.T) / this.H;
-				return Coordinates.point(2 * u - 1, 1 - 2 * v, Date.now());
+				return [2 * u - 1, 1 - 2 * v, Date.now()];
 			}
 
 			quadrant([x, y]) {
 				return x >= 0 ? (y >= 0 ? 1 : 4) : y >= 0 ? 2 : 3;
 			}
+
 			#bounds(quads) {
+				let m = 0;
+				for (const q of quads) m |= 1 << q;
 				return [
-					quads.some((q) => q === 2 || q === 3) ? -1 : 0,
-					quads.some((q) => q === 1 || q === 4) ? 1 : 0,
-					quads.some((q) => q === 3 || q === 4) ? -1 : 0,
-					quads.some((q) => q === 1 || q === 2) ? 1 : 0,
+					m & 12 ? -1 : 0,
+					m & 18 ? 1 : 0,
+					m & 24 ? -1 : 0,
+					m & 6 ? 1 : 0,
 				];
 			}
 
 			#sub([x, y, t], [x0, x1, y0, y1]) {
-				return Coordinates.point(
+				return [
 					(2 * (x - x0)) / (x1 - x0) - 1,
 					(2 * (y - y0)) / (y1 - y0) - 1,
 					t,
-				);
+				];
 			}
 
 			quads(l, v, i) {
@@ -92,14 +95,14 @@
 					: (pt) => pt;
 				const pair = {
 					start: toLocal(this.at(clientX, clientY)),
-					end: Coordinates.point(),
+					end: [],
 					path: [],
 					_dir: null,
 				};
 				pair.move = (x, y) => {
 					const point = toLocal(this.at(x, y));
 					const dir = this.direction(
-						this._last(pair.path, pair.start),
+						pair.path.at(-1)?.point ?? pair.start,
 						point,
 					);
 					if (dir && dir !== pair._dir) {
@@ -147,7 +150,7 @@
 				return dt > 0 ? this.distance(a, b) / dt : 0;
 			}
 			terminal(path, start, end) {
-				return this.velocity(this._last(path, start), end);
+				return this.velocity(path.at(-1)?.point ?? start, end);
 			}
 			type(direction, path) {
 				return direction === null
@@ -155,9 +158,6 @@
 					: path.length > 1
 						? 'gesture'
 						: 'swipe';
-			}
-			_last(path, fallback) {
-				return path.length ? path[path.length - 1].point : fallback;
 			}
 		}
 

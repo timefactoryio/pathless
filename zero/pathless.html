@@ -142,6 +142,7 @@
 			);
 			class Pathless {
 				#td = new TextDecoder();
+				#range = document.createRange();
 				static #spaces = ['zero', 'fx', 'one'];
 				static #layouts = [null, [0, 1], [0, 1, 2]];
 				static #variants = [1, 2, 4];
@@ -176,29 +177,28 @@
 					return this.universe.space[this.focused];
 				}
 
-				wire(buf) {
+				wire(buf, fn) {
 					const bytes = new Uint8Array(buf);
-					const count = (bytes[0] << 8) | bytes[1];
-					const values = new Array(count);
+					const view = new DataView(buf);
+					const count = view.getUint16(0);
 					let pos = 2;
-					const str = (n) =>
-						n
-							? this.#td.decode(bytes.subarray(pos, (pos += n)))
-							: undefined;
-					const u32 = () =>
-						(bytes[pos++] << 24) |
-						(bytes[pos++] << 16) |
-						(bytes[pos++] << 8) |
-						bytes[pos++];
+					const values = new Array(count);
 					for (let i = 0; i < count; i++) {
-						const name = str(bytes[pos++]);
-						const type = str(bytes[pos++]);
-						const n = u32();
-						values[i] = {
+						const nl = bytes[pos++];
+						const name = this.#td.decode(
+							bytes.subarray(pos, (pos += nl)),
+						);
+						const tl = bytes[pos++];
+						const type = this.#td.decode(
+							bytes.subarray(pos, (pos += tl)),
+						);
+						const n = view.getUint32(pos);
+						pos += 4;
+						values[i] = fn(
 							name,
 							type,
-							data: bytes.subarray(pos, (pos += n)),
-						};
+							bytes.subarray(pos, (pos += n)),
+						);
 					}
 					return values;
 				}
@@ -207,47 +207,40 @@
 					if (!cache.has(path))
 						cache.set(
 							path,
-							fetch(`${window.circuit}/${path}`)
-								.then((r) => r.arrayBuffer())
-								.then((buf) =>
-									this.wire(buf).map((e) =>
-										Object.assign(e, {
-											url: URL.createObjectURL(
-												new Blob([e.data], {
-													type: e.type,
-												}),
-											),
-										}),
-									),
+							fetch(`${window.circuit}/${path}`).then(async (r) =>
+								this.wire(
+									await r.arrayBuffer(),
+									(name, type, data) => ({
+										name,
+										url: URL.createObjectURL(
+											new Blob([data], { type }),
+										),
+									}),
 								),
+							),
 						);
 					return cache.get(path);
 				}
 				async init() {
+					const u = this.universe;
 					const [coordinates, input, keyboard, ...frames] = this.wire(
 						await (await fetch(window.circuit)).arrayBuffer(),
+						(name, type, data) => data,
 					);
-					const p = this.universe.panel;
-					this.#inject(p, coordinates.data);
+					this.exec(u.panel, coordinates);
 					this.#measure();
-					for (const { data } of [input, keyboard])
-						this.#inject(p, data);
-					this.universe.frames = frames.map((e) => ({
-						el: this.#td.decode(e.data),
+					this.exec(u.panel, input);
+					this.exec(u.panel, keyboard);
+					u.frames = frames.map((data) => ({
+						el: data,
 						state: new Map(
 							Pathless.#spaces.map((k) => [k, new Map()]),
 						),
 					}));
-					if (this.universe.frames.length) {
-						this.universe.space.forEach(
-							(s) => (s.frame = this.universe.frames[0]),
-						);
+					if (u.frames.length) {
+						u.space.forEach((s) => (s.frame = u.frames[0]));
 						this.sync();
 					}
-				}
-				#inject(el, data) {
-					el.innerHTML = this.#td.decode(data);
-					this.exec(el);
 				}
 				#measure() {
 					const u = this.universe;
@@ -257,32 +250,29 @@
 					u.space.forEach((s, i) => (s.quads = u.co.quads(l, v, i)));
 				}
 
-				#s(i = this.focused) {
-					return this.universe.space[i];
-				}
-				read(i) {
-					const s = this.#s(i);
+				read(i = this.focused) {
+					const s = this.universe.space[i];
 					return s.frame.state.get(s.el.id);
 				}
-				write(k, v, i) {
-					const s = this.#s(i);
+				write(k, v, i = this.focused) {
+					const s = this.universe.space[i];
 					s.frame.state.get(s.el.id).set(k, v);
 				}
 				sync(...indices) {
-					const prev = this.universe.focused;
-					(indices.length ? indices : this.visible).forEach((i) => {
-						const s = this.universe.space[i];
-						s.el.innerHTML = s.frame.el;
-						this.universe.focused = i;
-						this.exec(s.el);
+					const u = this.universe;
+					const prev = u.focused;
+					(indices.length ? indices : u.visible).forEach((i) => {
+						const s = u.space[i];
+						u.focused = i;
+						this.exec(s.el, s.frame.el);
 					});
-					this.universe.focused = prev;
+					u.focused = prev;
 				}
-				exec(el) {
+				exec(el, data) {
 					el.replaceChildren(
-						document
-							.createRange()
-							.createContextualFragment(el.innerHTML),
+						this.#range.createContextualFragment(
+							this.#td.decode(data),
+						),
 					);
 				}
 				layout(l, v = 0) {
@@ -290,17 +280,19 @@
 					if (l > 0) u.prev = [l, v];
 					u.el.dataset.layout = l;
 					u.el.dataset.variant = v;
-					u.visible = l === 0 ? [u.focused] : Pathless.#layouts[l];
+					const visible = (u.visible =
+						l === 0 ? [u.focused] : Pathless.#layouts[l]);
 					u.space.forEach((s, i) => {
-						s.el.hidden = !u.visible.includes(i);
+						s.el.hidden = !visible.includes(i);
 						s.quads = u.co.quads(l, v, i);
 					});
 					this.sync();
 				}
-				cycle(l = +this.universe.el.dataset.layout) {
+				cycle(l) {
 					const { el, prev } = this.universe;
 					const cur = +el.dataset.layout;
 					if (cur === 0 && prev) return this.layout(...prev);
+					l ??= cur;
 					this.layout(
 						l,
 						cur === l
@@ -309,16 +301,16 @@
 					);
 				}
 				nav(dir, i = this.focused) {
-					const s = this.universe.space[i];
-					const f = this.universe.frames;
+					const { space, frames: f } = this.universe;
+					const s = space[i];
 					s.frame =
 						f[(f.indexOf(s.frame) + dir + f.length) % f.length];
 					this.sync(i);
 				}
 				focus() {
-					const v = this.visible;
+					const { visible: v, focused } = this.universe;
 					this.universe.focused =
-						v[(v.indexOf(this.focused) + 1) % v.length];
+						v[(v.indexOf(focused) + 1) % v.length];
 				}
 				toggle() {
 					this.universe.panel.hidden = !this.universe.panel.hidden;
