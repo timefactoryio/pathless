@@ -4,9 +4,6 @@
 			#active = new Map();
 			#taps = new Map();
 
-			static MOVE = 0.1;
-			static SWIPE = 0.25;
-
 			constructor(universe) {
 				this.universe = universe;
 				this.space = universe.space;
@@ -24,45 +21,39 @@
 				this[e.type](e);
 			}
 
-			pointerdown({ pointerId, clientX, clientY, target }) {
-				const i = this.space.findIndex((s) => s.el.contains(target));
+			pointerdown({ pointerId, clientX, clientY }) {
+				const co = this.universe.co;
+				const pt = co.at(clientX, clientY);
+				const visible = this.universe.visible;
+				const i = this.space.findIndex(
+					(s, idx) =>
+						visible.includes(idx) && co.contains(pt, s.quads),
+				);
 				if (i === -1) return;
 				this.universe.focused = i;
 				this.#active.set(pointerId, {
 					i,
-					sx: clientX,
-					sy: clientY,
-					x: clientX,
-					y: clientY,
+					pair: co.track(clientX, clientY, this.space[i].quads),
 				});
 			}
 
 			pointermove({ pointerId, clientX, clientY }) {
-				const a = this.#active.get(pointerId);
-				if (!a) return;
-				a.x = clientX;
-				a.y = clientY;
+				this.#active.get(pointerId)?.pair.move(clientX, clientY);
 			}
 
-			pointerup({ pointerId }) {
+			pointerup({ pointerId, clientX, clientY }) {
 				const a = this.#active.get(pointerId);
 				if (!a) return;
 				this.#active.delete(pointerId);
-				const co = this.space[a.i].co;
-				const start = co.at(a.sx, a.sy);
-				const end = co.at(a.x, a.y);
-				if (co.distance(start, end) < Input.MOVE) {
-					this.#taps.get(a.i)?.(end);
+				const co = this.universe.co;
+				const g = a.pair.close(clientX, clientY);
+				if (g.distance < co.tap) {
+					this.#taps.get(a.i)?.(g);
 					return;
 				}
-				const dx = end[0] - start[0];
-				const dy = end[1] - start[1];
-				if (
-					Math.abs(dx) >= Input.SWIPE &&
-					Math.abs(dy) <= Math.abs(dx)
-				) {
+				if (g.axis === 'x' && g.distance >= co.swipe) {
 					navigator.vibrate?.(5);
-					pathless.nav(dx < 0 ? -1 : 1, a.i);
+					pathless.nav(g.direction === 'left' ? -1 : 1, a.i);
 				}
 			}
 

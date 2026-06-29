@@ -252,10 +252,11 @@
 				#measure() {
 					const u = this.universe;
 					(u.co ??= new pathless.Coordinates()).measure(u.el);
-					u.space.forEach((s) =>
-						(s.co ??= new pathless.Coordinates()).measure(s.el),
-					);
+					const l = +u.el.dataset.layout,
+						v = +u.el.dataset.variant;
+					u.space.forEach((s, i) => (s.quads = u.co.quads(l, v, i)));
 				}
+
 				#s(i = this.focused) {
 					return this.universe.space[i];
 				}
@@ -290,10 +291,10 @@
 					u.el.dataset.layout = l;
 					u.el.dataset.variant = v;
 					u.visible = l === 0 ? [u.focused] : Pathless.#layouts[l];
-					u.space.forEach(
-						(s, i) => (s.el.hidden = !u.visible.includes(i)),
-					);
-					this.#measure();
+					u.space.forEach((s, i) => {
+						s.el.hidden = !u.visible.includes(i);
+						s.quads = u.co.quads(l, v, i);
+					});
 					this.sync();
 				}
 				cycle(l = +this.universe.el.dataset.layout) {

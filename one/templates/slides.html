@@ -27,7 +27,7 @@
 			p.space.el.append(this.element);
 			this.entries = [];
 			this.index = p.read().get(prefix) || 0;
-			p.input.tap(([x]) => this.show(this.index + (x < 0 ? -1 : 1)));
+			p.input.tap((g) => this.show(this.index + (g.end[0] < 0 ? -1 : 1)));
 			p.kb.keyNav({
 				a: { down: () => this.show(this.index - 1) },
 				d: { down: () => this.show(this.index + 1) },

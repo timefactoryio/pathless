@@ -1,13 +1,36 @@
 <script>
 	{
 		class Coordinates {
-			static zero(x = null, y = null, z = null) {
+			static point(x = null, y = null, z = null) {
 				return [x, y, z];
 			}
+
+			static #quads = [
+				null,
+				[
+					[
+						[2, 3],
+						[1, 4],
+					],
+					[
+						[1, 2],
+						[3, 4],
+					],
+				],
+				[
+					[[2, 3], [1], [4]],
+					[[1, 2], [4], [3]],
+					[[1, 4], [3], [2]],
+					[[3, 4], [2], [1]],
+				],
+			];
+
 			constructor() {
-				this.origin = Coordinates.zero(0, 0);
 				this.threshold = 0.05;
+				this.tap = 0.1;
+				this.swipe = 0.25;
 			}
+
 			measure(el) {
 				if (this._onResize) {
 					removeEventListener('resize', this._onResize);
@@ -27,20 +50,54 @@
 					passive: true,
 				});
 			}
+
 			at(clientX, clientY) {
 				const u = (clientX - this.L) / this.W,
 					v = (clientY - this.T) / this.H;
-				return Coordinates.zero(2 * u - 1, 1 - 2 * v, Date.now());
+				return Coordinates.point(2 * u - 1, 1 - 2 * v, Date.now());
 			}
-			track(clientX, clientY) {
+
+			quadrant([x, y]) {
+				return x >= 0 ? (y >= 0 ? 1 : 4) : y >= 0 ? 2 : 3;
+			}
+			#bounds(quads) {
+				return [
+					quads.some((q) => q === 2 || q === 3) ? -1 : 0,
+					quads.some((q) => q === 1 || q === 4) ? 1 : 0,
+					quads.some((q) => q === 3 || q === 4) ? -1 : 0,
+					quads.some((q) => q === 1 || q === 2) ? 1 : 0,
+				];
+			}
+
+			#sub([x, y, t], [x0, x1, y0, y1]) {
+				return Coordinates.point(
+					(2 * (x - x0)) / (x1 - x0) - 1,
+					(2 * (y - y0)) / (y1 - y0) - 1,
+					t,
+				);
+			}
+
+			quads(l, v, i) {
+				return Coordinates.#quads[l]?.[v]?.[i] ?? [1, 2, 3, 4];
+			}
+
+			contains(pt, quads) {
+				return quads.includes(this.quadrant(pt));
+			}
+
+			track(clientX, clientY, quads) {
+				const bounds = quads ? this.#bounds(quads) : null;
+				const toLocal = bounds
+					? (pt) => this.#sub(pt, bounds)
+					: (pt) => pt;
 				const pair = {
-					start: this.at(clientX, clientY),
-					end: Coordinates.zero(),
+					start: toLocal(this.at(clientX, clientY)),
+					end: Coordinates.point(),
 					path: [],
 					_dir: null,
 				};
 				pair.move = (x, y) => {
-					const point = this.at(x, y);
+					const point = toLocal(this.at(x, y));
 					const dir = this.direction(
 						this._last(pair.path, pair.start),
 						point,
@@ -51,32 +108,20 @@
 					}
 				};
 				pair.close = (endX, endY) => {
-					pair.end = this.at(endX, endY);
+					pair.end = toLocal(this.at(endX, endY));
 					const direction = this.direction(pair.start, pair.end);
 					return {
-						start: pair.start,
 						end: pair.end,
-						delta: this.delta(pair.start, pair.end),
 						distance: this.distance(pair.start, pair.end),
-						duration: pair.end[2] - pair.start[2],
-						velocity: this.velocity(pair.start, pair.end),
-						terminal: this.terminal(
-							pair.path,
-							pair.start,
-							pair.end,
-						),
 						axis: this.axis(pair.start, pair.end),
 						direction,
 						type: this.type(direction, pair.path),
-						from: this.fromOrigin(pair.start),
-						path: pair.path,
+						quadrant: this.quadrant(pair.start),
 					};
 				};
 				return pair;
 			}
-			delta(a, b) {
-				return Coordinates.zero(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
-			}
+
 			distance(a, b) {
 				return Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]);
 			}
@@ -110,9 +155,6 @@
 					: path.length > 1
 						? 'gesture'
 						: 'swipe';
-			}
-			fromOrigin(coord) {
-				return this.delta(this.origin, coord);
 			}
 			_last(path, fallback) {
 				return path.length ? path[path.length - 1].point : fallback;
