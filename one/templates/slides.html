@@ -25,17 +25,17 @@
 					innerHTML: '<img>',
 				});
 				this.img = this.element.firstChild;
-				p.space.el.append(this.element);
+				p.universe.space.el.append(this.element);
 				this.entries = [];
-				this.index = p.read().get(prefix) || 0;
+				this.index = p.universe.read().get(prefix) || 0;
 				p.input.tap((g) =>
 					this.show(this.index + (g.end[0] < 0 ? -1 : 1)),
 				);
-				p.kb.keyNav({
+				p.keyboard.keyNav({
 					a: { down: () => this.show(this.index - 1) },
 					d: { down: () => this.show(this.index + 1) },
 				});
-				p.wire(prefix).then((entries) => {
+				p.source(prefix).then((entries) => {
 					this.entries = entries;
 					if (this.entries.length) this.show(this.index);
 				});
@@ -46,9 +46,9 @@
 				this.index =
 					((n % this.entries.length) + this.entries.length) %
 					this.entries.length;
-				this.p.write(prefix, this.index);
-				const { url, name } = this.entries[this.index];
-				Object.assign(this.img, { src: url, alt: name });
+				this.p.universe.write(prefix, this.index);
+				const { url } = this.entries[this.index];
+				Object.assign(this.img, { src: url });
 			}
 		}
 		new Slides(pathless);

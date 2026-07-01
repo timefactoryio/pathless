@@ -1,98 +1,77 @@
 <script>
 	{
+		// Coordinates understands pointer events per space. It does not manage
+		// the DOM or layout — CSS positions the spaces. It reads a space's live
+		// rect to decide which visible space a pointer is in and to map a point
+		// into that space's local [-1, 1] frame (+1 top), then tracks a gesture.
 		class Coordinates {
-			static point(x = null, y = null, z = null) {
-				return [x, y, z];
-			}
-
-			constructor(universe) {
-				this.universe = universe;
+			constructor(pathless) {
+				this.pathless = pathless;
+				this.universe = pathless.universe;
 				this.threshold = 0.05;
 				this.tap = 0.1;
 				this.swipe = 0.25;
-				this.measure(universe.el);
 			}
 
-			measure(el = this.el) {
-				if (this._onResize) {
-					removeEventListener('resize', this._onResize);
-					removeEventListener('orientationchange', this._onResize);
+			// locate: the visible space whose rect contains the client point.
+			locate(clientX, clientY) {
+				for (const i of this.universe.visible()) {
+					const s = this.universe.spaces[i];
+					const r = s.el.getBoundingClientRect();
+					if (
+						clientX >= r.left &&
+						clientX <= r.right &&
+						clientY >= r.top &&
+						clientY <= r.bottom
+					)
+						return s;
 				}
-				this.el = el;
-				const update = () => {
-					const r = el.getBoundingClientRect();
-					this.L = r.left;
-					this.T = r.top;
-					this.W = r.width || 1;
-					this.H = r.height || 1;
-				};
-				update();
-				this._onResize = update;
-				addEventListener('resize', update, { passive: true });
-				addEventListener('orientationchange', update, {
-					passive: true,
-				});
+				return null;
 			}
 
-			at(clientX, clientY) {
-				const u = (clientX - this.L) / this.W,
-					v = (clientY - this.T) / this.H;
-				return [2 * u - 1, 1 - 2 * v, Date.now()];
-			}
-
-			#bounds([x, y]) {
+			// at: client pixel -> [-1, 1] within a space element's rect.
+			at(clientX, clientY, el) {
+				const r = el.getBoundingClientRect();
 				return [
-					x > 0 ? 0 : -1,
-					x < 0 ? 0 : 1,
-					y < 0 ? 0 : -1,
-					y > 0 ? 0 : 1,
+					(2 * (clientX - r.left)) / (r.width || 1) - 1,
+					1 - (2 * (clientY - r.top)) / (r.height || 1),
+					Date.now(),
 				];
 			}
 
-			#sub([x, y, t], [x0, x1, y0, y1]) {
-				return [
-					(2 * (x - x0)) / (x1 - x0) - 1,
-					(2 * (y - y0)) / (y1 - y0) - 1,
-					t,
-				];
-			}
-
-			contains([px, py], geo) {
-				const [x0, x1, y0, y1] = this.#bounds(geo);
-				return px >= x0 && px <= x1 && py >= y0 && py <= y1;
-			}
-
-			track(clientX, clientY, geo) {
-				const bounds = geo ? this.#bounds(geo) : null;
-				const toLocal = bounds
-					? (pt) => this.#sub(pt, bounds)
-					: (pt) => pt;
+			// track: a gesture within a space element; move/close report the
+			// point in that space's local [-1, 1].
+			track(clientX, clientY, el) {
 				const pair = {
-					start: toLocal(this.at(clientX, clientY)),
-					end: [],
+					start: this.at(clientX, clientY, el),
 					path: [],
 					_dir: null,
 				};
 				pair.move = (x, y) => {
-					const point = toLocal(this.at(x, y));
+					const point = this.at(x, y, el);
 					const dir = this.direction(
-						pair.path.at(-1)?.point ?? pair.start,
+						pair.path.at(-1) ?? pair.start,
 						point,
 					);
 					if (dir && dir !== pair._dir) {
-						pair.path.push({ point, direction: dir });
+						pair.path.push(point);
 						pair._dir = dir;
 					}
 				};
-				pair.close = (endX, endY) => {
-					pair.end = toLocal(this.at(endX, endY));
-					const direction = this.direction(pair.start, pair.end);
+				pair.close = (x, y) => {
+					const end = this.at(x, y, el);
+					const direction = this.direction(pair.start, end);
 					return {
-						end: pair.end,
-						distance: this.distance(pair.start, pair.end),
-						axis: this.axis(pair.start, pair.end),
+						end,
+						distance: this.distance(pair.start, end),
+						axis: this.axis(pair.start, end),
 						direction,
-						type: this.type(direction, pair.path),
+						type:
+							direction === null
+								? 'tap'
+								: pair.path.length > 1
+									? 'gesture'
+									: 'swipe',
 					};
 				};
 				return pair;
@@ -122,18 +101,8 @@
 				const dt = b[2] - a[2];
 				return dt > 0 ? this.distance(a, b) / dt : 0;
 			}
-			terminal(path, start, end) {
-				return this.velocity(path.at(-1)?.point ?? start, end);
-			}
-			type(direction, path) {
-				return direction === null
-					? 'tap'
-					: path.length > 1
-						? 'gesture'
-						: 'swipe';
-			}
 		}
 
-		universe.coordinates = new Coordinates(universe);
+		pathless.coordinates = new Coordinates(pathless);
 	}
 </script>

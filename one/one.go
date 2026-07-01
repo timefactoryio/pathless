@@ -56,22 +56,14 @@ func (o *One) cors(next http.Handler) http.Handler {
 }
 
 func (o *One) Serve() {
-	r := &fx.Response{
-		Values: []*fx.Value{
-			{Name: "universe"},
-			{Name: "coordinates"},
-			{Name: "input"},
-			{Name: "keyboard"},
-		},
-		Data: [][]byte{o.Universe, o.Coordinates, o.Input, o.Keyboard},
-	}
+	// The root response is the universe (item 0) followed by every frame.
+	root := &fx.Value{Values: []*fx.Value{{Type: "text/html", Data: o.Universe}}}
 	for _, b := range o.Frames() {
-		r.Values = append(r.Values, &fx.Value{})
-		r.Data = append(r.Data, b)
+		root.Values = append(root.Values, &fx.Value{Type: "text/html", Data: b})
 	}
-	o.wire("/", o.Fx.Compress(o.Fx.Wire(r)))
-	for key, data := range o.Fx.Routes {
-		o.wire("/"+key, data)
+	o.wire("/", o.Compress(o.Encode(root)))
+	for key, v := range o.Fx.Routes {
+		o.wire("/"+key, o.Compress(o.Encode(v)))
 	}
 	go http.ListenAndServe(":1001", o.cors(o.circuit))
 	http.ListenAndServe(":1000", o.pathless)

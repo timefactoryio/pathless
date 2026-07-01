@@ -1,12 +1,29 @@
 # pathless frame specification
 
-This document specifies how to build a **frame** for pathless. A frame is a single `.html` file containing `<style>`, optional markup, and a `<script>`. It renders any bytes (JSON, images, text) into an interactive view. An AI agent reading this file should be able to produce a correct frame for an arbitrary data structure without further context.
+pathless renders **frames** — single `.html` files that visualize and interact with data the developer knows ahead of time. The data can be anything expressible as bytes: JSON, markdown, images, CSV, logs, binary formats, generated structures. There is no schema requirement.
+
+This document is the contract for an AI agent working with a developer. Given the developer's data (content, structure, and intent), the agent must:
+
+1. **Prefer a template.** If the data maps cleanly onto a built-in (`Home`, `Text`, `Slides`), emit only the one-line `main.go` registration — no HTML authoring.
+2. **Otherwise author a custom frame** via `CustomHTML`: design an HTML shell for visualizing, engaging with, and interacting with that specific data, following the rules below.
+
+Because the data is known at build time, the frame should be designed *for* it — its shape, its cardinality, its natural interactions — not as a generic viewer.
 
 ---
 
-## 1. Registration (Go `main.go`)
+## 1. Path one: templates (the brainless path)
 
-The developer writes a `main.go` that registers frames and data routes, then calls `Serve()`.
+| Builder                 | Input                                                              | Produces                                                                                                            |
+| ----------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `p.Home(logo, heading)` | `.svg` (inlined), local image, or `https://` image; heading string | centered logo + `<h1>`                                                                                              |
+| `p.Text(path)`          | markdown file (local or `https://`)                                | rendered HTML, `w`/`s` to scroll, scroll persisted                                                                  |
+| `p.Slides(dir)`         | image directory (local), or `https://` URL of a `Save`'d bundle    | full-screen viewer; tap halves or `a`/`d` to page; index persisted. Internally calls `Load(dir)` and `source(base)` |
+
+If one of these fits, stop here — only the `main.go` line is needed.
+
+---
+
+## 2. Path two: custom frames — registration (Go `main.go`)
 
 ```go
 package main
@@ -16,12 +33,10 @@ import "github.com/timefactoryio/pathless"
 func main() {
     p := pathless.NewPathless()
 
-    // built-in template frames
-    p.Home("./logo.svg", "Title")    // logo + heading
-    p.Text("./readme.md")            // markdown → html
-    p.Slides("./pics")               // image viewer (also registers "pics" route)
+    // templates and custom frames compose freely
+    p.Home("./logo.svg", "Title")
 
-    // custom data frame
+    // custom data frame: expose the data, register the frame
     p.Load("./data/catalog.json")    // route "catalog.json" (base name of path)
     p.Load("./pics")                 // route "pics"         (directory → bundle)
     p.CustomHTML("./catalog.html")   // frame, wrapper <div class="catalog">
@@ -30,61 +45,66 @@ func main() {
 }
 ```
 
-Rules an agent must follow when emitting main.go:
+Rules an agent must follow when emitting `main.go`:
 
 - `p.CustomHTML(path)` registers a frame. The wrapper `<div>` class is the filename without extension (`catalog.html` → `class="catalog"`). **Local files only.**
-- `p.Load(path)` exposes a file or directory as a fetchable route. **The route key is `filepath.Base(path)`** — `./data/catalog.json` → `catalog.json`, pics → pics. A directory becomes a bundle of all its files.
-- Data a frame reads via `p.source(...)` **must** be registered with `p.Load(...)` (or by a template builder that loads internally, e.g. `Slides`).
-- Built-in builders: `Home(logo, heading)`, `Text(path)`, `Slides(dir)`. Each accepts a local path or an `https://` URL.
+- `p.Load(path)` exposes a file or directory as a fetchable route. **The route key is `filepath.Base(path)`** — `./data/catalog.json` → `catalog.json`, `./pics` → `pics`. A directory becomes a bundle of all its files. Any file type works — the wire carries typed bytes, and the frame decides how to decode them.
+- `p.Load(url)` with an `http(s)://` URL expects a **pre-encoded wire blob** (produced by `Save`) and decodes it back into a bundle. It is not for arbitrary remote files.
+- `p.Save(key)` writes the wire encoding of a loaded route to `s3/<key>`, ready to sync to object storage (e.g. `rclone sync s3 remote:bucket`). A saved route round-trips: `Save("slides")` → upload → `p.Slides("https://bucket.example.com/slides")`.
+- Every route a frame reads via `p.source(...)` **must** be registered with `p.Load(...)` (or by a template that loads internally).
+
+### Ordering: `sort.txt`
+
+Bundle entries carry **no filenames on the wire — order is the contract.** A directory route's order defaults to filesystem walk order. To pin it, place a `sort.txt` in the directory: one file stem (name without extension) per line. Listed files come first, in that order; unlisted files follow.
+
+```
+cover
+intro
+alpha
+```
+
+Frames reference bundle entries **by index**, so `sort.txt` is how data and companion files stay aligned. When the agent designs a data structure alongside a bundle (e.g. records referencing images), it should reference entries by index and emit the matching `sort.txt`.
 
 ---
 
-## 2. Data access (client `p.source`)
+## 3. Data access (client `p.source`)
 
 ```js
-p.source(key) // → Promise<Array<{ name: string, url: string }>>
+p.source(key) // → Promise<Array<{ type, data, url }>>
 ```
 
-- `key` is the route key **without a leading slash**: `p.source('catalog.json')`, `p.source('pics')`.
-- Each entry: `name` is the filename (with extension), `url` is an object URL (`blob:`) to that file's bytes.
-- The promise is cached per key — calling it repeatedly causes one fetch.
-- A single-file route (e.g. a JSON file) yields a **one-element array**.
+- `key` is the route key **without a leading slash**: `p.source('catalog.json')`, `p.source('pics')`. The empty key is reserved for the shell.
+- Each entry:
+  - `type` — MIME type string (`image/avif`, `application/json`, `text/plain`, …)
+  - `data` — `Uint8Array` of the raw bytes, already in memory
+  - `url` — lazy getter; creates a `blob:` object URL from `data` on first access
+- There are **no names**. Entries are identified by position (see `sort.txt`).
+- The promise is cached per key — repeated calls cause one fetch.
+- A single-file route yields a **one-element array**.
 
-### Reading JSON
+Decode `data` however the format requires — the bytes are already local, so no second fetch is ever needed:
 
 ```js
+// structured text (JSON here; same idea for CSV, NDJSON, etc.)
 const [entry] = await p.source('catalog.json');
-const data = await fetch(entry.url).then((r) => r.json());
-```
+const data = JSON.parse(new TextDecoder().decode(entry.data));
 
-### Reading an image set and mapping by name
-
-Image references in data often omit the extension (e.g. `"image": "alpha"`), while bundle entries include it (`alpha.avif`). Build a lookup keyed by the stem:
-
-```js
+// media: hand the lazy blob url to the element
 const pics = await p.source('pics');
-const img = Object.fromEntries(
-    pics.map(({ name, url }) => [name.replace(/\.[^.]+$/, ''), url]),
-);
-// img['alpha'] === 'blob:...'
-```
+img.src = pics[i].url; // index i per sort.txt order
 
-### Loading JSON and images together
-
-```js
+// data + companion bundle, referenced by index
 const [[file], pics] = await Promise.all([
     p.source('catalog.json'),
     p.source('pics'),
 ]);
-const data = await fetch(file.url).then((r) => r.json());
-const img = Object.fromEntries(
-    pics.map(({ name, url }) => [name.replace(/\.[^.]+$/, ''), url]),
-);
+const records = JSON.parse(new TextDecoder().decode(file.data));
+// record { "image": 2 } → pics[2].url
 ```
 
 ---
 
-## 3. Frame anatomy
+## 4. Frame anatomy
 
 A frame file has three parts. The Go `Build` step **automatically**: hoists every `<style>` to the top, wraps every `<script>` body in a `{ }` block, and moves all scripts to the end. Authoring contract:
 
@@ -100,8 +120,8 @@ A frame file has three parts. The Go `Build` step **automatically**: hoists ever
   class Frame {
     constructor(p) {
       // 1. read persisted state
-      // 2. build / query DOM under p.space.el
-      // 3. register p.input.tap / p.kb.keyNav
+      // 2. build / query DOM under p.universe.space.el
+      // 3. register p.input.tap / p.keyboard.keyNav
       // 4. load async data, then render
     }
   }
@@ -116,51 +136,51 @@ A frame file has three parts. The Go `Build` step **automatically**: hoists ever
 | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | Wrap script body in `{ }`                                                   | scripts re-execute on every render; block scope prevents redeclaration errors    |
 | No `id` attributes                                                          | the same frame may render into multiple spaces simultaneously; ids would collide |
-| Query DOM via `p.space.el.querySelector(...)`, never `document`             | isolates per-space DOM                                                           |
-| Never call `addEventListener` for navigation/tap/keys                       | use `p.input.tap` / `p.kb.keyNav`; the shell owns input                          |
+| Query DOM via `p.universe.space.el.querySelector(...)`, never `document`    | isolates per-space DOM                                                           |
+| Never call `addEventListener` for navigation/tap/keys                       | use `p.input.tap` / `p.keyboard.keyNav`; the shell owns input                    |
 | Read state before registering input; write state before any `sync()`        | state must be current at render time                                             |
 | Build DOM with `createElement` + `textContent`, never `innerHTML` with data | prevents injection                                                               |
 | All sizing in `cqw` / `cqh`                                                 | spaces are containers; `vw`/`vh` break in multi-space layouts                    |
-| Do not set `width`/`height` on the frame root                               | the space sizes it (see §5)                                                      |
+| Do not set `width`/`height` on the frame root                               | the space sizes it (see §6)                                                      |
 
 ---
 
-## 4. APIs available inside a frame
+## 5. APIs available inside a frame
 
-`window.pathless` (passed as `p`) is the only global.
+`window.pathless` (passed as `p`) is the only global. `p` is the thin wire client; `p.universe`, `p.input`, and `p.keyboard` are the modules attached to it.
 
-| Member               | Signature                           | Behavior                                                      |
-| -------------------- | ----------------------------------- | ------------------------------------------------------------- |
-| `p.space.el`         | `HTMLElement`                       | the current space's element; root for all queries and appends |
-| `p.read()`           | `() => Map`                         | per-frame, per-space state map; survives re-render            |
-| `p.write(k, v)`      | `(string, any) => void`             | persist `k → v` into the state map                            |
-| `p.source(key)`      | `(string) => Promise<[{name,url}]>` | fetch + decode a route; cached                                |
-| `p.sync()`           | `() => void`                        | re-render visible spaces                                      |
-| `p.input.tap(fn)`    | `(g => void) => void`               | register tap handler for the focused space                    |
-| `p.kb.keyNav(binds)` | `(object) => void`                  | register key handlers for the focused space                   |
+| Member                     | Signature                                | Behavior                                                      |
+| -------------------------- | ---------------------------------------- | ------------------------------------------------------------- |
+| `p.source(key)`            | `(string) => Promise<[{type,data,url}]>` | fetch + decode a route; cached per key                        |
+| `p.universe.space.el`      | `HTMLElement`                            | the current space's element; root for all queries and appends |
+| `p.universe.read()`        | `() => Map`                              | per-(frame, space) state map; survives re-render              |
+| `p.universe.write(k, v)`   | `(string, any) => void`                  | persist `k → v` into the state map                            |
+| `p.universe.sync()`        | `() => void`                             | re-render visible spaces                                      |
+| `p.input.tap(fn)`          | `(g => void) => void`                    | register tap handler for the focused space                    |
+| `p.keyboard.keyNav(binds)` | `(object) => void`                       | register key handlers for the focused space                   |
 
 ### `p.input.tap(fn)`
 
-Fires when a touch ends with negligible movement (not a swipe). `fn` receives:
+Fires when a pointer gesture ends with negligible movement (not a swipe). `fn` receives:
 
 ```js
 g = {
-  end:       [x, y, t], // x,y normalized to [-1,1] within the space; t = ms timestamp
+  end:       [x, y, t], // x,y normalized to [-1,1] within the space (+1 = top); t = ms timestamp
   direction: 'left' | 'right' | 'up' | 'down' | null,
-  quadrant:  1 | 2 | 3 | 4, // 1=TR, 2=TL, 3=BL, 4=BR
-  distance:  number,
+  distance:  number,    // manhattan distance in normalized units
   axis:      'x' | 'y',
+  type:      'tap' | 'swipe' | 'gesture',
 }
 ```
 
-`g.end[0] < 0` → left half, `> 0` → right half. Re-registering replaces the handler.
+`g.end[0] < 0` → left half, `> 0` → right half. Re-registering replaces the handler. Horizontal swipes are consumed by the shell (frame navigation) and never reach `tap`.
 
-### `p.kb.keyNav(binds)`
+### `p.keyboard.keyNav(binds)`
 
 Active only while its space is focused. `down` repeats while held; `up` fires on release; both optional.
 
 ```js
-p.kb.keyNav({
+p.keyboard.keyNav({
   a: { down: () => this.prev() },
   d: { down: () => this.next() },
   w: { down: () => this.scroll(-1), up: () => this.stop() },
@@ -171,17 +191,17 @@ Reserved keys handled by the shell (do not bind): `q` `e` (nav), `1` `2` `3` (la
 
 ### State semantics
 
-State is a `Map` keyed to the (space, frame) pair. The same frame in two spaces has two independent maps. Persist only serializable view state (indices, scroll offsets, toggles).
+State is a `Map` keyed to the (frame, space) pair. The same frame in two spaces has two independent maps. Persist only serializable view state (indices, scroll offsets, toggles).
 
 ```js
-this.index = p.read().get('index') ?? 0;
+this.index = p.universe.read().get('index') ?? 0;
 // ...
-p.write('index', this.index);
+p.universe.write('index', this.index);
 ```
 
 ---
 
-## 5. Layout contract (CSS the frame inherits)
+## 6. Layout contract (CSS the frame inherits)
 
 The shell provides, for every space `#zero` / `#fx` / `#one`:
 
@@ -203,24 +223,25 @@ Consequences for the frame root (`.<framename>`):
 - It is a block in a flex column; give it its own `display: flex` + `flex-direction` for internal layout.
 - `1cqw` = 1% of the space's width, `1cqh` = 1% of its height — correct under any layout. Use `clamp(min, Ncqw, max)` for fluid type.
 - For a scrollable frame, set `overflow-y: auto` and `height: 100%` on the root.
-- 
-Pattern summary an agent should generalize:
-- One small class per record type; recurse for nested arrays (here `options`).
-- Resolve image stems to blob URLs once, before constructing DOM.
-- Build all DOM with `createElement` + `textContent` (never `innerHTML` with data).
-- Append the built tree under `p.space.el.querySelector('.<framename>')`.
-- Persist only view state through `p.read()` / `p.write()`.
 
 ---
 
-## 6. Template builders (when not writing a custom frame)
+## 7. Designing a frame for known data
 
-If the data maps cleanly onto a built-in, register a builder instead of authoring HTML:
+Because the data is fixed at build time, the agent should tailor the frame to it rather than generalize:
 
-| Builder                 | Input                                                                     | Produces                                                                                                            |
-| ----------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `p.Home(logo, heading)` | `.svg` (inlined), local image (blob), or `https://` image; heading string | centered logo + `<h1>`                                                                                              |
-| `p.Text(path)`          | markdown file (local or `https://`)                                       | rendered HTML, `w`/`s` to scroll, scroll persisted                                                                  |
-| `p.Slides(dir)`         | image directory (local or `https://`)                                     | full-screen viewer; tap halves or `a`/`d` to page; index persisted. Internally calls `Load(dir)` and `source(base)` |
+- Choose interactions that fit the data's shape: paging for sequences, taps on halves for prev/next, `keyNav` for scrubbing/scrolling, per-record expansion for hierarchies.
+- One small class per record type; recurse for nested collections.
+- Decode each route's bytes according to its known format (`entry.data` for text/structured data, `entry.url` for media) — never a second network fetch.
+- Reference bundle entries by index (`sort.txt` order); emit the `sort.txt` alongside any index-referencing data the agent authors.
+- Build all DOM with `createElement` + `textContent`.
+- Append the built tree under `p.universe.space.el.querySelector('.<framename>')`.
+- Persist only view state through `p.universe.read()` / `p.universe.write()`.
+````
 
-These require no `.html` authoring — only the main.go registration line.
+Structural changes from my previous draft, per your framing:
+
+- **New intro** states the workflow explicitly: developer provides known data of any kind → agent picks template or authors a `CustomHTML` frame designed for that data.
+- **Templates promoted to §1** as the first decision (the "brainless" path), instead of being an afterthought at the end.
+- **Data generalized** throughout — "any bytes" framing, JSON demoted to one example among structured-text formats.
+- **New §7** replaces the old buried "pattern summary": design guidance for tailoring a frame to known data, including that the agent emits `sort.txt` when it authors index-referencing data.

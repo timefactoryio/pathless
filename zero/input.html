@@ -1,12 +1,15 @@
 <script>
 	{
+		// Input owns the pointer stream. It locates each gesture to the space
+		// that owns its starting point (via the universe), then routes taps and
+		// horizontal swipes to that space.
 		class Input {
 			#active = new Map();
 			#taps = new Map();
 
-			constructor(universe) {
-				this.universe = universe;
-				this.space = universe.space;
+			constructor(pathless) {
+				this.pathless = pathless;
+				this.universe = pathless.universe;
 				const o = { passive: true };
 				for (const t of [
 					'pointerdown',
@@ -14,7 +17,7 @@
 					'pointerup',
 					'pointercancel',
 				])
-					universe.el.addEventListener(t, this, o);
+					this.universe.el.addEventListener(t, this, o);
 			}
 
 			handleEvent(e) {
@@ -22,17 +25,13 @@
 			}
 
 			pointerdown({ pointerId, clientX, clientY }) {
-				const co = this.universe.coordinates;
-				const pt = co.at(clientX, clientY);
-				const visible = this.universe.visible();
-				const i = this.space.findIndex(
-					(s, idx) => visible.includes(idx) && co.contains(pt, s.geo),
-				);
-				if (i === -1) return;
-				this.universe.state.focused = i;
+				const co = this.pathless.coordinates;
+				const s = co.locate(clientX, clientY);
+				if (!s) return;
+				this.universe.state.focused = this.universe.spaces.indexOf(s);
 				this.#active.set(pointerId, {
-					i,
-					pair: co.track(clientX, clientY, this.space[i].geo),
+					i: this.universe.state.focused,
+					pair: co.track(clientX, clientY, s.el),
 				});
 			}
 
@@ -44,7 +43,7 @@
 				const a = this.#active.get(pointerId);
 				if (!a) return;
 				this.#active.delete(pointerId);
-				const co = this.universe.coordinates;
+				const co = this.pathless.coordinates;
 				const g = a.pair.close(clientX, clientY);
 				if (g.distance < co.tap) {
 					this.#taps.get(a.i)?.(g);
@@ -60,11 +59,12 @@
 				this.#active.delete(pointerId);
 			}
 
+			// tap registers a handler for the focused space.
 			tap(fn) {
 				this.#taps.set(this.universe.state.focused, fn);
 			}
 		}
 
-		universe.input = new Input(universe);
+		pathless.input = new Input(pathless);
 	}
 </script>

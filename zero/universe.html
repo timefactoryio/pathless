@@ -1,145 +1,110 @@
 <div id="zero"></div>
 <div id="fx" hidden></div>
 <div id="one" hidden></div>
-<div id="panel" hidden></div>
 
 <script>
 	{
+		// Universe is the controller. It owns the spaces, the panel, layout/
+		// variant, the flat per-(frame,space) state store, and drives rendering.
+		// Layout is CSS-driven: layout() sets data-layout/data-variant on the
+		// universe element and toggles space visibility. Coordinates/Input/
+		// Keyboard register onto it; Pathless mixes its surface onto p.
 		class Universe {
-			static layout = [
-				{ visible: [0], variants: 1, geo: [[[0, 0], null, null]] },
-				{
-					visible: [0, 1],
-					variants: 2,
-					geo: [
-						[[-1, 0], [1, 0], null],
-						[[0, 1], [0, -1], null],
-					],
-				},
-				{
-					visible: [0, 1, 2],
-					variants: 4,
-					geo: [
-						[
-							[-1, 0],
-							[1, 1],
-							[1, -1],
-						],
-						[
-							[0, 1],
-							[1, -1],
-							[-1, -1],
-						],
-						[
-							[1, 0],
-							[-1, -1],
-							[-1, 1],
-						],
-						[
-							[0, -1],
-							[-1, 1],
-							[1, 1],
-						],
-					],
-				},
-			];
+			static ids = ['zero', 'fx', 'one'];
+			static layouts = [null, [0, 1], [0, 1, 2]]; // visible spaces per layout
+			static variants = [1, 2, 4];
 
 			constructor(pathless) {
 				this.pathless = pathless;
 				this.el = document.getElementById('universe');
-				this.space = ['zero', 'fx', 'one'].map((id) => ({
+				this.spaces = Universe.ids.map((id) => ({
+					id,
 					el: document.getElementById(id),
 					frame: 0,
 				}));
 				this.panel = document.getElementById('panel');
 				this.frames = [];
-				this.state = { focused: 0, prev: [0, 0], l: 0, v: 0 };
+				this.store = new Map();
+				this.state = { focused: 0, prev: null, l: 0, v: 0 };
+			}
+
+			get zero() {
+				return this.spaces[0];
+			}
+			get fx() {
+				return this.spaces[1];
+			}
+			get one() {
+				return this.spaces[2];
+			}
+			get space() {
+				return this.spaces[this.state.focused];
 			}
 
 			visible(l = this.state.l) {
-				return l === 0
-					? [this.state.focused]
-					: Universe.layout[l].visible;
-			}
-
-			exec(el, data) {
-				this.pathless.exec(el, data);
+				return l === 0 ? [this.state.focused] : Universe.layouts[l];
 			}
 
 			init(frames) {
-				const ids = this.space.map((s) => s.el.id);
-				this.frames = frames.map((data) => ({
-					el: data,
-					state: new Map(ids.map((id) => [id, new Map()])),
-				}));
+				this.frames = frames;
+				this.spaces.forEach((s) => (s.frame = 0));
 				this.layout(0);
 			}
+
+			// flat state store, keyed (frame, space) — survives re-render.
 			read(i = this.state.focused) {
-				const s = this.space[i];
-				return this.frames[s.frame].state.get(s.el.id);
+				const s = this.spaces[i];
+				const key = s.frame + ':' + s.id;
+				let m = this.store.get(key);
+				if (!m) this.store.set(key, (m = new Map()));
+				return m;
 			}
-			write(k, v, i = this.state.focused) {
-				const s = this.space[i];
-				this.frames[s.frame].state.get(s.el.id).set(k, v);
+			write(key, val, i = this.state.focused) {
+				this.read(i).set(key, val);
 			}
 
 			sync(...indices) {
-				const { focused, l } = this.state;
-				(indices.length ? indices : this.visible(l)).forEach((i) => {
-					const s = this.space[i];
-					const frame = this.frames[s.frame];
+				const { focused } = this.state;
+				(indices.length ? indices : this.visible()).forEach((i) => {
 					this.state.focused = i;
-					this.exec(s.el, frame.el);
+					this.pathless.exec(
+						this.spaces[i].el,
+						this.frames[this.spaces[i].frame],
+					);
 				});
 				this.state.focused = focused;
+				this.pathless.keyboard?.update();
 			}
 
 			layout(l, v = 0) {
-				if (l > 0) {
-					this.state.prev[0] = l;
-					this.state.prev[1] = v;
-				}
+				if (l > 0) this.state.prev = [l, v];
 				this.state.l = l;
 				this.state.v = v;
-				const geo =
-					l === 0
-						? this.space.map((_, i) =>
-								i === this.state.focused ? [0, 0] : null,
-							)
-						: Universe.layout[l].geo[v];
-				this.space.forEach((s, i) => {
-					s.el.hidden = !geo[i];
-					s.geo = geo[i];
-					if (geo[i]) {
-						const [x, y] = geo[i];
-						s.el.style.setProperty('--x', x);
-						s.el.style.setProperty('--y', y);
-					}
-				});
+				this.el.dataset.layout = l;
+				this.el.dataset.variant = v;
+				const vis = this.visible(l);
+				this.spaces.forEach((s, i) => (s.el.hidden = !vis.includes(i)));
 				this.sync();
 			}
 
 			cycle(l) {
 				const { l: cur, v, prev } = this.state;
-				if (cur === 0 && prev[0] > 0) return this.layout(...prev);
+				if (cur === 0 && prev) return this.layout(...prev);
 				l ??= cur;
-				this.layout(
-					l,
-					cur === l ? (v + 1) % Universe.layout[l].variants : 0,
-				);
+				this.layout(l, cur === l ? (v + 1) % Universe.variants[l] : 0);
 			}
 
 			nav(dir, i = this.state.focused) {
-				const s = this.space[i];
+				const s = this.spaces[i];
 				s.frame =
 					(s.frame + dir + this.frames.length) % this.frames.length;
 				this.sync(i);
 			}
 
 			focus() {
-				const { focused, l } = this.state;
-				const v = this.visible(l);
-				this.state.focused = v[(v.indexOf(focused) + 1) % v.length];
+				const v = this.visible();
+				this.state.focused =
+					v[(v.indexOf(this.state.focused) + 1) % v.length];
 			}
 
 			toggle() {

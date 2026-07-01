@@ -10,10 +10,13 @@ import (
 )
 
 //go:embed origin.html
-var pathlessHtml string
+var originHtml string
 
 //go:embed universe.html
 var universeHtml []byte
+
+//go:embed coordinates.html
+var coordinatesHtml []byte
 
 //go:embed input.html
 var inputHtml []byte
@@ -21,24 +24,18 @@ var inputHtml []byte
 //go:embed keyboard.html
 var keyboardHtml []byte
 
-//go:embed coordinates.html
-var coordinatesHtml []byte
-
-// Zero holds the compiled HTML shell and shared assets.
+// Zero holds the compiled HTML shell (Pathless) and the universe payload.
 // Origin is the CORS-allowed root domain; Circuit is the API endpoint URL
-// baked into the HTML at build time.
+// baked into the shell at build time. Universe is the single item-0 blob:
+// the plane DOM plus its folded coordinates/input/keyboard modules.
 type Zero struct {
-	Pathless    []byte
-	Input       []byte
-	Keyboard    []byte
-	Coordinates []byte
-	Universe    []byte
-	Origin      string
-	Circuit     string
+	Pathless []byte
+	Universe []byte
+	Origin   string
+	Circuit  string
 }
 
-// NewZero constructs Zero from a single host string.
-// See resolve for how origin and circuit are derived.
+// NewZero constructs Zero from an origin and circuit host.
 func NewZero(origin, circuit string) *Zero {
 	if origin == "" {
 		origin = "*"
@@ -46,19 +43,22 @@ func NewZero(origin, circuit string) *Zero {
 	if circuit == "" {
 		circuit = "http://localhost:1001"
 	}
-	tmpl := template.Must(template.New("pathless").Parse(pathlessHtml))
+	tmpl := template.Must(template.New("pathless").Parse(originHtml))
 	var b strings.Builder
 	if err := tmpl.Execute(&b, map[string]string{"CIRCUIT": circuit}); err != nil {
 		panic(err)
 	}
+	// Fold coordinates/input/keyboard into the universe payload delivered as item 0.
+	universe := make([]byte, 0, len(universeHtml)+len(coordinatesHtml)+len(inputHtml)+len(keyboardHtml))
+	universe = append(universe, universeHtml...)
+	universe = append(universe, coordinatesHtml...)
+	universe = append(universe, inputHtml...)
+	universe = append(universe, keyboardHtml...)
 	return &Zero{
-		Pathless:    minify(b.String()),
-		Origin:      origin,
-		Circuit:     circuit,
-		Input:       inputHtml,
-		Universe:    universeHtml,
-		Keyboard:    keyboardHtml,
-		Coordinates: coordinatesHtml,
+		Pathless: minify(b.String()),
+		Universe: universe,
+		Origin:   origin,
+		Circuit:  circuit,
 	}
 }
 

@@ -57,10 +57,10 @@
 	{
 		class Home {
 			constructor(p) {
-				const { el } = p.space;
+				const { el } = p.universe.space;
 				const logoImg = el.querySelector('.home .logo img[data-src]');
 				if (logoImg) {
-					p.wire(logoImg.dataset.src).then(([entry]) => {
+					p.source(logoImg.dataset.src).then(([entry]) => {
 						logoImg.src = entry.url;
 					});
 				}
