@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta
+			name="viewport"
+			content="width=device-width,initial-scale=1.0,viewport-fit=cover,user-scalable=no" />
+		<title>hello.universe</title>
+		<style>
+			:root {
+				--b: 1px solid blue;
+			}
+			*,
+			*::before,
+			*::after {
+				box-sizing: border-box;
+				margin: 0;
+				padding: 0;
+				user-select: none;
+				-webkit-user-select: none;
+			}
+			[hidden] {
+				display: none !important;
+			}
+			body {
+				height: 100dvh;
+				overflow: hidden;
+				font-family: sans-serif;
+				background: #000;
+				color: #fff;
+				display: flex;
+				flex-direction: column;
+				border: var(--b);
+				border-radius: 5px;
+				touch-action: none;
+			}
+			#universe {
+				flex: 1;
+				min-height: 0;
+				position: relative;
+				container-type: size;
+				container-name: universe;
+			}
+			:is(#zero, #fx, #one) {
+				--x: 0;
+				--y: 0;
+				position: absolute;
+				overflow: hidden;
+				container-type: size;
+				isolation: isolate;
+				display: flex;
+				flex-direction: column;
+				touch-action: none;
+				overscroll-behavior: none;
+				left: calc(50cqw * max(var(--x), 0));
+				width: calc(100cqw - 50cqw * max(var(--x), -1 * var(--x)));
+				top: calc(50cqh * max(-1 * var(--y), 0));
+				height: calc(100cqh - 50cqh * max(var(--y), -1 * var(--y)));
+				border-style: solid;
+				border-color: blue;
+				border-right-width: calc(1px * max(-1 * var(--x), 0));
+				border-left-width: calc(1px * max(var(--x), 0));
+				border-bottom-width: calc(1px * max(var(--y), 0));
+				border-top-width: calc(1px * max(-1 * var(--y), 0));
+			}
+			:is(#zero, #fx, #one) > * {
+				width: 100cqw;
+			}
+			:is(#zero, #fx, #one) > :first-child {
+				flex: 1;
+				min-height: 0;
+			}
+			#zero {
+				container-name: zero;
+			}
+			#fx {
+				container-name: fx;
+			}
+			#one {
+				container-name: one;
+			}
+			#panel {
+				height: 15vh;
+				border-top: var(--b);
+				touch-action: none;
+				overscroll-behavior: none;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				padding: 0.5em;
+			}
+		</style>
+		<script>
+			let lastTouch = 0;
+			for (const t of ['touchstart', 'touchend'])
+				document.addEventListener(
+					t,
+					(e) => {
+						const now = Date.now();
+						if (now - lastTouch < 300) e.preventDefault();
+						lastTouch = now;
+					},
+					{ passive: false },
+				);
+			window.circuit = '{{.CIRCUIT}}'.replace(
+				'localhost',
+				location.hostname,
+			);
+			class Pathless {
+				#td = new TextDecoder();
+				#range = document.createRange();
+				constructor() {
+					this.cache = new Map();
+					this.init();
+				}
+				get space() {
+					return this.universe.space[this.universe.state.focused];
+				}
+				get input() {
+					return this.universe.input;
+				}
+				get kb() {
+					return this.universe.keyboard;
+				}
+				read(...a) {
+					return this.universe.read(...a);
+				}
+				write(...a) {
+					return this.universe.write(...a);
+				}
+				sync(...a) {
+					return this.universe.sync(...a);
+				}
+
+				wire(path = '') {
+					if (!this.cache.has(path)) {
+						const url = path
+							? `${window.circuit}/${path}`
+							: window.circuit;
+						this.cache.set(
+							path,
+							fetch(url)
+								.then((r) => r.arrayBuffer())
+								.then((buf) =>
+									this.#unwire(buf).map(
+										({ name, type, data }) => ({
+											name,
+											url: URL.createObjectURL(
+												new Blob([data], { type }),
+											),
+										}),
+									),
+								),
+						);
+					}
+					return this.cache.get(path);
+				}
+				#unwire(buf) {
+					const view = new DataView(buf);
+					const n = view.getUint16(0);
+					const values = [];
+					let o = 2;
+					for (let i = 0; i < n; i++) {
+						const nameLen = view.getUint8(o);
+						o += 1;
+						const name = this.#td.decode(
+							new Uint8Array(buf, o, nameLen),
+						);
+						o += nameLen;
+						const typeLen = view.getUint8(o);
+						o += 1;
+						const type = this.#td.decode(
+							new Uint8Array(buf, o, typeLen),
+						);
+						o += typeLen;
+						const dataLen = view.getUint32(o);
+						o += 4;
+						const data = new Uint8Array(buf, o, dataLen);
+						o += dataLen;
+						values.push({ name, type, data });
+					}
+					return values;
+				}
+				async init() {
+					const buf = await fetch(window.circuit).then((r) =>
+						r.arrayBuffer(),
+					);
+					const parts = this.#unwire(buf);
+					const next = () => parts.shift().data;
+
+					this.exec(document.getElementById('universe'), next()); // -> pathless.universe
+					window.universe = this.universe;
+					const sink = document.createElement('div');
+					this.exec(sink, next()); // -> universe.coordinates
+					this.exec(sink, next()); // -> universe.input
+					this.exec(this.universe.panel, next()); // -> universe.keyboard
+
+					this.universe.init(parts.map(({ data }) => data));
+				}
+				exec(el, data) {
+					el.replaceChildren(
+						this.#range.createContextualFragment(
+							this.#td.decode(data),
+						),
+					);
+				}
+			}
+
+			document.addEventListener('DOMContentLoaded', () => {
+				window.pathless = new Pathless();
+			});
+		</script>
+	</head>
+	<body>
+		<div id="universe"></div>
+	</body>
+</html>

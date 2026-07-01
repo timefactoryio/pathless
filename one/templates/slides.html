@@ -16,36 +16,41 @@
 </style>
 
 <script>
-	const prefix = '{{.PREFIX}}';
-	class Slides {
-		constructor(p) {
-			this.element = Object.assign(document.createElement('div'), {
-				className: 'slides',
-				innerHTML: '<img>',
-			});
-			this.img = this.element.firstChild;
-			p.space.el.append(this.element);
-			this.entries = [];
-			this.index = p.read().get(prefix) || 0;
-			p.input.tap((g) => this.show(this.index + (g.end[0] < 0 ? -1 : 1)));
-			p.kb.keyNav({
-				a: { down: () => this.show(this.index - 1) },
-				d: { down: () => this.show(this.index + 1) },
-			});
-			p.source(prefix).then((entries) => {
-				this.entries = entries;
-				if (this.entries.length) this.show(this.index);
-			});
+	{
+		const prefix = '{{.PREFIX}}';
+		class Slides {
+			constructor(p) {
+				this.element = Object.assign(document.createElement('div'), {
+					className: 'slides',
+					innerHTML: '<img>',
+				});
+				this.img = this.element.firstChild;
+				p.space.el.append(this.element);
+				this.entries = [];
+				this.index = p.read().get(prefix) || 0;
+				p.input.tap((g) =>
+					this.show(this.index + (g.end[0] < 0 ? -1 : 1)),
+				);
+				p.kb.keyNav({
+					a: { down: () => this.show(this.index - 1) },
+					d: { down: () => this.show(this.index + 1) },
+				});
+				p.wire(prefix).then((entries) => {
+					this.entries = entries;
+					if (this.entries.length) this.show(this.index);
+				});
+				this.p = p;
+			}
+			show(n) {
+				if (!this.entries.length) return;
+				this.index =
+					((n % this.entries.length) + this.entries.length) %
+					this.entries.length;
+				this.p.write(prefix, this.index);
+				const { url, name } = this.entries[this.index];
+				Object.assign(this.img, { src: url, alt: name });
+			}
 		}
-		show(n) {
-			if (!this.entries.length) return;
-			this.index =
-				((n % this.entries.length) + this.entries.length) %
-				this.entries.length;
-			pathless.write(prefix, this.index);
-			const { url, name } = this.entries[this.index];
-			Object.assign(this.img, { src: url, alt: name });
-		}
+		new Slides(pathless);
 	}
-	new Slides(pathless);
 </script>

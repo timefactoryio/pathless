@@ -154,50 +154,52 @@
 	}
 </style>
 <script>
-	class Text {
-		#raf = null;
+	{
+		class Text {
+			#raf = null;
 
-		#scroll(dy) {
-			if (this.#raf) return;
-			const speed = 100;
-			let last = null;
-			const tick = (ts) => {
-				if (last !== null)
-					this.el.scrollBy(0, (dy * speed * (ts - last)) / 1000);
-				last = ts;
-				this.#raf = requestAnimationFrame(tick);
-			};
-			this.#raf = requestAnimationFrame(tick);
-		}
-		#stop() {
-			cancelAnimationFrame(this.#raf);
-			this.#raf = null;
-		}
-
-		constructor(p) {
-			this.el = p.space.el.querySelector('.text');
-			const saved = p.read().get('scroll');
-			if (saved) {
-				const restore = () => {
-					this.el.scrollTop = saved;
-					if (Math.abs(this.el.scrollTop - saved) > 1)
-						requestAnimationFrame(restore);
+			#scroll(dy) {
+				if (this.#raf) return;
+				const speed = 100;
+				let last = null;
+				const tick = (ts) => {
+					if (last !== null)
+						this.el.scrollBy(0, (dy * speed * (ts - last)) / 1000);
+					last = ts;
+					this.#raf = requestAnimationFrame(tick);
 				};
-				requestAnimationFrame(restore);
+				this.#raf = requestAnimationFrame(tick);
 			}
-			this.el.addEventListener(
-				'scroll',
-				() => p.write('scroll', this.el.scrollTop),
-				{ passive: true },
-			);
-			p.kb.keyNav({
-				w: {
-					down: () => this.#scroll(-20),
-					up: () => this.#stop(),
-				},
-				s: { down: () => this.#scroll(20), up: () => this.#stop() },
-			});
+			#stop() {
+				cancelAnimationFrame(this.#raf);
+				this.#raf = null;
+			}
+
+			constructor(p) {
+				this.el = p.space.el.querySelector('.text');
+				const saved = p.read().get('scroll');
+				if (saved) {
+					const restore = () => {
+						this.el.scrollTop = saved;
+						if (Math.abs(this.el.scrollTop - saved) > 1)
+							requestAnimationFrame(restore);
+					};
+					requestAnimationFrame(restore);
+				}
+				this.el.addEventListener(
+					'scroll',
+					() => p.write('scroll', this.el.scrollTop),
+					{ passive: true },
+				);
+				p.kb.keyNav({
+					w: {
+						down: () => this.#scroll(-20),
+						up: () => this.#stop(),
+					},
+					s: { down: () => this.#scroll(20), up: () => this.#stop() },
+				});
+			}
 		}
+		new Text(pathless);
 	}
-	new Text(pathless);
 </script>

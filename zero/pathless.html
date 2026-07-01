@@ -179,8 +179,7 @@
 
 				wire(buf, fn) {
 					const bytes = new Uint8Array(buf);
-					const view = new DataView(buf);
-					const count = view.getUint16(0);
+					const count = (bytes[0] << 8) | bytes[1];
 					let pos = 2;
 					const values = new Array(count);
 					for (let i = 0; i < count; i++) {
@@ -192,7 +191,12 @@
 						const type = this.#td.decode(
 							bytes.subarray(pos, (pos += tl)),
 						);
-						const n = view.getUint32(pos);
+						const n =
+							((bytes[pos] << 24) |
+								(bytes[pos + 1] << 16) |
+								(bytes[pos + 2] << 8) |
+								bytes[pos + 3]) >>>
+							0;
 						pos += 4;
 						values[i] = fn(
 							name,

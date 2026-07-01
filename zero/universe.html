@@ -1,0 +1,152 @@
+<div id="zero"></div>
+<div id="fx" hidden></div>
+<div id="one" hidden></div>
+<div id="panel" hidden></div>
+
+<script>
+	{
+		class Universe {
+			static layout = [
+				{ visible: [0], variants: 1, geo: [[[0, 0], null, null]] },
+				{
+					visible: [0, 1],
+					variants: 2,
+					geo: [
+						[[-1, 0], [1, 0], null],
+						[[0, 1], [0, -1], null],
+					],
+				},
+				{
+					visible: [0, 1, 2],
+					variants: 4,
+					geo: [
+						[
+							[-1, 0],
+							[1, 1],
+							[1, -1],
+						],
+						[
+							[0, 1],
+							[1, -1],
+							[-1, -1],
+						],
+						[
+							[1, 0],
+							[-1, -1],
+							[-1, 1],
+						],
+						[
+							[0, -1],
+							[-1, 1],
+							[1, 1],
+						],
+					],
+				},
+			];
+
+			constructor(pathless) {
+				this.pathless = pathless;
+				this.el = document.getElementById('universe');
+				this.space = ['zero', 'fx', 'one'].map((id) => ({
+					el: document.getElementById(id),
+					frame: 0,
+				}));
+				this.panel = document.getElementById('panel');
+				this.frames = [];
+				this.state = { focused: 0, prev: [0, 0], l: 0, v: 0 };
+			}
+
+			visible(l = this.state.l) {
+				return l === 0
+					? [this.state.focused]
+					: Universe.layout[l].visible;
+			}
+
+			exec(el, data) {
+				this.pathless.exec(el, data);
+			}
+
+			init(frames) {
+				const ids = this.space.map((s) => s.el.id);
+				this.frames = frames.map((data) => ({
+					el: data,
+					state: new Map(ids.map((id) => [id, new Map()])),
+				}));
+				this.layout(0);
+			}
+			read(i = this.state.focused) {
+				const s = this.space[i];
+				return this.frames[s.frame].state.get(s.el.id);
+			}
+			write(k, v, i = this.state.focused) {
+				const s = this.space[i];
+				this.frames[s.frame].state.get(s.el.id).set(k, v);
+			}
+
+			sync(...indices) {
+				const { focused, l } = this.state;
+				(indices.length ? indices : this.visible(l)).forEach((i) => {
+					const s = this.space[i];
+					const frame = this.frames[s.frame];
+					this.state.focused = i;
+					this.exec(s.el, frame.el);
+				});
+				this.state.focused = focused;
+			}
+
+			layout(l, v = 0) {
+				if (l > 0) {
+					this.state.prev[0] = l;
+					this.state.prev[1] = v;
+				}
+				this.state.l = l;
+				this.state.v = v;
+				const geo =
+					l === 0
+						? this.space.map((_, i) =>
+								i === this.state.focused ? [0, 0] : null,
+							)
+						: Universe.layout[l].geo[v];
+				this.space.forEach((s, i) => {
+					s.el.hidden = !geo[i];
+					s.geo = geo[i];
+					if (geo[i]) {
+						const [x, y] = geo[i];
+						s.el.style.setProperty('--x', x);
+						s.el.style.setProperty('--y', y);
+					}
+				});
+				this.sync();
+			}
+
+			cycle(l) {
+				const { l: cur, v, prev } = this.state;
+				if (cur === 0 && prev[0] > 0) return this.layout(...prev);
+				l ??= cur;
+				this.layout(
+					l,
+					cur === l ? (v + 1) % Universe.layout[l].variants : 0,
+				);
+			}
+
+			nav(dir, i = this.state.focused) {
+				const s = this.space[i];
+				s.frame =
+					(s.frame + dir + this.frames.length) % this.frames.length;
+				this.sync(i);
+			}
+
+			focus() {
+				const { focused, l } = this.state;
+				const v = this.visible(l);
+				this.state.focused = v[(v.indexOf(focused) + 1) % v.length];
+			}
+
+			toggle() {
+				this.panel.hidden = !this.panel.hidden;
+			}
+		}
+
+		pathless.universe = new Universe(pathless);
+	}
+</script>

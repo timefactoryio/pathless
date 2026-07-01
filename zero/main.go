@@ -9,8 +9,11 @@ import (
 	"strings"
 )
 
-//go:embed pathless.html
+//go:embed origin.html
 var pathlessHtml string
+
+//go:embed universe.html
+var universeHtml []byte
 
 //go:embed input.html
 var inputHtml []byte
@@ -29,6 +32,7 @@ type Zero struct {
 	Input       []byte
 	Keyboard    []byte
 	Coordinates []byte
+	Universe    []byte
 	Origin      string
 	Circuit     string
 }
@@ -52,6 +56,7 @@ func NewZero(origin, circuit string) *Zero {
 		Origin:      origin,
 		Circuit:     circuit,
 		Input:       inputHtml,
+		Universe:    universeHtml,
 		Keyboard:    keyboardHtml,
 		Coordinates: coordinatesHtml,
 	}

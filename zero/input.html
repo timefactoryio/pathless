@@ -22,18 +22,17 @@
 			}
 
 			pointerdown({ pointerId, clientX, clientY }) {
-				const co = this.universe.co;
+				const co = this.universe.coordinates;
 				const pt = co.at(clientX, clientY);
-				const visible = this.universe.visible;
+				const visible = this.universe.visible();
 				const i = this.space.findIndex(
-					(s, idx) =>
-						visible.includes(idx) && co.contains(pt, s.quads),
+					(s, idx) => visible.includes(idx) && co.contains(pt, s.geo),
 				);
 				if (i === -1) return;
-				this.universe.focused = i;
+				this.universe.state.focused = i;
 				this.#active.set(pointerId, {
 					i,
-					pair: co.track(clientX, clientY, this.space[i].quads),
+					pair: co.track(clientX, clientY, this.space[i].geo),
 				});
 			}
 
@@ -45,7 +44,7 @@
 				const a = this.#active.get(pointerId);
 				if (!a) return;
 				this.#active.delete(pointerId);
-				const co = this.universe.co;
+				const co = this.universe.coordinates;
 				const g = a.pair.close(clientX, clientY);
 				if (g.distance < co.tap) {
 					this.#taps.get(a.i)?.(g);
@@ -53,7 +52,7 @@
 				}
 				if (g.axis === 'x' && g.distance >= co.swipe) {
 					navigator.vibrate?.(5);
-					pathless.nav(g.direction === 'left' ? -1 : 1, a.i);
+					this.universe.nav(g.direction === 'left' ? -1 : 1, a.i);
 				}
 			}
 
@@ -62,10 +61,10 @@
 			}
 
 			tap(fn) {
-				this.#taps.set(pathless.focused, fn);
+				this.#taps.set(this.universe.state.focused, fn);
 			}
 		}
 
-		pathless.input = new Input(pathless.universe);
+		universe.input = new Input(universe);
 	}
 </script>

@@ -57,8 +57,13 @@ func (o *One) cors(next http.Handler) http.Handler {
 
 func (o *One) Serve() {
 	r := &fx.Response{
-		Values: []*fx.Value{{}, {}, {}},
-		Data:   [][]byte{o.Coordinates, o.Input, o.Keyboard},
+		Values: []*fx.Value{
+			{Name: "universe"},
+			{Name: "coordinates"},
+			{Name: "input"},
+			{Name: "keyboard"},
+		},
+		Data: [][]byte{o.Universe, o.Coordinates, o.Input, o.Keyboard},
 	}
 	for _, b := range o.Frames() {
 		r.Values = append(r.Values, &fx.Value{})

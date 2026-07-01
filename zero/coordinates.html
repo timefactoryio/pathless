@@ -5,37 +5,20 @@
 				return [x, y, z];
 			}
 
-			static #quads = [
-				null,
-				[
-					[
-						[2, 3],
-						[1, 4],
-					],
-					[
-						[1, 2],
-						[3, 4],
-					],
-				],
-				[
-					[[2, 3], [1], [4]],
-					[[1, 2], [4], [3]],
-					[[1, 4], [3], [2]],
-					[[3, 4], [2], [1]],
-				],
-			];
-
-			constructor() {
+			constructor(universe) {
+				this.universe = universe;
 				this.threshold = 0.05;
 				this.tap = 0.1;
 				this.swipe = 0.25;
+				this.measure(universe.el);
 			}
 
-			measure(el) {
+			measure(el = this.el) {
 				if (this._onResize) {
 					removeEventListener('resize', this._onResize);
 					removeEventListener('orientationchange', this._onResize);
 				}
+				this.el = el;
 				const update = () => {
 					const r = el.getBoundingClientRect();
 					this.L = r.left;
@@ -57,18 +40,12 @@
 				return [2 * u - 1, 1 - 2 * v, Date.now()];
 			}
 
-			quadrant([x, y]) {
-				return x >= 0 ? (y >= 0 ? 1 : 4) : y >= 0 ? 2 : 3;
-			}
-
-			#bounds(quads) {
-				let m = 0;
-				for (const q of quads) m |= 1 << q;
+			#bounds([x, y]) {
 				return [
-					m & 12 ? -1 : 0,
-					m & 18 ? 1 : 0,
-					m & 24 ? -1 : 0,
-					m & 6 ? 1 : 0,
+					x > 0 ? 0 : -1,
+					x < 0 ? 0 : 1,
+					y < 0 ? 0 : -1,
+					y > 0 ? 0 : 1,
 				];
 			}
 
@@ -80,16 +57,13 @@
 				];
 			}
 
-			quads(l, v, i) {
-				return Coordinates.#quads[l]?.[v]?.[i] ?? [1, 2, 3, 4];
+			contains([px, py], geo) {
+				const [x0, x1, y0, y1] = this.#bounds(geo);
+				return px >= x0 && px <= x1 && py >= y0 && py <= y1;
 			}
 
-			contains(pt, quads) {
-				return quads.includes(this.quadrant(pt));
-			}
-
-			track(clientX, clientY, quads) {
-				const bounds = quads ? this.#bounds(quads) : null;
+			track(clientX, clientY, geo) {
+				const bounds = geo ? this.#bounds(geo) : null;
 				const toLocal = bounds
 					? (pt) => this.#sub(pt, bounds)
 					: (pt) => pt;
@@ -119,7 +93,6 @@
 						axis: this.axis(pair.start, pair.end),
 						direction,
 						type: this.type(direction, pair.path),
-						quadrant: this.quadrant(pair.start),
 					};
 				};
 				return pair;
@@ -161,6 +134,6 @@
 			}
 		}
 
-		pathless.Coordinates = Coordinates;
+		universe.coordinates = new Coordinates(universe);
 	}
 </script>

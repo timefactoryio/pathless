@@ -21,11 +21,16 @@ func NewCircuit() *Circuit {
 	return &Circuit{Routes: make(map[string][]byte)}
 }
 
+// Value holds name/type metadata for a single entry in a Response.
+// The raw bytes for each Value live in the parallel Response.Data slice
+// (same index), so Values can be cheaply built/reordered without copying data.
 type Value struct {
 	Name string
 	Type string
 }
 
+// Response pairs a slice of Value metadata with a parallel slice of raw
+// byte payloads — Values[i] describes Data[i].
 type Response struct {
 	Values []*Value
 	Data   [][]byte
@@ -81,7 +86,6 @@ func (c *Circuit) ToBytes(input string) ([]byte, error) {
 
 // Load reads a file or directory at path, encodes and compresses the contents,
 // and stores the bundle in Routes keyed by the base name of path.
-// Raw data is freed from each Value after the bundle is stored.
 func (c *Circuit) Load(path string) {
 	key := filepath.Base(path)
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
@@ -97,10 +101,8 @@ func (c *Circuit) Load(path string) {
 	var r *Response
 	if info.IsDir() {
 		r = c.walk(path)
-	} else {
-		if v, data := c.read(path); v != nil {
-			r = &Response{Values: []*Value{v}, Data: [][]byte{data}}
-		}
+	} else if v, data := c.read(path); v != nil {
+		r = &Response{Values: []*Value{v}, Data: [][]byte{data}}
 	}
 	if r != nil {
 		c.Routes[key] = c.Compress(c.Wire(r))
@@ -108,10 +110,10 @@ func (c *Circuit) Load(path string) {
 	}
 }
 
-// read loads a single file into a Value, inferring MIME type from extension
-// or content detection as a fallback.
+// read loads a single file into a Value plus its raw bytes, inferring MIME
+// type from extension or content detection as a fallback.
 func (c *Circuit) read(path string) (*Value, []byte) {
-	data, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil
 	}
@@ -119,16 +121,16 @@ func (c *Circuit) read(path string) (*Value, []byte) {
 	ext := filepath.Ext(base)
 	ct := mime.TypeByExtension(ext)
 	if ct == "" {
-		ct = http.DetectContentType(data)
+		ct = http.DetectContentType(raw)
 	}
-	return &Value{Name: base[:len(base)-len(ext)], Type: ct}, data
+	return &Value{Name: base[:len(base)-len(ext)], Type: ct}, raw
 }
 
-// walk reads all files in a directory into an ordered slice of Values.
-// If a sort.json file is present, it defines the blob order by name;
-// files not listed in sort.json are appended after the ordered entries.
+// walk reads all files in a directory into a Response with parallel
+// Values/Data slices. If a sort.txt file is present, it defines the order
+// by name; files not listed in sort.txt are appended after the ordered entries.
 func (c *Circuit) walk(path string) *Response {
-	var r Response
+	r := &Response{}
 	filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || filepath.Base(p) == "sort.txt" {
 			return err
@@ -145,25 +147,25 @@ func (c *Circuit) walk(path string) *Response {
 		for i, v := range r.Values {
 			byName[v.Name] = i
 		}
-		outV := make([]*Value, 0, len(r.Values))
-		outD := make([][]byte, 0, len(r.Data))
+		outValues := make([]*Value, 0, len(r.Values))
+		outData := make([][]byte, 0, len(r.Data))
 		seen := make(map[int]bool)
 		for _, name := range order {
 			if idx, ok := byName[strings.TrimSpace(name)]; ok && !seen[idx] {
-				outV = append(outV, r.Values[idx])
-				outD = append(outD, r.Data[idx])
+				outValues = append(outValues, r.Values[idx])
+				outData = append(outData, r.Data[idx])
 				seen[idx] = true
 			}
 		}
 		for i := range r.Values {
 			if !seen[i] {
-				outV = append(outV, r.Values[i])
-				outD = append(outD, r.Data[i])
+				outValues = append(outValues, r.Values[i])
+				outData = append(outData, r.Data[i])
 			}
 		}
-		r.Values, r.Data = outV, outD
+		r.Values, r.Data = outValues, outData
 	}
-	return &r
+	return r
 }
 
 // Save decompresses the bundle stored in Routes at key and writes it to a file named key+".bin".
