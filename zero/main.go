@@ -15,9 +15,6 @@ var pathlessHtml string
 //go:embed universe.html
 var universeHtml []byte
 
-//go:embed coordinates.html
-var coordinatesHtml []byte
-
 //go:embed input.html
 var inputHtml []byte
 
@@ -27,7 +24,7 @@ var keyboardHtml []byte
 // Zero holds the compiled HTML shell (Pathless) and the universe payload.
 // Origin is the CORS-allowed root domain; Circuit is the API endpoint URL
 // baked into the shell at build time. Universe is the single item-0 blob:
-// the plane DOM plus its folded coordinates/input/keyboard modules.
+// the plane DOM plus its folded input/keyboard modules.
 type Zero struct {
 	Pathless []byte
 	Universe []byte
@@ -48,10 +45,9 @@ func NewZero(origin, circuit string) *Zero {
 	if err := tmpl.Execute(&b, map[string]string{"CIRCUIT": circuit}); err != nil {
 		panic(err)
 	}
-	// Fold coordinates/input/keyboard into the universe payload delivered as item 0.
-	universe := make([]byte, 0, len(universeHtml)+len(coordinatesHtml)+len(inputHtml)+len(keyboardHtml))
+	// Fold input/keyboard into the universe payload delivered as item 0.
+	universe := make([]byte, 0, len(universeHtml)+len(inputHtml)+len(keyboardHtml))
 	universe = append(universe, universeHtml...)
-	universe = append(universe, coordinatesHtml...)
 	universe = append(universe, inputHtml...)
 	universe = append(universe, keyboardHtml...)
 	return &Zero{

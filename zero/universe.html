@@ -22,17 +22,10 @@
 				this.frames = [];
 				this.store = new Map();
 				this.state = { focused: 0, prev: null, l: 0, v: 0 };
+				this.tap = 0.1;
+				this.swipe = 0.25;
 			}
 
-			get zero() {
-				return this.spaces[0];
-			}
-			get fx() {
-				return this.spaces[1];
-			}
-			get one() {
-				return this.spaces[2];
-			}
 			get space() {
 				return this.spaces[this.state.focused];
 			}
@@ -57,6 +50,9 @@
 			write(key, val, i = this.state.focused) {
 				this.read(i).set(key, val);
 			}
+			// pin captures the focused index once (correct only synchronously
+			// during construction) and returns read/write bound to it, so
+			// frames never need to thread an index through later callbacks.
 			pin(i = this.state.focused) {
 				return {
 					i,
@@ -111,6 +107,53 @@
 
 			toggle() {
 				this.panel.hidden = !this.panel.hidden;
+			}
+
+			// at: client pixel -> [-1, 1] within a rect.
+			at(clientX, clientY, r) {
+				return [
+					(2 * (clientX - r.left)) / (r.width || 1) - 1,
+					1 - (2 * (clientY - r.top)) / (r.height || 1),
+				];
+			}
+
+			// press: hit-tests the point against visible spaces, focuses the
+			// one it lands in, and returns { i, close } to track the gesture
+			// to completion. Returns null if the point isn't inside any
+			// visible space.
+			press(clientX, clientY) {
+				for (const i of this.visible()) {
+					const r = this.spaces[i].el.getBoundingClientRect();
+					if (
+						clientX < r.left ||
+						clientX > r.right ||
+						clientY < r.top ||
+						clientY > r.bottom
+					)
+						continue;
+					this.state.focused = i;
+					const start = this.at(clientX, clientY, r);
+					return {
+						i,
+						close: (x, y) => {
+							const end = this.at(x, y, r);
+							return { end, name: this.classify(start, end) };
+						},
+					};
+				}
+				return null;
+			}
+
+			// classify: the declarative gesture name of a->b — 'tap', 'swipeLeft',
+			// 'swipeRight', or null for a drag that doesn't qualify as either.
+			classify(a, b) {
+				const dx = b[0] - a[0],
+					dy = b[1] - a[1];
+				const distance = Math.abs(dx) + Math.abs(dy);
+				if (distance < this.tap) return 'tap';
+				if (Math.abs(dx) < Math.abs(dy) || distance < this.swipe)
+					return null;
+				return 'swipe' + (dx >= 0 ? 'Right' : 'Left');
 			}
 		}
 

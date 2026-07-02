@@ -36,42 +36,35 @@
 			}
 
 			pointerdown({ pointerId, clientX, clientY }) {
-				const co = this.pathless.coordinates;
-				const s = co.locate(clientX, clientY);
-				if (!s) return;
-				this.universe.state.focused = this.universe.spaces.indexOf(s);
-				this.#active.set(pointerId, {
-					i: this.universe.state.focused,
-					pair: co.track(clientX, clientY, s.el),
-				});
+				const t = this.universe.press(clientX, clientY);
+				if (t) this.#active.set(pointerId, t);
 			}
 
 			pointerup({ pointerId, clientX, clientY }) {
 				const a = this.#active.get(pointerId);
 				if (!a) return;
 				this.#active.delete(pointerId);
-				return { i: a.i, ...a.pair.close(clientX, clientY) };
+				return { i: a.i, ...a.close(clientX, clientY) };
 			}
-
 			pointercancel({ pointerId }) {
 				this.#active.delete(pointerId);
 			}
 
-			keydown(e) {
+			// key: shared body for keydown/keyup, kept as separate methods
+			// since handleEvent dispatches by exact event-type name.
+			key(e, phase) {
 				return {
 					i: this.universe.state.focused,
 					name: e.key.toLowerCase(),
-					phase: 'down',
+					phase,
 					event: e,
 				};
 			}
+			keydown(e) {
+				return this.key(e, 'down');
+			}
 			keyup(e) {
-				return {
-					i: this.universe.state.focused,
-					name: e.key.toLowerCase(),
-					phase: 'up',
-					event: e,
-				};
+				return this.key(e, 'up');
 			}
 
 			dispatch({ name, phase, i, event, ...g }) {
