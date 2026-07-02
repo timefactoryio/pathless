@@ -127,7 +127,7 @@ The shell — including its root container div — is authored as divs directly 
     constructor(p) {
       // 1. read persisted state
       // 2. query the shell under p.universe.space.el
-      // 3. register p.input.tap / p.keyboard.keyNav
+      // 3. register p.input.bind
       // 4. load async data, then populate the shell
       this.el = p.universe.space.el.querySelector('.catalog');
       this.img = this.el.querySelector('.viewer img');
@@ -141,18 +141,18 @@ The shell — including its root container div — is authored as divs directly 
 
 ### Hard rules
 
-| Rule                                                                                                                                                             | Reason                                                                                                                                                                                                                              |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Wrap script body in `{ }`                                                                                                                                        | scripts re-execute on every render; block scope prevents redeclaration errors                                                                                                                                                       |
-| No `id` attributes                                                                                                                                               | the same frame may render into multiple spaces simultaneously; ids would collide                                                                                                                                                    |
-| Query DOM via `p.universe.space.el.querySelector(...)`, never `document`                                                                                         | isolates per-space DOM                                                                                                                                                                                                              |
-| Never call `addEventListener` for navigation/tap/keys                                                                                                            | use `p.input.tap` / `p.keyboard.keyNav`; the shell owns input                                                                                                                                                                       |
-| Read state before registering input; write state before any `sync()`                                                                                             | state must be current at render time                                                                                                                                                                                                |
-| Capture `const i = p.universe.state.focused` at construction; pass `i` explicitly to every `read`/`write` in async callbacks (promises, event listeners, keyNav) | the default index reflects whichever space is *currently* focused, evaluated at call time — correct only synchronously during construction. An async callback firing later reads the wrong space's default and spills state into it |
-| Author the shell as static markup, including the root container div                                                                                              | data is known at build time — structure belongs in HTML, behavior in script                                                                                                                                                         |
-| Update dynamic slots via `textContent` / `src`, never `innerHTML` with data                                                                                      | prevents injection                                                                                                                                                                                                                  |
-| All sizing in `cqw` / `cqh`                                                                                                                                      | spaces are containers; `vw`/`vh` break in multi-space layouts                                                                                                                                                                       |
-| Do not set `width`/`height` on the frame root                                                                                                                    | the space sizes it (see §6)                                                                                                                                                                                                         |
+| Rule                                                                                                                                                           | Reason                                                                                                                                                                                                                              |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Wrap script body in `{ }`                                                                                                                                      | scripts re-execute on every render; block scope prevents redeclaration errors                                                                                                                                                       |
+| No `id` attributes                                                                                                                                             | the same frame may render into multiple spaces simultaneously; ids would collide                                                                                                                                                    |
+| Query DOM via `p.universe.space.el.querySelector(...)`, never `document`                                                                                       | isolates per-space DOM                                                                                                                                                                                                              |
+| Never call `addEventListener` for navigation/tap/keys                                                                                                          | use `p.input.bind`; the shell owns input                                                                                                                                                                                            |
+| Read state before registering input; write state before any `sync()`                                                                                           | state must be current at render time                                                                                                                                                                                                |
+| Capture `const i = p.universe.state.focused` at construction; pass `i` explicitly to every `read`/`write` in async callbacks (promises, event listeners, bind) | the default index reflects whichever space is *currently* focused, evaluated at call time — correct only synchronously during construction. An async callback firing later reads the wrong space's default and spills state into it |
+| Author the shell as static markup, including the root container div                                                                                            | data is known at build time — structure belongs in HTML, behavior in script                                                                                                                                                         |
+| Update dynamic slots via `textContent` / `src`, never `innerHTML` with data                                                                                    | prevents injection                                                                                                                                                                                                                  |
+| All sizing in `cqw` / `cqh`                                                                                                                                    | spaces are containers; `vw`/`vh` break in multi-space layouts                                                                                                                                                                       |
+| Do not set `width`/`height` on the frame root                                                                                                                  | the space sizes it (see §6)                                                                                                                                                                                                         |
 
 ---
 
@@ -167,44 +167,34 @@ The shell — including its root container div — is authored as divs directly 
 | `p.universe.read(i?)`        | `(number?) => Map`                       | per-(frame, space) state map; survives re-render; defaults to the currently focused space |
 | `p.universe.write(k, v, i?)` | `(string, any, number?) => void`         | persist `k → v` into the state map; same default caveat as `read`                         |
 | `p.universe.sync()`          | `() => void`                             | re-render visible spaces                                                                  |
-| `p.input.tap(fn)`            | `(g => void) => void`                    | register tap handler for the focused space                                                |
-| `p.keyboard.keyNav(binds)`   | `(object) => void`                       | register key handlers for the focused space                                               |
+| `p.input.bind(binds)`        | `(object) => void`                       | register gesture and key handlers for the focused space                                   |
 
-### `p.input.tap(fn)`
+### `p.input.bind(binds)`
 
-Fires when a pointer gesture ends with negligible movement (not a swipe). `fn` receives:
+A frame has exactly one way to register input, for both touch and keyboard: `p.input.bind({...})`. Every trigger — tap, swipe, or key — is a named property on one plain object, passed in a single call; calling `bind` again replaces the whole set for the focused space. This exists because a gesture and a key press are, underneath, the same thing: a named event the shell resolves and routes. One object means a frame thinks about *what* should happen, not *where* the input came from, and can freely mix touch and keyboard triggers for the same action.
 
-```js
-g = {
-  end:       [x, y, t], // x,y normalized to [-1,1] within the space (+1 = top); t = ms timestamp
-  direction: 'left' | 'right' | 'up' | 'down' | null,
-  distance:  number,    // manhattan distance in normalized units
-  axis:      'x' | 'y',
-  type:      'tap' | 'swipe' | 'gesture',
-}
-```
-
-`g.end[0] < 0` → left half, `> 0` → right half. Re-registering replaces the handler. Horizontal swipes are consumed by the shell (frame navigation) and never reach `tap`.
-
-### `p.keyboard.keyNav(binds)`
-
-Active only while its space is focused. `down` repeats while held; `up` fires on release; both optional.
+The value shape tells `bind` what kind of trigger it is:
 
 ```js
-p.keyboard.keyNav({
-  a: { down: () => this.prev() },
-  d: { down: () => this.next() },
-  w: { down: () => this.scroll(-1), up: () => this.stop() },
+p.input.bind({
+  tapLeft:  () => this.prev(),               // gesture -> plain function, fires once
+  tapRight: () => this.next(),
+  swipeUp:  () => this.expand(),
+  a:        { down: () => this.prev() },      // key -> { down, up }, down repeats while held
+  d:        { down: () => this.next() },
+  w:        { down: () => this.scroll(-1), up: () => this.stop() },
 });
 ```
 
-Reserved keys handled by the shell (do not bind): `q` `e` (nav), `1` `2` `3` (layout), `tab` (focus), `z` (panel).
+Gesture names (`tapLeft`/`tapRight`/`tapTop`/`tapBottom`/`swipeUp`/`swipeDown`) map to a function because a gesture is instantaneous — it either happened or it didn't. Key names (any `e.key.toLowerCase()`) map to `{ down, up }` because a key has duration a frame may need to act on — `down` fires (and repeats) while held, `up` on release.
+
+Reserved names are resolved by the shell before a frame's bindings are ever consulted, so they can't be overridden: `q` `e` `swipeLeft` `swipeRight` (nav — the swipes are gesture aliases of the `q`/`e` keys), `1` `2` `3` (layout), `tab` (focus), `z` (panel).
 
 ### State semantics
 
 State is a `Map` keyed to the (frame, space) pair. The same frame in two spaces has two independent maps. Persist only serializable view state (indices, scroll offsets, toggles).
 
-`read()`/`write()` default their space index to `p.universe.state.focused` — but that value is only guaranteed correct **synchronously during construction** (the shell sets it right before executing the frame's script). Any code that runs later — a promise callback, an event listener, a `keyNav`/`tap` handler firing on user input — must not rely on the default, because by then a *different* space may be focused. Capture the index once, up front, and pass it explicitly everywhere else:
+`read()`/`write()` default their space index to `p.universe.state.focused` — but that value is only guaranteed correct **synchronously during construction** (the shell sets it right before executing the frame's script). Any code that runs later — a promise callback, an event listener, a `bind` handler firing on user input — must not rely on the default, because by then a *different* space may be focused. Capture the index once, up front, and pass it explicitly everywhere else:
 
 ```js
 constructor(p) {
@@ -212,7 +202,7 @@ constructor(p) {
   this.index = p.universe.read(this.i).get('index') ?? 0;
   // ...
 }
-// later, from a promise/event/keyNav callback:
+// later, from a promise/event/bind callback:
 p.universe.write('index', this.index, this.i);
 ```
 
@@ -247,7 +237,7 @@ Consequences for the frame root (`.<framename>`):
 
 Because the data is fixed at build time, the agent should tailor the frame to it rather than generalize:
 
-- Choose interactions that fit the data's shape: paging for sequences, taps on halves for prev/next, `keyNav` for scrubbing/scrolling, per-record expansion for hierarchies.
+- Choose interactions that fit the data's shape: paging for sequences, taps on halves for prev/next, `bind` for scrubbing/scrolling, per-record expansion for hierarchies.
 - Author the shell to mirror the data: root container div plus one static structure per record type, repeated/nested in the markup as the known data dictates.
 - The script queries the shell (`p.universe.space.el.querySelector('.<framename>')`), registers input, and populates dynamic slots via `textContent` / `src`.
 - Decode each route's bytes according to its known format (`entry.data` for text/structured data, `entry.url` for media) — never a second network fetch.

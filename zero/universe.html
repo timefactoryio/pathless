@@ -1,17 +1,13 @@
 <div id="zero"></div>
 <div id="fx" hidden></div>
 <div id="one" hidden></div>
+<div id="panel" hidden></div>
 
 <script>
 	{
-		// Universe is the controller. It owns the spaces, the panel, layout/
-		// variant, the flat per-(frame,space) state store, and drives rendering.
-		// Layout is CSS-driven: layout() sets data-layout/data-variant on the
-		// universe element and toggles space visibility. Coordinates/Input/
-		// Keyboard register onto it; Pathless mixes its surface onto p.
 		class Universe {
 			static ids = ['zero', 'fx', 'one'];
-			static layouts = [null, [0, 1], [0, 1, 2]]; // visible spaces per layout
+			static layouts = [null, [0, 1], [0, 1, 2]];
 			static variants = [1, 2, 4];
 
 			constructor(pathless) {
@@ -51,7 +47,6 @@
 				this.layout(0);
 			}
 
-			// flat state store, keyed (frame, space) — survives re-render.
 			read(i = this.state.focused) {
 				const s = this.spaces[i];
 				const key = s.frame + ':' + s.id;
@@ -105,6 +100,7 @@
 				const v = this.visible();
 				this.state.focused =
 					v[(v.indexOf(this.state.focused) + 1) % v.length];
+				this.pathless.keyboard?.update();
 			}
 
 			toggle() {

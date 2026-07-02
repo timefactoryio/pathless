@@ -85,6 +85,17 @@
 					? 'x'
 					: 'y';
 			}
+			// quadrant: which side of center a point falls on (for taps,
+			// which have no start->end direction of their own).
+			quadrant([x, y]) {
+				return Math.abs(x) >= Math.abs(y)
+					? x >= 0
+						? 'Right'
+						: 'Left'
+					: y >= 0
+						? 'Top'
+						: 'Bottom';
+			}
 			direction(a, b) {
 				const dx = b[0] - a[0],
 					dy = b[1] - a[1];

@@ -28,10 +28,9 @@
 				this.img = this.element.querySelector('img');
 				this.entries = [];
 				this.index = p.universe.read(this.i).get(prefix) || 0;
-				p.input.tap((g) =>
-					this.show(this.index + (g.end[0] < 0 ? -1 : 1)),
-				);
-				p.keyboard.keyNav({
+				p.input.bind({
+					tapLeft: () => this.show(this.index - 1),
+					tapRight: () => this.show(this.index + 1),
 					a: { down: () => this.show(this.index - 1) },
 					d: { down: () => this.show(this.index + 1) },
 				});

@@ -32,11 +32,12 @@ type Value struct {
 }
 
 // Encode flattens a Value tree to its leaves in order and writes the wire
-// format the client decodes:
+// format the client decodes: repeated, back-to-back, per leaf:
 //
-//	[2B count]  then per leaf: [1B typeLen][type] [4B dataLen][data]
+//	[1B typeLen][type] [4B dataLen][data]
 //
-// Names are not encoded — order is the contract.
+// There is no leaf count on the wire — the response's length is the
+// terminator. Names are not encoded — order is the contract.
 func (c *Circuit) Encode(v *Value) []byte {
 	var leaves []*Value
 	var walk func(*Value)
@@ -54,9 +55,7 @@ func (c *Circuit) Encode(v *Value) []byte {
 	for _, l := range leaves {
 		total += len(l.Type) + len(l.Data)
 	}
-	buf := bytes.NewBuffer(make([]byte, 0, 2+5*len(leaves)+total))
-	buf.WriteByte(byte(len(leaves) >> 8))
-	buf.WriteByte(byte(len(leaves)))
+	buf := bytes.NewBuffer(make([]byte, 0, 5*len(leaves)+total))
 	var hdr [4]byte
 	for _, l := range leaves {
 		buf.WriteByte(byte(len(l.Type)))
@@ -68,22 +67,18 @@ func (c *Circuit) Encode(v *Value) []byte {
 	return buf.Bytes()
 }
 
-// Decode is the inverse of Encode: it parses a wire blob back into leaf
-// Values (Type/Data only — Name isn't on the wire, so it's not restored).
-// This lets the server read back what it once wrote, e.g. content pre-
-// encoded via Save and fetched from S3.
+// Decode is the inverse of Encode.
 func (c *Circuit) Decode(buf []byte) []*Value {
-	count := int(buf[0])<<8 | int(buf[1])
-	pos := 2
-	leaves := make([]*Value, count)
-	for i := range leaves {
+	var leaves []*Value
+	pos := 0
+	for pos < len(buf) {
 		tl := int(buf[pos])
 		pos++
 		typ := string(buf[pos : pos+tl])
 		pos += tl
 		n := int(binary.BigEndian.Uint32(buf[pos : pos+4]))
 		pos += 4
-		leaves[i] = &Value{Type: typ, Data: buf[pos : pos+n]}
+		leaves = append(leaves, &Value{Type: typ, Data: buf[pos : pos+n]})
 		pos += n
 	}
 	return leaves

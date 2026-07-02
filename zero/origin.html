@@ -140,6 +140,7 @@
 				'localhost',
 				location.hostname,
 			);
+
 			class Pathless {
 				#td = new TextDecoder();
 				#range = document.createRange();
@@ -148,57 +149,52 @@
 					this.init();
 				}
 
-				// decode reads the wire format into [{ type, data }]:
-				//   [2B count]  per entry: [1B typeLen][type] [4B dataLen][data]
-				decode(buf) {
-					const bytes = new Uint8Array(buf);
+				decode(bytes) {
+					const view = new DataView(
+						bytes.buffer,
+						bytes.byteOffset,
+						bytes.byteLength,
+					);
+					const frames = [];
 					let pos = 0;
-					const count = (bytes[pos++] << 8) | bytes[pos++];
-					return Array.from({ length: count }, () => {
+					while (pos < bytes.length) {
 						const tl = bytes[pos++];
 						const type = this.#td.decode(
 							bytes.subarray(pos, (pos += tl)),
 						);
-						const n =
-							((bytes[pos] << 24) |
-								(bytes[pos + 1] << 16) |
-								(bytes[pos + 2] << 8) |
-								bytes[pos + 3]) >>>
-							0;
+						const n = view.getUint32(pos);
 						pos += 4;
-						return { type, data: bytes.subarray(pos, (pos += n)) };
-					});
+						frames.push({
+							type,
+							data: bytes.subarray(pos, (pos += n)),
+						});
+					}
+					return frames;
 				}
 
-				// source fetches and decodes a route (empty path = the root).
-				// decode already gives each entry its type/data; source just adds
-				// a lazily-created blob url on top. Cached per path.
 				source(path = '') {
-					if (!this.cache.has(path)) {
-						const url = path
-							? `${window.circuit}/${path}`
-							: window.circuit;
-						this.cache.set(
-							path,
-							fetch(url)
-								.then((r) => r.arrayBuffer())
-								.then((buf) =>
-									this.decode(buf).map((e) => {
-										let u;
-										return Object.defineProperty(e, 'url', {
-											get: () =>
-												(u ??= URL.createObjectURL(
-													new Blob([e.data], {
-														type: e.type,
-													}),
-												)),
-										});
-									}),
-								),
-						);
+					let p = this.cache.get(path);
+					if (!p) {
+						p = fetch(`${window.circuit}/${path}`)
+							.then((r) => r.bytes())
+							.then((bytes) =>
+								this.decode(bytes).map((e) => {
+									let u;
+									return Object.defineProperty(e, 'url', {
+										get: () =>
+											(u ??= URL.createObjectURL(
+												new Blob([e.data], {
+													type: e.type,
+												}),
+											)),
+									});
+								}),
+							);
+						this.cache.set(path, p);
 					}
-					return this.cache.get(path);
+					return p;
 				}
+
 				exec(el, data) {
 					el.replaceChildren(
 						this.#range.createContextualFragment(
@@ -209,9 +205,6 @@
 
 				async init() {
 					const [universe, ...frames] = await this.source();
-					// item 0 builds the universe and its coordinates/input/
-					// keyboard, attaching each onto pathless (p.universe,
-					// p.input, p.keyboard, p.coordinates).
 					this.exec(
 						document.getElementById('universe'),
 						universe.data,
@@ -227,6 +220,5 @@
 	</head>
 	<body>
 		<div id="universe" data-layout="0" data-variant="0"></div>
-		<div id="panel" hidden></div>
 	</body>
 </html>
