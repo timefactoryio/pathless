@@ -176,9 +176,9 @@
 			}
 
 			constructor(p) {
-				this.i = p.universe.state.focused;
+				const { read, write } = p.universe.pin();
 				this.el = p.universe.space.el.querySelector('.text');
-				const saved = p.universe.read(this.i).get('scroll');
+				const saved = read().get('scroll');
 				if (saved) {
 					const restore = () => {
 						this.el.scrollTop = saved;
@@ -189,7 +189,7 @@
 				}
 				this.el.addEventListener(
 					'scroll',
-					() => p.universe.write('scroll', this.el.scrollTop, this.i),
+					() => write('scroll', this.el.scrollTop),
 					{ passive: true },
 				);
 				p.input.bind({

@@ -57,7 +57,13 @@
 			write(key, val, i = this.state.focused) {
 				this.read(i).set(key, val);
 			}
-
+			pin(i = this.state.focused) {
+				return {
+					i,
+					read: () => this.read(i),
+					write: (key, val) => this.write(key, val, i),
+				};
+			}
 			sync(...indices) {
 				const { focused } = this.state;
 				(indices.length ? indices : this.visible()).forEach((i) => {

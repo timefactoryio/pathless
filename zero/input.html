@@ -1,9 +1,5 @@
 <script>
 	{
-		// Input resolves every pointer and keyboard event into one named
-		// trigger ('a', 'tab', 'swipeLeft', 'tapTop', ...) and hands it to
-		// dispatch. Shell-reserved names always win; anything else routes to
-		// whatever the focused frame registered via bind().
 		class Input {
 			#active = new Map();
 			#bindings = new Map();
@@ -18,7 +14,6 @@
 				z: { fn: (u) => u.toggle() },
 			};
 
-			// gestures that alias a shell key, keyed by gesture name.
 			static gestureNames = Object.fromEntries(
 				Object.entries(this.shellNames)
 					.filter(([, v]) => v.touch)
@@ -29,12 +24,7 @@
 				this.pathless = pathless;
 				this.universe = pathless.universe;
 				const o = { passive: true };
-				for (const t of [
-					'pointerdown',
-					'pointermove',
-					'pointerup',
-					'pointercancel',
-				])
+				for (const t of ['pointerdown', 'pointerup', 'pointercancel'])
 					this.universe.el.addEventListener(t, this, o);
 				window.addEventListener('keydown', this);
 				window.addEventListener('keyup', this);
@@ -56,26 +46,11 @@
 				});
 			}
 
-			pointermove({ pointerId, clientX, clientY }) {
-				this.#active.get(pointerId)?.pair.move(clientX, clientY);
-			}
-
 			pointerup({ pointerId, clientX, clientY }) {
 				const a = this.#active.get(pointerId);
 				if (!a) return;
 				this.#active.delete(pointerId);
-				const co = this.pathless.coordinates;
-				const g = a.pair.close(clientX, clientY);
-				const name =
-					g.distance < co.tap
-						? 'tap' + co.quadrant(g.end)
-						: g.axis === 'x' && g.distance >= co.swipe
-							? 'swipe' +
-								g.direction[0].toUpperCase() +
-								g.direction.slice(1)
-							: null;
-				if (!name) return;
-				return { i: a.i, name, ...g };
+				return { i: a.i, ...a.pair.close(clientX, clientY) };
 			}
 
 			pointercancel({ pointerId }) {
@@ -100,14 +75,13 @@
 			}
 
 			dispatch({ name, phase, i, event, ...g }) {
+				if (!name) return;
 				if (name.startsWith('swipe')) navigator.vibrate?.(5);
 
 				const shell =
 					Input.shellNames[name] ?? Input.gestureNames[name];
 				if (shell) {
 					event?.preventDefault();
-					// event only exists for keydown/keyup — gestures never
-					// touch the keyboard visualization.
 					if (event)
 						this.pathless.keyboard?.flash(name, phase !== 'up');
 					if (phase !== 'up') shell.fn(this.universe);
@@ -119,9 +93,6 @@
 				else bind?.[phase]?.(g);
 			}
 
-			// bind registers gesture/key handlers for the focused space.
-			// Gestures ('tapLeft', 'swipeUp', ...) are plain functions, fired
-			// once. Keys are { down, up }, both optional.
 			bind(binds) {
 				this.#bindings.set(this.universe.state.focused, binds);
 				return this;

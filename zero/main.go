@@ -9,8 +9,8 @@ import (
 	"strings"
 )
 
-//go:embed origin.html
-var originHtml string
+//go:embed pathless.html
+var pathlessHtml string
 
 //go:embed universe.html
 var universeHtml []byte
@@ -43,7 +43,7 @@ func NewZero(origin, circuit string) *Zero {
 	if circuit == "" {
 		circuit = "http://localhost:1001"
 	}
-	tmpl := template.Must(template.New("pathless").Parse(originHtml))
+	tmpl := template.Must(template.New("pathless").Parse(pathlessHtml))
 	var b strings.Builder
 	if err := tmpl.Execute(&b, map[string]string{"CIRCUIT": circuit}); err != nil {
 		panic(err)

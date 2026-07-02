@@ -22,17 +22,17 @@
 		const prefix = '{{.PREFIX}}';
 		class Slides {
 			constructor(p) {
-				this.p = p;
-				this.i = p.universe.state.focused;
-				this.element = p.universe.space.el.querySelector('.slides');
-				this.img = this.element.querySelector('img');
+				const { read, write } = p.universe.pin();
+				this.write = write;
+				this.img = p.universe.space.el.querySelector('.slides img');
 				this.entries = [];
-				this.index = p.universe.read(this.i).get(prefix) || 0;
+				this.index = read().get(prefix) || 0;
+				const nav = (d) => () => this.show(this.index + d);
 				p.input.bind({
-					tapLeft: () => this.show(this.index - 1),
-					tapRight: () => this.show(this.index + 1),
-					a: { down: () => this.show(this.index - 1) },
-					d: { down: () => this.show(this.index + 1) },
+					tapLeft: nav(-1),
+					tapRight: nav(1),
+					a: { down: nav(-1) },
+					d: { down: nav(1) },
 				});
 				p.source(prefix).then((entries) => {
 					this.entries = entries;
@@ -44,7 +44,7 @@
 				this.index =
 					((n % this.entries.length) + this.entries.length) %
 					this.entries.length;
-				this.p.universe.write(prefix, this.index, this.i);
+				this.write(prefix, this.index);
 				const { url } = this.entries[this.index];
 				Object.assign(this.img, { src: url });
 			}

@@ -1,12 +1,7 @@
 <script>
 	{
-		// Coordinates understands pointer events per space. It does not manage
-		// the DOM or layout — CSS positions the spaces. It reads a space's live
-		// rect to decide which visible space a pointer is in and to map a point
-		// into that space's local [-1, 1] frame (+1 top), then tracks a gesture.
 		class Coordinates {
 			constructor(pathless) {
-				this.pathless = pathless;
 				this.universe = pathless.universe;
 				this.threshold = 0.05;
 				this.tap = 0.1;
@@ -29,88 +24,55 @@
 				return null;
 			}
 
-			// at: client pixel -> [-1, 1] within a space element's rect.
-			at(clientX, clientY, el) {
-				const r = el.getBoundingClientRect();
+			// at: client pixel -> [-1, 1] within a rect.
+			at(clientX, clientY, r) {
 				return [
 					(2 * (clientX - r.left)) / (r.width || 1) - 1,
 					1 - (2 * (clientY - r.top)) / (r.height || 1),
-					Date.now(),
 				];
 			}
 
-			// track: a gesture within a space element; move/close report the
-			// point in that space's local [-1, 1].
-			track(clientX, clientY, el) {
-				const pair = {
-					start: this.at(clientX, clientY, el),
-					path: [],
-					_dir: null,
-				};
-				pair.move = (x, y) => {
-					const point = this.at(x, y, el);
-					const dir = this.direction(
-						pair.path.at(-1) ?? pair.start,
-						point,
-					);
-					if (dir && dir !== pair._dir) {
-						pair.path.push(point);
-						pair._dir = dir;
-					}
-				};
+			// track: a gesture within the focused space; close reports
+			// the point in that space's local [-1, 1] plus its full
+			// classification, including the declarative name (tap/swipe).
+			track(clientX, clientY) {
+				const r = this.universe.space.el.getBoundingClientRect();
+				const pair = { start: this.at(clientX, clientY, r) };
 				pair.close = (x, y) => {
-					const end = this.at(x, y, el);
-					const direction = this.direction(pair.start, end);
-					return {
-						end,
-						distance: this.distance(pair.start, end),
-						axis: this.axis(pair.start, end),
-						direction,
-						type:
-							direction === null
-								? 'tap'
-								: pair.path.length > 1
-									? 'gesture'
-									: 'swipe',
-					};
+					const end = this.at(x, y, r);
+					const g = { end, ...this.classify(pair.start, end) };
+					g.name =
+						g.distance < this.tap
+							? 'tap'
+							: g.axis === 'x' && g.distance >= this.swipe
+								? 'swipe' +
+									g.direction[0].toUpperCase() +
+									g.direction.slice(1)
+								: null;
+					return g;
 				};
 				return pair;
 			}
 
-			distance(a, b) {
-				return Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]);
-			}
-			axis(a, b) {
-				return Math.abs(b[0] - a[0]) >= Math.abs(b[1] - a[1])
-					? 'x'
-					: 'y';
-			}
-			// quadrant: which side of center a point falls on (for taps,
-			// which have no start->end direction of their own).
-			quadrant([x, y]) {
-				return Math.abs(x) >= Math.abs(y)
-					? x >= 0
-						? 'Right'
-						: 'Left'
-					: y >= 0
-						? 'Top'
-						: 'Bottom';
-			}
-			direction(a, b) {
+			// classify: distance, dominant axis, and labeled direction of
+			// a->b. direction is null when movement is below threshold
+			// (i.e. the gesture is a tap, not a drag).
+			classify(a, b) {
 				const dx = b[0] - a[0],
 					dy = b[1] - a[1];
-				if (Math.abs(dx) + Math.abs(dy) < this.threshold) return null;
-				return Math.abs(dx) >= Math.abs(dy)
-					? dx >= 0
-						? 'right'
-						: 'left'
-					: dy >= 0
-						? 'up'
-						: 'down';
-			}
-			velocity(a, b) {
-				const dt = b[2] - a[2];
-				return dt > 0 ? this.distance(a, b) / dt : 0;
+				const distance = Math.abs(dx) + Math.abs(dy);
+				const axis = Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y';
+				const direction =
+					distance < this.threshold
+						? null
+						: axis === 'x'
+							? dx >= 0
+								? 'right'
+								: 'left'
+							: dy >= 0
+								? 'up'
+								: 'down';
+				return { distance, axis, direction };
 			}
 		}
 

@@ -140,138 +140,61 @@
 				'localhost',
 				location.hostname,
 			);
+
 			class Pathless {
 				#td = new TextDecoder();
 				#range = document.createRange();
-				static #spaces = ['zero', 'fx', 'one'];
-				static #layouts = [null, [0, 1], [0, 1, 2]];
-				static #variants = [1, 2, 4];
 				constructor() {
-					this.universe = {
-						el: document.getElementById('universe'),
-						space: Pathless.#spaces.map((id) => ({
-							el: document.getElementById(id),
-							frame: null,
-						})),
-						panel: document.getElementById('panel'),
-						cache: new Map(),
-						prev: null,
-						focused: 0,
-						frames: [],
-						visible: [0],
-					};
-					this.input = null;
+					this.cache = new Map();
 					this.init();
 				}
 
-				get visible() {
-					return this.universe.visible;
-				}
-				get panel() {
-					return this.universe.panel;
-				}
-				get focused() {
-					return this.universe.focused;
-				}
-				get space() {
-					return this.universe.space[this.focused];
-				}
-
-				wire(buf, fn) {
-					const bytes = new Uint8Array(buf);
-					const count = (bytes[0] << 8) | bytes[1];
-					let pos = 2;
-					const values = new Array(count);
-					for (let i = 0; i < count; i++) {
-						const nl = bytes[pos++];
-						const name = this.#td.decode(
-							bytes.subarray(pos, (pos += nl)),
-						);
+				decode(bytes) {
+					const view = new DataView(
+						bytes.buffer,
+						bytes.byteOffset,
+						bytes.byteLength,
+					);
+					const frames = [];
+					let pos = 0;
+					while (pos < bytes.length) {
 						const tl = bytes[pos++];
 						const type = this.#td.decode(
 							bytes.subarray(pos, (pos += tl)),
 						);
-						const n =
-							((bytes[pos] << 24) |
-								(bytes[pos + 1] << 16) |
-								(bytes[pos + 2] << 8) |
-								bytes[pos + 3]) >>>
-							0;
+						const n = view.getUint32(pos);
 						pos += 4;
-						values[i] = fn(
-							name,
+						frames.push({
 							type,
-							bytes.subarray(pos, (pos += n)),
-						);
+							data: bytes.subarray(pos, (pos += n)),
+						});
 					}
-					return values;
-				}
-				source(path) {
-					const { cache } = this.universe;
-					if (!cache.has(path))
-						cache.set(
-							path,
-							fetch(`${window.circuit}/${path}`).then(async (r) =>
-								this.wire(
-									await r.arrayBuffer(),
-									(name, type, data) => ({
-										name,
-										url: URL.createObjectURL(
-											new Blob([data], { type }),
-										),
-									}),
-								),
-							),
-						);
-					return cache.get(path);
-				}
-				async init() {
-					const u = this.universe;
-					const [coordinates, input, keyboard, ...frames] = this.wire(
-						await (await fetch(window.circuit)).arrayBuffer(),
-						(name, type, data) => data,
-					);
-					this.exec(u.panel, coordinates);
-					this.#measure();
-					this.exec(u.panel, input);
-					this.exec(u.panel, keyboard);
-					u.frames = frames.map((data) => ({
-						el: data,
-						state: new Map(
-							Pathless.#spaces.map((k) => [k, new Map()]),
-						),
-					}));
-					if (u.frames.length) {
-						u.space.forEach((s) => (s.frame = u.frames[0]));
-						this.sync();
-					}
-				}
-				#measure() {
-					const u = this.universe;
-					(u.co ??= new pathless.Coordinates()).measure(u.el);
-					const l = +u.el.dataset.layout,
-						v = +u.el.dataset.variant;
-					u.space.forEach((s, i) => (s.quads = u.co.quads(l, v, i)));
+					return frames;
 				}
 
-				read(i = this.focused) {
-					const s = this.universe.space[i];
-					return s.frame.state.get(s.el.id);
+				source(path = '') {
+					let p = this.cache.get(path);
+					if (!p) {
+						p = fetch(`${window.circuit}/${path}`)
+							.then((r) => r.bytes())
+							.then((bytes) =>
+								this.decode(bytes).map((e) => {
+									let u;
+									return Object.defineProperty(e, 'url', {
+										get: () =>
+											(u ??= URL.createObjectURL(
+												new Blob([e.data], {
+													type: e.type,
+												}),
+											)),
+									});
+								}),
+							);
+						this.cache.set(path, p);
+					}
+					return p;
 				}
-				write(k, v, i = this.focused) {
-					const s = this.universe.space[i];
-					s.frame.state.get(s.el.id).set(k, v);
-				}
-				sync(...indices) {
-					const u = this.universe;
-					const prev = u.focused;
-					(indices.length ? indices : u.visible).forEach((i) => {
-						const s = u.space[i];
-						u.focused = i;
-						this.exec(s.el, s.frame.el);
-					});
-					u.focused = prev;
-				}
+
 				exec(el, data) {
 					el.replaceChildren(
 						this.#range.createContextualFragment(
@@ -279,45 +202,14 @@
 						),
 					);
 				}
-				layout(l, v = 0) {
-					const u = this.universe;
-					if (l > 0) u.prev = [l, v];
-					u.el.dataset.layout = l;
-					u.el.dataset.variant = v;
-					const visible = (u.visible =
-						l === 0 ? [u.focused] : Pathless.#layouts[l]);
-					u.space.forEach((s, i) => {
-						s.el.hidden = !visible.includes(i);
-						s.quads = u.co.quads(l, v, i);
-					});
-					this.sync();
-				}
-				cycle(l) {
-					const { el, prev } = this.universe;
-					const cur = +el.dataset.layout;
-					if (cur === 0 && prev) return this.layout(...prev);
-					l ??= cur;
-					this.layout(
-						l,
-						cur === l
-							? (+el.dataset.variant + 1) % Pathless.#variants[l]
-							: 0,
+
+				async init() {
+					const [universe, ...frames] = await this.source();
+					this.exec(
+						document.getElementById('universe'),
+						universe.data,
 					);
-				}
-				nav(dir, i = this.focused) {
-					const { space, frames: f } = this.universe;
-					const s = space[i];
-					s.frame =
-						f[(f.indexOf(s.frame) + dir + f.length) % f.length];
-					this.sync(i);
-				}
-				focus() {
-					const { visible: v, focused } = this.universe;
-					this.universe.focused =
-						v[(v.indexOf(focused) + 1) % v.length];
-				}
-				toggle() {
-					this.universe.panel.hidden = !this.universe.panel.hidden;
+					this.universe.init(frames.map((f) => f.data));
 				}
 			}
 
@@ -327,11 +219,6 @@
 		</script>
 	</head>
 	<body>
-		<div id="universe" data-layout="0" data-variant="0">
-			<div id="zero"></div>
-			<div id="fx" hidden></div>
-			<div id="one" hidden></div>
-		</div>
-		<div id="panel" hidden></div>
+		<div id="universe" data-layout="0" data-variant="0"></div>
 	</body>
 </html>

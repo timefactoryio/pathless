@@ -166,6 +166,7 @@ The shell — including its root container div — is authored as divs directly 
 | `p.universe.space.el`        | `HTMLElement`                            | the current space's element; root for all queries and appends                             |
 | `p.universe.read(i?)`        | `(number?) => Map`                       | per-(frame, space) state map; survives re-render; defaults to the currently focused space |
 | `p.universe.write(k, v, i?)` | `(string, any, number?) => void`         | persist `k → v` into the state map; same default caveat as `read`                         |
+| `p.universe.pin(i?)`         | `(number?) => {i, read, write}`          | captures the focused index once and returns read/write bound to it                        |
 | `p.universe.sync()`          | `() => void`                             | re-render visible spaces                                                                  |
 | `p.input.bind(binds)`        | `(object) => void`                       | register gesture and key handlers for the focused space                                   |
 
@@ -194,16 +195,17 @@ Reserved names are resolved by the shell before a frame's bindings are ever cons
 
 State is a `Map` keyed to the (frame, space) pair. The same frame in two spaces has two independent maps. Persist only serializable view state (indices, scroll offsets, toggles).
 
-`read()`/`write()` default their space index to `p.universe.state.focused` — but that value is only guaranteed correct **synchronously during construction** (the shell sets it right before executing the frame's script). Any code that runs later — a promise callback, an event listener, a `bind` handler firing on user input — must not rely on the default, because by then a *different* space may be focused. Capture the index once, up front, and pass it explicitly everywhere else:
+`read()`/`write()` default their space index to `p.universe.state.focused` — but that value is only guaranteed correct **synchronously during construction** (the shell sets it right before executing the frame's script). Any code that runs later — a promise callback, an event listener, a `bind` handler firing on user input — must not rely on the default, because by then a *different* space may be focused. Capture the index once with `p.universe.pin()` and use the `read`/`write` it returns everywhere else:
 
 ```js
 constructor(p) {
-  this.i = p.universe.state.focused;      // capture once, synchronously
-  this.index = p.universe.read(this.i).get('index') ?? 0;
+  const { read, write } = p.universe.pin();  // captures once, synchronously
+  this.write = write;
+  this.index = read().get('index') ?? 0;
   // ...
 }
 // later, from a promise/event/bind callback:
-p.universe.write('index', this.index, this.i);
+this.write('index', this.index);
 ```
 
 ---
