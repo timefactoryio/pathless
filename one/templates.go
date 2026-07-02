@@ -29,7 +29,8 @@ func (o *One) Home(logo, heading string) {
 	h1 := o.Elem("h1", heading)
 	kbd := o.Elem("kbd", "Z")
 	button := o.Block("button", nil, o.HTML("Press"), kbd)
-	o.Build("home", &tmpl, logoDiv, h1, button)
+	root := o.Block("div", fx.Attr{"class": "home"}, logoDiv, h1, button)
+	o.Build(&tmpl, root)
 }
 
 func (o *One) Text(path string) {
@@ -43,7 +44,8 @@ func (o *One) Text(path string) {
 	}
 	markdown := template.HTML(buf.String())
 	textTmpl := template.HTML(textHtml)
-	o.Build("text", &markdown, &textTmpl)
+	root := o.Block("div", fx.Attr{"class": "text"}, &markdown)
+	o.Build(&textTmpl, root)
 }
 
 func (o *One) Slides(dir string) {
@@ -58,17 +60,18 @@ func (o *One) Slides(dir string) {
 		return
 	}
 	result := template.HTML(buf.String())
-	o.Build("", &result)
+	o.Build(&result)
 }
 
+// CustomHTML registers a frame from a local file. The file authors its own
+// root container div (by convention <div class="<filename stem>">).
 func (o *One) CustomHTML(path string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return
 	}
-	class := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	raw := template.HTML(data)
-	o.Build(class, &raw)
+	o.Build(&raw)
 }
 func (o *One) Logo(path string) template.HTML {
 	if strings.ToLower(filepath.Ext(path)) == ".svg" {

@@ -30,8 +30,8 @@ type forge struct {
 
 type Forge interface {
 	HTML(raw string) *template.HTML
-	Build(class string, elements ...*template.HTML)
-	Builder(class string, elements ...*template.HTML) *template.HTML
+	Build(elements ...*template.HTML)
+	Builder(elements ...*template.HTML) *template.HTML
 	Frames(frame ...*template.HTML) [][]byte
 	Markdown() *markdown.Markdown
 	JS(path string) *template.HTML
@@ -51,20 +51,17 @@ func (f *forge) HTML(raw string) *template.HTML {
 	return &o
 }
 
-func (f *forge) Build(class string, elements ...*template.HTML) {
-	f.Frames(f.Builder(class, elements...))
+// Build registers a frame from its elements. The frame's root container is
+// authored by the caller (template builder or custom frame file), not added
+// here.
+func (f *forge) Build(elements ...*template.HTML) {
+	f.Frames(f.Builder(elements...))
 }
 
-func (f *forge) Builder(class string, elements ...*template.HTML) *template.HTML {
+func (f *forge) Builder(elements ...*template.HTML) *template.HTML {
 	var b strings.Builder
-	if class != "" {
-		fmt.Fprintf(&b, `<div class="%s">`, html.EscapeString(class))
-	}
 	for _, el := range elements {
 		b.WriteString(string(*el))
-	}
-	if class != "" {
-		b.WriteString("</div>")
 	}
 	cleaned := f.consolidateAssets(b.String())
 	result := template.HTML(cleaned)

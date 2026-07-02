@@ -176,8 +176,9 @@
 			}
 
 			constructor(p) {
+				this.i = p.universe.state.focused;
 				this.el = p.universe.space.el.querySelector('.text');
-				const saved = p.universe.read().get('scroll');
+				const saved = p.universe.read(this.i).get('scroll');
 				if (saved) {
 					const restore = () => {
 						this.el.scrollTop = saved;
@@ -188,7 +189,7 @@
 				}
 				this.el.addEventListener(
 					'scroll',
-					() => p.universe.write('scroll', this.el.scrollTop),
+					() => p.universe.write('scroll', this.el.scrollTop, this.i),
 					{ passive: true },
 				);
 				p.keyboard.keyNav({

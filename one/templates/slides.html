@@ -15,19 +15,19 @@
 	}
 </style>
 
+<div class="slides"><img /></div>
+
 <script>
 	{
 		const prefix = '{{.PREFIX}}';
 		class Slides {
 			constructor(p) {
-				this.element = Object.assign(document.createElement('div'), {
-					className: 'slides',
-					innerHTML: '<img>',
-				});
-				this.img = this.element.firstChild;
-				p.universe.space.el.append(this.element);
+				this.p = p;
+				this.i = p.universe.state.focused;
+				this.element = p.universe.space.el.querySelector('.slides');
+				this.img = this.element.querySelector('img');
 				this.entries = [];
-				this.index = p.universe.read().get(prefix) || 0;
+				this.index = p.universe.read(this.i).get(prefix) || 0;
 				p.input.tap((g) =>
 					this.show(this.index + (g.end[0] < 0 ? -1 : 1)),
 				);
@@ -39,14 +39,13 @@
 					this.entries = entries;
 					if (this.entries.length) this.show(this.index);
 				});
-				this.p = p;
 			}
 			show(n) {
 				if (!this.entries.length) return;
 				this.index =
 					((n % this.entries.length) + this.entries.length) %
 					this.entries.length;
-				this.p.universe.write(prefix, this.index);
+				this.p.universe.write(prefix, this.index, this.i);
 				const { url } = this.entries[this.index];
 				Object.assign(this.img, { src: url });
 			}

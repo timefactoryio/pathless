@@ -39,7 +39,7 @@ func main() {
     // custom data frame: expose the data, register the frame
     p.Load("./data/catalog.json")    // route "catalog.json" (base name of path)
     p.Load("./pics")                 // route "pics"         (directory → bundle)
-    p.CustomHTML("./catalog.html")   // frame, wrapper <div class="catalog">
+    p.CustomHTML("./catalog.html")   // frame; file authors <div class="catalog">
 
     p.Serve()
 }
@@ -47,7 +47,7 @@ func main() {
 
 Rules an agent must follow when emitting `main.go`:
 
-- `p.CustomHTML(path)` registers a frame. The wrapper `<div>` class is the filename without extension (`catalog.html` → `class="catalog"`). **Local files only.**
+- `p.CustomHTML(path)` registers a frame. The file authors its own root container div, classed by convention after the filename stem (`catalog.html` → `<div class="catalog">…</div>`). Nothing is wrapped for you. **Local files only.**
 - `p.Load(path)` exposes a file or directory as a fetchable route. **The route key is `filepath.Base(path)`** — `./data/catalog.json` → `catalog.json`, `./pics` → `pics`. A directory becomes a bundle of all its files. Any file type works — the wire carries typed bytes, and the frame decides how to decode them.
 - `p.Load(url)` with an `http(s)://` URL expects a **pre-encoded wire blob** (produced by `Save`) and decodes it back into a bundle. It is not for arbitrary remote files.
 - `p.Save(key)` writes the wire encoding of a loaded route to `s3/<key>`, ready to sync to object storage (e.g. `rclone sync s3 remote:bucket`). A saved route round-trips: `Save("slides")` → upload → `p.Slides("https://bucket.example.com/slides")`.
@@ -106,23 +106,32 @@ const records = JSON.parse(new TextDecoder().decode(file.data));
 
 ## 4. Frame anatomy
 
-A frame file has three parts. The Go `Build` step **automatically**: hoists every `<style>` to the top, wraps every `<script>` body in a `{ }` block, and moves all scripts to the end. Authoring contract:
+A frame file has three parts: `<style>`, **static markup (the shell)**, and a `<script>`. The Go `Build` step **automatically**: hoists every `<style>` to the top, wraps every `<script>` body in a `{ }` block, and moves all scripts to the end.
+
+The shell — including its root container div — is authored as divs directly in the HTML. Because the data is known ahead of time, its structure (root, sections, lists, an `<img>` per slot, …) is written statically. The script does **not** build the DOM; it queries the shell, wires interaction, and updates the dynamic slots (`textContent`, `src`, `hidden`, dataset/state attributes).
 
 ```html
 <style>
   /* scoped to .<framename>; use cqw / cqh units only */
 </style>
 
-<!-- optional static markup; becomes children of <div class="<framename>"> -->
+<!-- the shell: root container + static structure mirroring the known data -->
+<div class="catalog">
+  <div class="viewer"><img></div>
+  <div class="detail"><p class="desc"></p><span class="count"></span></div>
+</div>
 
 <script>
 {
   class Frame {
     constructor(p) {
       // 1. read persisted state
-      // 2. build / query DOM under p.universe.space.el
+      // 2. query the shell under p.universe.space.el
       // 3. register p.input.tap / p.keyboard.keyNav
-      // 4. load async data, then render
+      // 4. load async data, then populate the shell
+      this.el = p.universe.space.el.querySelector('.catalog');
+      this.img = this.el.querySelector('.viewer img');
+      this.desc = this.el.querySelector('.desc');
     }
   }
   new Frame(pathless);
@@ -132,16 +141,18 @@ A frame file has three parts. The Go `Build` step **automatically**: hoists ever
 
 ### Hard rules
 
-| Rule                                                                        | Reason                                                                           |
-| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Wrap script body in `{ }`                                                   | scripts re-execute on every render; block scope prevents redeclaration errors    |
-| No `id` attributes                                                          | the same frame may render into multiple spaces simultaneously; ids would collide |
-| Query DOM via `p.universe.space.el.querySelector(...)`, never `document`    | isolates per-space DOM                                                           |
-| Never call `addEventListener` for navigation/tap/keys                       | use `p.input.tap` / `p.keyboard.keyNav`; the shell owns input                    |
-| Read state before registering input; write state before any `sync()`        | state must be current at render time                                             |
-| Build DOM with `createElement` + `textContent`, never `innerHTML` with data | prevents injection                                                               |
-| All sizing in `cqw` / `cqh`                                                 | spaces are containers; `vw`/`vh` break in multi-space layouts                    |
-| Do not set `width`/`height` on the frame root                               | the space sizes it (see §6)                                                      |
+| Rule                                                                                                                                                             | Reason                                                                                                                                                                                                                              |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Wrap script body in `{ }`                                                                                                                                        | scripts re-execute on every render; block scope prevents redeclaration errors                                                                                                                                                       |
+| No `id` attributes                                                                                                                                               | the same frame may render into multiple spaces simultaneously; ids would collide                                                                                                                                                    |
+| Query DOM via `p.universe.space.el.querySelector(...)`, never `document`                                                                                         | isolates per-space DOM                                                                                                                                                                                                              |
+| Never call `addEventListener` for navigation/tap/keys                                                                                                            | use `p.input.tap` / `p.keyboard.keyNav`; the shell owns input                                                                                                                                                                       |
+| Read state before registering input; write state before any `sync()`                                                                                             | state must be current at render time                                                                                                                                                                                                |
+| Capture `const i = p.universe.state.focused` at construction; pass `i` explicitly to every `read`/`write` in async callbacks (promises, event listeners, keyNav) | the default index reflects whichever space is *currently* focused, evaluated at call time — correct only synchronously during construction. An async callback firing later reads the wrong space's default and spills state into it |
+| Author the shell as static markup, including the root container div                                                                                              | data is known at build time — structure belongs in HTML, behavior in script                                                                                                                                                         |
+| Update dynamic slots via `textContent` / `src`, never `innerHTML` with data                                                                                      | prevents injection                                                                                                                                                                                                                  |
+| All sizing in `cqw` / `cqh`                                                                                                                                      | spaces are containers; `vw`/`vh` break in multi-space layouts                                                                                                                                                                       |
+| Do not set `width`/`height` on the frame root                                                                                                                    | the space sizes it (see §6)                                                                                                                                                                                                         |
 
 ---
 
@@ -149,15 +160,15 @@ A frame file has three parts. The Go `Build` step **automatically**: hoists ever
 
 `window.pathless` (passed as `p`) is the only global. `p` is the thin wire client; `p.universe`, `p.input`, and `p.keyboard` are the modules attached to it.
 
-| Member                     | Signature                                | Behavior                                                      |
-| -------------------------- | ---------------------------------------- | ------------------------------------------------------------- |
-| `p.source(key)`            | `(string) => Promise<[{type,data,url}]>` | fetch + decode a route; cached per key                        |
-| `p.universe.space.el`      | `HTMLElement`                            | the current space's element; root for all queries and appends |
-| `p.universe.read()`        | `() => Map`                              | per-(frame, space) state map; survives re-render              |
-| `p.universe.write(k, v)`   | `(string, any) => void`                  | persist `k → v` into the state map                            |
-| `p.universe.sync()`        | `() => void`                             | re-render visible spaces                                      |
-| `p.input.tap(fn)`          | `(g => void) => void`                    | register tap handler for the focused space                    |
-| `p.keyboard.keyNav(binds)` | `(object) => void`                       | register key handlers for the focused space                   |
+| Member                       | Signature                                | Behavior                                                                                  |
+| ---------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `p.source(key)`              | `(string) => Promise<[{type,data,url}]>` | fetch + decode a route; cached per key                                                    |
+| `p.universe.space.el`        | `HTMLElement`                            | the current space's element; root for all queries and appends                             |
+| `p.universe.read(i?)`        | `(number?) => Map`                       | per-(frame, space) state map; survives re-render; defaults to the currently focused space |
+| `p.universe.write(k, v, i?)` | `(string, any, number?) => void`         | persist `k → v` into the state map; same default caveat as `read`                         |
+| `p.universe.sync()`          | `() => void`                             | re-render visible spaces                                                                  |
+| `p.input.tap(fn)`            | `(g => void) => void`                    | register tap handler for the focused space                                                |
+| `p.keyboard.keyNav(binds)`   | `(object) => void`                       | register key handlers for the focused space                                               |
 
 ### `p.input.tap(fn)`
 
@@ -193,10 +204,16 @@ Reserved keys handled by the shell (do not bind): `q` `e` (nav), `1` `2` `3` (la
 
 State is a `Map` keyed to the (frame, space) pair. The same frame in two spaces has two independent maps. Persist only serializable view state (indices, scroll offsets, toggles).
 
+`read()`/`write()` default their space index to `p.universe.state.focused` — but that value is only guaranteed correct **synchronously during construction** (the shell sets it right before executing the frame's script). Any code that runs later — a promise callback, an event listener, a `keyNav`/`tap` handler firing on user input — must not rely on the default, because by then a *different* space may be focused. Capture the index once, up front, and pass it explicitly everywhere else:
+
 ```js
-this.index = p.universe.read().get('index') ?? 0;
-// ...
-p.universe.write('index', this.index);
+constructor(p) {
+  this.i = p.universe.state.focused;      // capture once, synchronously
+  this.index = p.universe.read(this.i).get('index') ?? 0;
+  // ...
+}
+// later, from a promise/event/keyNav callback:
+p.universe.write('index', this.index, this.i);
 ```
 
 ---
@@ -231,17 +248,8 @@ Consequences for the frame root (`.<framename>`):
 Because the data is fixed at build time, the agent should tailor the frame to it rather than generalize:
 
 - Choose interactions that fit the data's shape: paging for sequences, taps on halves for prev/next, `keyNav` for scrubbing/scrolling, per-record expansion for hierarchies.
-- One small class per record type; recurse for nested collections.
+- Author the shell to mirror the data: root container div plus one static structure per record type, repeated/nested in the markup as the known data dictates.
+- The script queries the shell (`p.universe.space.el.querySelector('.<framename>')`), registers input, and populates dynamic slots via `textContent` / `src`.
 - Decode each route's bytes according to its known format (`entry.data` for text/structured data, `entry.url` for media) — never a second network fetch.
 - Reference bundle entries by index (`sort.txt` order); emit the `sort.txt` alongside any index-referencing data the agent authors.
-- Build all DOM with `createElement` + `textContent`.
-- Append the built tree under `p.universe.space.el.querySelector('.<framename>')`.
 - Persist only view state through `p.universe.read()` / `p.universe.write()`.
-````
-
-Structural changes from my previous draft, per your framing:
-
-- **New intro** states the workflow explicitly: developer provides known data of any kind → agent picks template or authors a `CustomHTML` frame designed for that data.
-- **Templates promoted to §1** as the first decision (the "brainless" path), instead of being an afterthought at the end.
-- **Data generalized** throughout — "any bytes" framing, JSON demoted to one example among structured-text formats.
-- **New §7** replaces the old buried "pattern summary": design guidance for tailoring a frame to known data, including that the agent emits `sort.txt` when it authors index-referencing data.
