@@ -31,28 +31,13 @@
 		font-size: clamp(1rem, 5cqw, 3rem);
 		margin: 0 0 auto 0;
 	}
-	.home button {
-		padding: 0.5em 1.5em;
-		font-size: clamp(1rem, 2cqw, 1.5rem);
-		background: black;
-		color: #fff;
-		border-radius: 5px;
-		cursor: pointer;
-		border: none;
-		margin-bottom: 2em;
-		display: none;
-	}
-	.home button.show {
-		display: block;
-	}
-	.home kbd {
-		border: 2px solid blue;
-		padding: 0.3em 0.6em;
-		border-radius: 3px;
-		font-weight: bold;
-		margin-left: 0.3em;
-	}
 </style>
+
+<div class="home">
+	<div class="logo">{{.LOGO}}</div>
+	<h1>{{.HEADING}}</h1>
+</div>
+
 <script>
 	{
 		class Home {
@@ -66,7 +51,6 @@
 				}
 			}
 		}
-
 		new Home(pathless);
 	}
 </script>

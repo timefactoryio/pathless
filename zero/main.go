@@ -15,9 +15,6 @@ var pathlessHtml string
 //go:embed universe.html
 var universeHtml []byte
 
-//go:embed input.html
-var inputHtml []byte
-
 //go:embed keyboard.html
 var keyboardHtml []byte
 
@@ -45,10 +42,9 @@ func NewZero(origin, circuit string) *Zero {
 	if err := tmpl.Execute(&b, map[string]string{"CIRCUIT": circuit}); err != nil {
 		panic(err)
 	}
-	// Fold input/keyboard into the universe payload delivered as item 0.
-	universe := make([]byte, 0, len(universeHtml)+len(inputHtml)+len(keyboardHtml))
+	// Fold keyboard into the universe payload delivered as item 0.
+	universe := make([]byte, 0, len(universeHtml)+len(keyboardHtml))
 	universe = append(universe, universeHtml...)
-	universe = append(universe, inputHtml...)
 	universe = append(universe, keyboardHtml...)
 	return &Zero{
 		Pathless: minify(b.String()),
@@ -59,44 +55,21 @@ func NewZero(origin, circuit string) *Zero {
 }
 
 // minify: <style> -> <script> -> <html>
+// minify aggressively strips pathless.html's <style>/<script> markup down to
+// its minimum byte size, then gzip-compresses the result. This is hand-tuned
+// for pathless.html's exact content — not a general-purpose minifier.
 func minify(html string) []byte {
 	html = regexp.MustCompile(`<style>([\s\S]*?)</style>`).ReplaceAllStringFunc(html, func(s string) string {
-		s = regexp.MustCompile(`/\*[\s\S]*?\*/`).ReplaceAllString(s, "")
 		s = regexp.MustCompile(`\s*([{}:;,>+~])\s*`).ReplaceAllString(s, "$1")
-		s = regexp.MustCompile(`;\s*}`).ReplaceAllString(s, "}")
-		s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
-		s = strings.ReplaceAll(s, "0px", "0")
-		s = strings.ReplaceAll(s, "0em", "0")
-		s = strings.ReplaceAll(s, "0%", "0")
-		s = strings.ReplaceAll(s, " 0 0 0 0", " 0")
-		s = strings.ReplaceAll(s, ":0 0 0 0", ":0")
-		s = strings.ReplaceAll(s, "<style> ", "<style>")
-		s = strings.ReplaceAll(s, " </style>", "</style>")
-		return s
+		return strings.ReplaceAll(s, ";}", "}")
 	})
 	html = regexp.MustCompile(`<script>([\s\S]*?)</script>`).ReplaceAllStringFunc(html, func(s string) string {
-		s = regexp.MustCompile(`//[^\n]*\n`).ReplaceAllString(s, "\n")
-		s = regexp.MustCompile(`/\*[\s\S]*?\*/`).ReplaceAllString(s, "")
 		s = regexp.MustCompile(`\s*([=+\-*/<>!&|?:,;{}()\[\]])\s*`).ReplaceAllString(s, "$1")
-		for _, kw := range []string{"const", "let", "var", "return", "async", "await", "function", "if", "else", "for", "of", "in", "new", "throw", "typeof", "instanceof"} {
-			s = strings.ReplaceAll(s, kw+"(", kw+" (")
-			s = strings.ReplaceAll(s, kw+"{", kw+" {")
-		}
-		s = regexp.MustCompile(`\n+`).ReplaceAllString(s, "\n")
-		s = regexp.MustCompile(`\t+`).ReplaceAllString(s, "")
-		s = regexp.MustCompile(`  +`).ReplaceAllString(s, " ")
-		s = regexp.MustCompile(`\n\s*\n`).ReplaceAllString(s, "\n")
-		s = regexp.MustCompile(`([;{},])\n`).ReplaceAllString(s, "$1")
-		s = regexp.MustCompile(`\n([;})])`).ReplaceAllString(s, "$1")
-		s = strings.ReplaceAll(s, "<script>\n", "<script>")
-		s = strings.ReplaceAll(s, "\n</script>", "</script>")
-		return s
+		return strings.ReplaceAll(s, ";}", "}")
 	})
-	html = regexp.MustCompile(`<!--[\s\S]*?-->`).ReplaceAllString(html, "")
 	html = regexp.MustCompile(`>\s+<`).ReplaceAllString(html, "><")
 	html = regexp.MustCompile(`\s+`).ReplaceAllString(html, " ")
 	html = strings.ReplaceAll(html, " />", ">")
-	html = strings.ReplaceAll(html, "\" >", "\">")
 	html = strings.TrimSpace(html)
 
 	var buf bytes.Buffer

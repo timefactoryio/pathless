@@ -43,6 +43,6 @@ func NewPathless(args ...string) *Pathless {
 		log.Fatalf("NewPathless: expected 0 or 2 arguments, got %d", len(args))
 	}
 	z := zero.NewZero(origin, circuit)
-	x := fx.NewFx(z)
+	x := fx.NewFx()
 	return &Pathless{Zero: z, Fx: x, One: one.NewOne(z, x)}
 }

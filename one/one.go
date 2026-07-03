@@ -56,7 +56,6 @@ func (o *One) cors(next http.Handler) http.Handler {
 }
 
 func (o *One) Serve() {
-	// The root response is the universe (item 0) followed by every frame.
 	root := &fx.Value{Values: []*fx.Value{{Type: "text/html", Data: o.Universe}}}
 	for _, b := range o.Frames() {
 		root.Values = append(root.Values, &fx.Value{Type: "text/html", Data: b})

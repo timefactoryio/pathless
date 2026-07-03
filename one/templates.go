@@ -2,7 +2,6 @@ package one
 
 import (
 	"bytes"
-	"os"
 
 	_ "embed"
 	"fmt"
@@ -10,8 +9,6 @@ import (
 	"html/template"
 	"path/filepath"
 	"strings"
-
-	"github.com/timefactoryio/pathless/fx"
 )
 
 //go:embed templates/home.html
@@ -24,13 +21,38 @@ var slidesHtml string
 var textHtml string
 
 func (o *One) Home(logo, heading string) {
-	tmpl := template.HTML(homeHtml)
-	logoDiv := o.Block("div", fx.Attr{"class": "logo"}, o.HTML(string(o.Logo(logo))))
-	h1 := o.Elem("h1", heading)
-	kbd := o.Elem("kbd", "Z")
-	button := o.Block("button", nil, o.HTML("Press"), kbd)
-	root := o.Block("div", fx.Attr{"class": "home"}, logoDiv, h1, button)
-	o.Build(&tmpl, root)
+	tmpl, err := template.New("home").Parse(homeHtml)
+	if err != nil {
+		return
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, map[string]any{
+		"LOGO":    o.Logo(logo),
+		"HEADING": heading,
+	}); err != nil {
+		return
+	}
+	result := template.HTML(buf.String())
+	o.Build(&result)
+}
+
+func (o *One) Logo(path string) template.HTML {
+	ext := filepath.Ext(path)
+	if strings.ToLower(ext) == ".svg" {
+		if b, err := o.ToBytes(path); err == nil {
+			return template.HTML(b)
+		}
+	}
+
+	attr, src := "src", path
+	if !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") {
+		o.Load(path)
+		attr, src = "data-src", o.Origin+"/"+filepath.Base(path)
+	}
+	alt := strings.TrimSuffix(filepath.Base(path), ext)
+	return template.HTML(fmt.Sprintf(`<img %s="%s" alt="%s">`,
+		attr, html.EscapeString(src), html.EscapeString(alt),
+	))
 }
 
 func (o *One) Text(path string) {
@@ -38,14 +60,22 @@ func (o *One) Text(path string) {
 	if err != nil {
 		return
 	}
-	var buf bytes.Buffer
-	if err := o.Markdown().Convert(content, &buf); err != nil {
+	var md bytes.Buffer
+	if err := o.Markdown().Convert(content, &md); err != nil {
 		return
 	}
-	markdown := template.HTML(buf.String())
-	textTmpl := template.HTML(textHtml)
-	root := o.Block("div", fx.Attr{"class": "text"}, &markdown)
-	o.Build(&textTmpl, root)
+	tmpl, err := template.New("text").Parse(textHtml)
+	if err != nil {
+		return
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, map[string]any{
+		"MARKDOWN": template.HTML(md.String()),
+	}); err != nil {
+		return
+	}
+	result := template.HTML(buf.String())
+	o.Build(&result)
 }
 
 func (o *One) Slides(dir string) {
@@ -61,36 +91,4 @@ func (o *One) Slides(dir string) {
 	}
 	result := template.HTML(buf.String())
 	o.Build(&result)
-}
-
-// CustomHTML registers a frame from a local file. The file authors its own
-// root container div (by convention <div class="<filename stem>">).
-func (o *One) CustomHTML(path string) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	raw := template.HTML(data)
-	o.Build(&raw)
-}
-func (o *One) Logo(path string) template.HTML {
-	if strings.ToLower(filepath.Ext(path)) == ".svg" {
-		if b, err := o.ToBytes(path); err == nil {
-			return template.HTML(b)
-		}
-	}
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		alt := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-		return template.HTML(fmt.Sprintf(`<img src="%s" alt="%s">`,
-			html.EscapeString(path),
-			html.EscapeString(alt),
-		))
-	}
-	o.Load(path)
-	base := filepath.Base(path)
-	alt := strings.TrimSuffix(base, filepath.Ext(base))
-	return template.HTML(fmt.Sprintf(`<img data-src="%s" alt="%s">`,
-		html.EscapeString(o.Origin+"/"+base),
-		html.EscapeString(alt),
-	))
 }
