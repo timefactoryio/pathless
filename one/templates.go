@@ -20,6 +20,9 @@ var slidesHtml string
 //go:embed templates/text.html
 var textHtml string
 
+//go:embed templates/keyboard.html
+var keyboardHtml string
+
 func (o *One) Home(logo, heading string) {
 	tmpl, err := template.New("home").Parse(homeHtml)
 	if err != nil {
@@ -91,4 +94,11 @@ func (o *One) Slides(dir string) {
 	}
 	result := template.HTML(buf.String())
 	o.Build(&result)
+}
+
+// Keyboard registers the default keyboard as a panel frame — an example of
+// a self-contained panel frame template, same shape as Home/Text/Slides.
+func (o *One) Keyboard() {
+	result := template.HTML(keyboardHtml)
+	o.BuildPanel(&result)
 }

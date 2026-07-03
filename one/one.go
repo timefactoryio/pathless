@@ -61,6 +61,15 @@ func (o *One) Serve() {
 		root.Values = append(root.Values, &fx.Value{Type: "text/html", Data: b})
 	}
 	o.wire("/", o.Compress(o.Encode(root)))
+
+	if panels := o.Panels(); len(panels) > 0 {
+		panelRoot := &fx.Value{}
+		for _, b := range panels {
+			panelRoot.Values = append(panelRoot.Values, &fx.Value{Type: "text/html", Data: b})
+		}
+		o.wire("/panel", o.Compress(o.Encode(panelRoot)))
+	}
+
 	for key, v := range o.Fx.Routes {
 		o.wire("/"+key, o.Compress(o.Encode(v)))
 	}

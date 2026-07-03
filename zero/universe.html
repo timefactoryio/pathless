@@ -16,11 +16,6 @@
 					el: document.getElementById(id),
 					frame: 0,
 				}));
-				this.panel = document.body.appendChild(
-					document.createElement('div'),
-				);
-				this.panel.id = 'panel';
-				this.panel.hidden = true;
 				this.frames = [];
 				this.store = new Map();
 				this.state = { focused: 0, prev: null, l: 0, v: 0 };
@@ -104,10 +99,6 @@
 				this.pathless.keyboard?.update();
 			}
 
-			toggle() {
-				this.panel.hidden = !this.panel.hidden;
-			}
-
 			at(clientX, clientY, r) {
 				return [
 					(2 * (clientX - r.left)) / (r.width || 1) - 1,
@@ -161,7 +152,7 @@
 				tab: { fn: (u) => u.focus() },
 				q: { fn: (u) => u.nav(-1), desc: 'back', touch: 'swipeLeft' },
 				e: { fn: (u) => u.nav(1), desc: 'next', touch: 'swipeRight' },
-				z: { fn: (u) => u.toggle() },
+				z: { fn: (u) => u.pathless.panel.toggle() },
 			};
 
 			static gestureNames = Object.fromEntries(

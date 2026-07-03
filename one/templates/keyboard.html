@@ -110,10 +110,7 @@
 			constructor(pathless) {
 				this.pathless = pathless;
 				this.universe = pathless.universe;
-				this.el = this.universe.panel;
-				const kb = this.el.appendChild(
-					document.querySelector('.keyboard'),
-				);
+				const kb = pathless.panel.el.querySelector('.keyboard');
 
 				for (const [key, { desc }] of Object.entries(
 					pathless.input.constructor.shellNames,
@@ -121,13 +118,12 @@
 					this.#tile(kb, key, desc);
 
 				new MutationObserver(() => {
-					if (!this.el.hidden) this.update();
-				}).observe(this.el, {
+					if (!pathless.panel.el.hidden) this.update();
+				}).observe(pathless.panel.el, {
 					attributes: true,
 					attributeFilter: ['hidden'],
 				});
 			}
-
 			#tile(kb, key, desc) {
 				const el = document.createElement('div');
 				el.className = 'key';
@@ -149,9 +145,19 @@
 			}
 
 			update() {
-				const { l: layout, v: variant, focused } = this.universe.state;
+				const {
+					l: layout,
+					v: variant,
+					prev,
+					focused,
+				} = this.universe.state;
 				const { variants } = this.universe.constructor;
 				Keyboard.#layoutKeys.forEach((key, i) => {
+					if (i === 0 && layout === 0 && prev) {
+						const [pl, pv] = prev;
+						this.#icon(key, Keyboard.#svgs[pl][pv][focused + 1]);
+						return;
+					}
 					const next = i === layout ? (variant + 1) % variants[i] : 0;
 					this.#icon(key, Keyboard.#svgs[i][next][0]);
 				});

@@ -13,12 +13,14 @@ import (
 type Fx struct {
 	*Circuit
 	frames []*template.HTML
+	panels []*template.HTML
 	md     *markdown.Markdown
 }
 
 func NewFx() *Fx {
 	return &Fx{
 		frames:  []*template.HTML{},
+		panels:  []*template.HTML{},
 		md:      markdown.New(""),
 		Circuit: NewCircuit(),
 	}
@@ -109,4 +111,29 @@ func (f *Fx) consolidateAssets(s string) string {
 		s += openBlock + scripts.String() + closeBlock
 	}
 	return s
+}
+
+func (f *Fx) Panels(panel ...*template.HTML) [][]byte {
+	if len(panel) > 0 && panel[0] != nil {
+		f.panels = append(f.panels, panel[0])
+	}
+	out := make([][]byte, 0, len(f.panels))
+	for _, p := range f.panels {
+		if p != nil {
+			out = append(out, []byte(*p))
+		}
+	}
+	return out
+}
+
+// BuildPanel registers a panel frame from its elements, consolidated the
+// same way Build consolidates space frames.
+func (f *Fx) BuildPanel(elements ...*template.HTML) {
+	var b strings.Builder
+	for _, el := range elements {
+		b.WriteString(string(*el))
+	}
+	cleaned := f.consolidateAssets(b.String())
+	result := template.HTML(cleaned)
+	f.Panels(&result)
 }
