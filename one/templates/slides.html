@@ -27,12 +27,11 @@
 				this.img = p.universe.space.el.querySelector('.slides img');
 				this.entries = [];
 				this.index = read().get(prefix) || 0;
-				const nav = (d) => () => this.show(this.index + d);
 				p.input.bind({
-					tapLeft: nav(-1),
-					tapRight: nav(1),
-					a: { down: nav(-1) },
-					d: { down: nav(1) },
+					tapLeft: () => this.show(this.index - 1),
+					tapRight: () => this.show(this.index + 1),
+					a: { down: () => this.show(this.index - 1) },
+					d: { down: () => this.show(this.index + 1) },
 				});
 				p.source(prefix).then((entries) => {
 					this.entries = entries;

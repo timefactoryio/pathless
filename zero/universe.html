@@ -1,7 +1,6 @@
 <div id="zero"></div>
 <div id="fx" hidden></div>
 <div id="one" hidden></div>
-<div id="panel" hidden></div>
 
 <script>
 	{
@@ -14,11 +13,14 @@
 				this.pathless = pathless;
 				this.el = document.getElementById('universe');
 				this.spaces = Universe.ids.map((id) => ({
-					id,
 					el: document.getElementById(id),
 					frame: 0,
 				}));
-				this.panel = document.getElementById('panel');
+				this.panel = document.body.appendChild(
+					document.createElement('div'),
+				);
+				this.panel.id = 'panel';
+				this.panel.hidden = true;
 				this.frames = [];
 				this.store = new Map();
 				this.state = { focused: 0, prev: null, l: 0, v: 0 };
@@ -42,7 +44,7 @@
 
 			read(i = this.state.focused) {
 				const s = this.spaces[i];
-				const key = s.frame + ':' + s.id;
+				const key = s.frame + ':' + s.el.id;
 				let m = this.store.get(key);
 				if (!m) this.store.set(key, (m = new Map()));
 				return m;
@@ -50,9 +52,6 @@
 			write(key, val, i = this.state.focused) {
 				this.read(i).set(key, val);
 			}
-			// pin captures the focused index once (correct only synchronously
-			// during construction) and returns read/write bound to it, so
-			// frames never need to thread an index through later callbacks.
 			pin(i = this.state.focused) {
 				return {
 					i,
@@ -109,7 +108,6 @@
 				this.panel.hidden = !this.panel.hidden;
 			}
 
-			// at: client pixel -> [-1, 1] within a rect.
 			at(clientX, clientY, r) {
 				return [
 					(2 * (clientX - r.left)) / (r.width || 1) - 1,
@@ -117,10 +115,6 @@
 				];
 			}
 
-			// press: hit-tests the point against visible spaces, focuses the
-			// one it lands in, and returns { i, close } to track the gesture
-			// to completion. Returns null if the point isn't inside any
-			// visible space.
 			press(clientX, clientY) {
 				for (const i of this.visible()) {
 					const r = this.spaces[i].el.getBoundingClientRect();
@@ -144,19 +138,17 @@
 				return null;
 			}
 
-			// classify: the declarative gesture name of a->b — 'tap', 'swipeLeft',
-			// 'swipeRight', or null for a drag that doesn't qualify as either.
 			classify(a, b) {
 				const dx = b[0] - a[0],
 					dy = b[1] - a[1];
 				const distance = Math.abs(dx) + Math.abs(dy);
-				if (distance < this.tap) return 'tap';
+				if (distance < this.tap)
+					return 'tap' + (b[0] >= 0 ? 'Right' : 'Left');
 				if (Math.abs(dx) < Math.abs(dy) || distance < this.swipe)
 					return null;
 				return 'swipe' + (dx >= 0 ? 'Right' : 'Left');
 			}
 		}
-
 		pathless.universe = new Universe(pathless);
 	}
 </script>

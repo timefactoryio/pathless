@@ -59,6 +59,8 @@
 	}
 </style>
 
+<div class="keyboard"></div>
+
 <script>
 	{
 		class Keyboard {
@@ -87,8 +89,9 @@
 					TR = [455, 25, 415, 258],
 					BL = [25, 313, 415, 258],
 					BR = [455, 313, 415, 258];
+				const full = el('', '#00f');
 				return [
-					[[v(), full(), full(), full()]],
+					[[v(), full, full, full]],
 					[
 						[v(V), f(LF, V), f(RF, V), f(RF, V)],
 						[v(H), f(TF, H), f(BF, H), f(BF, H)],
@@ -100,30 +103,22 @@
 						[v(H, VT), f(BF, H, VT), f(TL, H, VT), f(TR, H, VT)],
 					],
 				];
-
-				function full() {
-					return el('', '#00f');
-				}
 			})();
 
+			static #layoutKeys = ['1', '2', '3'];
 			#keys = new Map();
-
 			constructor(pathless) {
 				this.pathless = pathless;
-				const universe = (this.universe = pathless.universe);
-				this.el = universe.panel;
-				const kb = this.el.appendChild(document.createElement('div'));
-				kb.className = 'keyboard';
+				this.universe = pathless.universe;
+				this.el = this.universe.panel;
+				const kb = this.el.appendChild(
+					document.querySelector('.keyboard'),
+				);
 
 				for (const [key, { desc }] of Object.entries(
 					pathless.input.constructor.shellNames,
-				)) {
-					const el = kb.appendChild(document.createElement('div'));
-					el.className = 'key';
-					el.dataset.key = key;
-					el.innerHTML = `<div>${key}</div><div>${desc ?? ''}</div>`;
-					this.#keys.set(key, el);
-				}
+				))
+					this.#tile(kb, key, desc);
 
 				new MutationObserver(() => {
 					if (!this.el.hidden) this.update();
@@ -133,27 +128,36 @@
 				});
 			}
 
-			// flash toggles the pressed-visual for a shell-reserved key.
-			// Called by Input.dispatch; a no-op for names with no tile.
+			#tile(kb, key, desc) {
+				const el = document.createElement('div');
+				el.className = 'key';
+				el.dataset.key = key;
+				el.innerHTML = `<div>${key}</div><div>${desc ?? ''}</div>`;
+				kb.appendChild(el);
+				this.#keys.set(key, el);
+			}
+
+			#icon(key, svg) {
+				this.#keys.get(key).lastElementChild.innerHTML = svg;
+			}
+
 			flash(key, on) {
 				const el = this.#keys.get(key);
-				if (el)
-					on ? (el.dataset.state = 'true') : delete el.dataset.state;
+				if (!el) return;
+				if (on) el.dataset.state = 'true';
+				else delete el.dataset.state;
 			}
 
 			update() {
 				const { l: layout, v: variant, focused } = this.universe.state;
-				['1', '2', '3'].forEach((key, i) => {
-					const next =
-						i === layout ? (variant + 1) % [1, 2, 4][i] : 0;
-					this.#keys.get(key).lastElementChild.innerHTML =
-						Keyboard.#svgs[i][next][0];
+				const { variants } = this.universe.constructor;
+				Keyboard.#layoutKeys.forEach((key, i) => {
+					const next = i === layout ? (variant + 1) % variants[i] : 0;
+					this.#icon(key, Keyboard.#svgs[i][next][0]);
 				});
-				this.#keys.get('tab').lastElementChild.innerHTML =
-					Keyboard.#svgs[layout][variant][focused + 1];
+				this.#icon('tab', Keyboard.#svgs[layout][variant][focused + 1]);
 			}
 		}
-
 		pathless.keyboard = new Keyboard(pathless);
 		pathless.keyboard.update();
 	}

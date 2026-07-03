@@ -125,22 +125,10 @@
 			}
 		</style>
 		<script>
-			let lastTouch = 0;
-			for (const t of ['touchstart', 'touchend'])
-				document.addEventListener(
-					t,
-					(e) => {
-						const now = Date.now();
-						if (now - lastTouch < 300) e.preventDefault();
-						lastTouch = now;
-					},
-					{ passive: false },
-				);
 			window.circuit = '{{.CIRCUIT}}'.replace(
 				'localhost',
 				location.hostname,
 			);
-
 			class Pathless {
 				#td = new TextDecoder();
 				#range = document.createRange();
@@ -148,7 +136,6 @@
 					this.cache = new Map();
 					this.init();
 				}
-
 				decode(bytes) {
 					const view = new DataView(
 						bytes.buffer,
@@ -171,7 +158,6 @@
 					}
 					return frames;
 				}
-
 				source(path = '') {
 					let p = this.cache.get(path);
 					if (!p) {
@@ -183,9 +169,7 @@
 									return Object.defineProperty(e, 'url', {
 										get: () =>
 											(u ??= URL.createObjectURL(
-												new Blob([e.data], {
-													type: e.type,
-												}),
+												new Blob([e.data], e),
 											)),
 									});
 								}),
@@ -194,7 +178,6 @@
 					}
 					return p;
 				}
-
 				exec(el, data) {
 					el.replaceChildren(
 						this.#range.createContextualFragment(
@@ -202,7 +185,6 @@
 						),
 					);
 				}
-
 				async init() {
 					const [universe, ...frames] = await this.source();
 					this.exec(
@@ -212,7 +194,6 @@
 					this.universe.init(frames.map((f) => f.data));
 				}
 			}
-
 			document.addEventListener('DOMContentLoaded', () => {
 				window.pathless = new Pathless();
 			});

@@ -28,6 +28,18 @@
 					this.universe.el.addEventListener(t, this, o);
 				window.addEventListener('keydown', this);
 				window.addEventListener('keyup', this);
+
+				let lastTouch = 0;
+				const blockDoubleTap = (e) => {
+					if (Date.now() - lastTouch < 300) e.preventDefault();
+					lastTouch = Date.now();
+				};
+				document.addEventListener('touchstart', blockDoubleTap, {
+					passive: false,
+				});
+				document.addEventListener('touchend', blockDoubleTap, {
+					passive: false,
+				});
 			}
 
 			handleEvent(e) {
@@ -50,8 +62,6 @@
 				this.#active.delete(pointerId);
 			}
 
-			// key: shared body for keydown/keyup, kept as separate methods
-			// since handleEvent dispatches by exact event-type name.
 			key(e, phase) {
 				return {
 					i: this.universe.state.focused,
