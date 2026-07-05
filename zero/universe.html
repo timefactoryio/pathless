@@ -152,7 +152,7 @@
 				tab: { fn: (u) => u.focus() },
 				q: { fn: (u) => u.nav(-1), desc: 'back', touch: 'swipeLeft' },
 				e: { fn: (u) => u.nav(1), desc: 'next', touch: 'swipeRight' },
-				z: { fn: (u) => u.pathless.panel.toggle() },
+				z: { fn: (u) => u.panel.toggle() },
 			};
 
 			static gestureNames = Object.fromEntries(
@@ -242,8 +242,33 @@
 				return this;
 			}
 		}
+		class Panel {
+			constructor(pathless) {
+				this.pathless = pathless;
+				this.el = document.getElementById('panel');
+				this.frames = [];
+			}
+
+			init(frames = []) {
+				this.frames = frames;
+				this.show(this.pathless.universe.space.frame);
+			}
+
+			toggle() {
+				this.el.hidden = !this.el.hidden;
+			}
+
+			show(i) {
+				if (!this.frames.length) return;
+				this.pathless.exec(
+					this.el,
+					this.frames[i % this.frames.length],
+				);
+			}
+		}
 
 		pathless.universe = new Universe(pathless);
 		pathless.input = new Input(pathless);
+		pathless.universe.panel = new Panel(pathless);
 	}
 </script>

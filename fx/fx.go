@@ -57,17 +57,11 @@ func (f *Fx) Build(elements ...*template.HTML) {
 	f.Frames(&result)
 }
 
-func (f *Fx) Frames(frame ...*template.HTML) [][]byte {
+func (f *Fx) Frames(frame ...*template.HTML) *Value {
 	if len(frame) > 0 && frame[0] != nil {
 		f.frames = append(f.frames, frame[0])
 	}
-	out := make([][]byte, 0, len(f.frames))
-	for _, fr := range f.frames {
-		if fr != nil {
-			out = append(out, []byte(*fr))
-		}
-	}
-	return out
+	return f.bundle(f.frames)
 }
 
 // Markdown returns the configured goldmark instance for rendering markdown to HTML.
@@ -113,27 +107,52 @@ func (f *Fx) consolidateAssets(s string) string {
 	return s
 }
 
-func (f *Fx) Panels(panel ...*template.HTML) [][]byte {
-	if len(panel) > 0 && panel[0] != nil {
-		f.panels = append(f.panels, panel[0])
+// Panel builds a panel frame from a local file. It does not register the
+// frame — pass the result to Panels(...) to do that.
+func (f *Fx) Panel(path string) *template.HTML {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
 	}
-	out := make([][]byte, 0, len(f.panels))
-	for _, p := range f.panels {
-		if p != nil {
-			out = append(out, []byte(*p))
-		}
-	}
-	return out
+	raw := template.HTML(data)
+	return f.BuildPanel(&raw)
 }
 
-// BuildPanel registers a panel frame from its elements, consolidated the
-// same way Build consolidates space frames.
-func (f *Fx) BuildPanel(elements ...*template.HTML) {
+// BuildPanel consolidates elements into a single panel frame, the same way
+// Build consolidates space frames. It does not register the frame — pass
+// the result to Panels(...) to do that.
+func (f *Fx) BuildPanel(elements ...*template.HTML) *template.HTML {
 	var b strings.Builder
 	for _, el := range elements {
-		b.WriteString(string(*el))
+		if el != nil {
+			b.WriteString(string(*el))
+		}
 	}
 	cleaned := f.consolidateAssets(b.String())
 	result := template.HTML(cleaned)
-	f.Panels(&result)
+	return &result
+}
+
+// Panels registers any given panel frames, then returns the wire payload
+// for every panel frame registered so far.
+func (f *Fx) Panels(panels ...*template.HTML) *Value {
+	for _, p := range panels {
+		if p != nil {
+			f.panels = append(f.panels, p)
+		}
+	}
+	return f.bundle(f.panels)
+}
+
+// bundle wraps frames as text/html leaves and pre-encodes them into a single
+// application/octet-stream Value for the client to decode as a nested bundle.
+func (f *Fx) bundle(frames []*template.HTML) *Value {
+	if len(frames) == 0 {
+		return nil
+	}
+	values := make([]*Value, len(frames))
+	for i, fr := range frames {
+		values[i] = &Value{Type: "text/html", Data: []byte(*fr)}
+	}
+	return &Value{Type: "application/octet-stream", Data: f.Encode(&Value{Values: values})}
 }

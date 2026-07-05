@@ -15,9 +15,6 @@ var pathlessHtml string
 //go:embed universe.html
 var universeHtml []byte
 
-//go:embed panel.html
-var panelHtml string
-
 // Zero holds the compiled HTML shell (Pathless) and the universe payload.
 // Origin is the CORS-allowed root domain; Circuit is the API endpoint URL
 // baked into the shell at build time. Universe is the single item-0 blob:
@@ -42,12 +39,9 @@ func NewZero(origin, circuit string) *Zero {
 	if err := tmpl.Execute(&b, map[string]string{"CIRCUIT": circuit}); err != nil {
 		panic(err)
 	}
-	universe := make([]byte, 0, len(universeHtml)+len(panelHtml))
-	universe = append(universe, universeHtml...)
-	universe = append(universe, panelHtml...)
 	return &Zero{
 		Pathless: minify(b.String()),
-		Universe: universe,
+		Universe: universeHtml,
 		Origin:   origin,
 		Circuit:  circuit,
 	}

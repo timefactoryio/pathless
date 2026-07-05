@@ -96,9 +96,10 @@ func (o *One) Slides(dir string) {
 	o.Build(&result)
 }
 
-// Keyboard registers the default keyboard as a panel frame — an example of
-// a self-contained panel frame template, same shape as Home/Text/Slides.
-func (o *One) Keyboard() {
+// Keyboard builds the default keyboard panel frame — an example of a
+// self-contained panel frame template, same shape as Home/Text/Slides.
+// Pass the result to Panels(...) to register it.
+func (o *One) Keyboard() *template.HTML {
 	result := template.HTML(keyboardHtml)
-	o.BuildPanel(&result)
+	return o.BuildPanel(&result)
 }

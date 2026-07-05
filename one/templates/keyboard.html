@@ -110,7 +110,8 @@
 			constructor(pathless) {
 				this.pathless = pathless;
 				this.universe = pathless.universe;
-				const kb = pathless.panel.el.querySelector('.keyboard');
+				const kb =
+					pathless.universe.panel.el.querySelector('.keyboard');
 
 				for (const [key, { desc }] of Object.entries(
 					pathless.input.constructor.shellNames,
@@ -118,8 +119,8 @@
 					this.#tile(kb, key, desc);
 
 				new MutationObserver(() => {
-					if (!pathless.panel.el.hidden) this.update();
-				}).observe(pathless.panel.el, {
+					if (!pathless.universe.panel.el.hidden) this.update();
+				}).observe(pathless.universe.panel.el, {
 					attributes: true,
 					attributeFilter: ['hidden'],
 				});

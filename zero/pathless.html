@@ -186,12 +186,19 @@
 					);
 				}
 				async init() {
-					const [universe, ...frames] = await this.source();
+					const [universe, frames, panels] = await this.source();
 					this.exec(
 						document.getElementById('universe'),
 						universe.data,
 					);
-					this.universe.init(frames.map((f) => f.data));
+					this.universe.init(
+						this.decode(frames.data).map((f) => f.data),
+					);
+					if (panels) {
+						this.universe.panel.init(
+							this.decode(panels.data).map((f) => f.data),
+						);
+					}
 				}
 			}
 			document.addEventListener('DOMContentLoaded', () => {
@@ -201,5 +208,6 @@
 	</head>
 	<body>
 		<div id="universe" data-layout="0" data-variant="0"></div>
+		<div id="panel" hidden></div>
 	</body>
 </html>

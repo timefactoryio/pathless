@@ -35,7 +35,8 @@ func (o *One) handlePathless(w http.ResponseWriter, r *http.Request) {
 	w.Write(o.Pathless)
 }
 
-func (o *One) wire(path string, data []byte) {
+func (o *One) wire(path string, v *fx.Value) {
+	data := o.Compress(o.Encode(v))
 	o.circuit.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Encoding", "gzip")
@@ -56,23 +57,19 @@ func (o *One) cors(next http.Handler) http.Handler {
 }
 
 func (o *One) Serve() {
-	root := &fx.Value{Values: []*fx.Value{{Type: "text/html", Data: o.Universe}}}
-	for _, b := range o.Frames() {
-		root.Values = append(root.Values, &fx.Value{Type: "text/html", Data: b})
+	values := []*fx.Value{
+		{Type: "text/html", Data: o.Universe},
+		o.Frames(),
 	}
-	o.wire("/", o.Compress(o.Encode(root)))
-
-	if panels := o.Panels(); len(panels) > 0 {
-		panelRoot := &fx.Value{}
-		for _, b := range panels {
-			panelRoot.Values = append(panelRoot.Values, &fx.Value{Type: "text/html", Data: b})
-		}
-		o.wire("/panel", o.Compress(o.Encode(panelRoot)))
+	if panels := o.Panels(); panels != nil {
+		values = append(values, panels)
 	}
+	o.wire("/", &fx.Value{Values: values})
 
 	for key, v := range o.Fx.Routes {
-		o.wire("/"+key, o.Compress(o.Encode(v)))
+		o.wire("/"+key, v)
 	}
+
 	go http.ListenAndServe(":1001", o.cors(o.circuit))
 	http.ListenAndServe(":1000", o.pathless)
 }
