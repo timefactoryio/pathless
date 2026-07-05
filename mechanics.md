@@ -1,151 +1,18 @@
 # pathless frame specification
 
-pathless renders **frames** — single `.html` files that visualize and interact with data the developer knows ahead of time. The data can be anything expressible as bytes: JSON, markdown, images, CSV, logs, binary formats, generated structures. There is no schema requirement.
+pathless renders **frames** — single `.html` files built for data the developer already knows: its shape, its cardinality, its natural interactions. The data can be anything expressible as bytes — JSON, markdown, images, CSV, logs, binary formats, generated structures — there is no schema requirement. There's also no separate mobile path: one `Input` model resolves mouse, touch, and pen into the same events, and one sizing unit (`cqw`/`cqh`) fits a frame to whatever container it's given. A frame is authored once and rendered wherever it's observed.
 
-This document is the contract for an AI agent working with a developer. Given the developer's data (content, structure, and intent), the agent must:
+This document is the contract for building **one frame**: its file, what it can call at runtime, how it's registered, and how it's served. Frames can be observed side by side in multiple spaces at once — that's a property of the shell's layout system, not something a frame needs to author for, so it isn't covered here.
 
-1. **Prefer a template.** If the data maps cleanly onto a built-in (`Home`, `Text`, `Slides`, `Keyboard`), emit only the one-line `main.go` registration — no HTML authoring.
-2. **Otherwise author a custom frame** via `Frame`: design an HTML shell for visualizing, engaging with, and interacting with that specific data, following the rules below.
+Because the data is known at build time, the frame should be designed *for* it — not as a generic viewer. Match interactions to the data's shape: paging for sequences, taps on halves for prev/next, held keys for scrubbing/scrolling, per-record expansion for hierarchies.
 
-Because the data is known at build time, the frame should be designed *for* it — its shape, its cardinality, its natural interactions — not as a generic viewer.
-
----
-
-## 0. Construction and serving
-
-```go
-p := pathless.NewPathless()                                  // development
-p := pathless.NewPathless("timefactory.io", "api.timefactory.io") // production
-```
-
-- **No arguments** — localhost. The HTML shell is served on `:1000`, the wire gateway on `:1001`, CORS open (`*`).
-- **Two arguments** — `origin` (the domain serving the shell) and `circuit` (the wire gateway host). Both are assumed HTTPS; CORS on the gateway is restricted to the origin. Any other argument count is fatal.
-
-`p.Serve()` is the last call. At that point every registered route is wire-encoded and gzip-compressed **once**; requests are served from memory. Route map:
-
-| Route    | Content                                                      |
-| -------- | ------------------------------------------------------------ |
-| `/`      | the universe payload (item 0) followed by every space frame  |
-| `/panel` | every panel frame (only registered if at least one exists)   |
-| `/<key>` | one bundle per `Load`ed path, keyed by `filepath.Base(path)` |
+The three sections below follow the Go packages a frame touches, in the order it touches them: **zero** (what the frame calls at runtime), **fx** (how the frame's file is authored and registered), **one** (how it's templated and served).
 
 ---
 
-## 1. Path one: templates (the brainless path)
+## The frame file
 
-| Builder                 | Input                                                                              | Produces                                                                                         |
-| ----------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `p.Home(logo, heading)` | `.svg` (inlined), local image (auto-`Load`ed), or `https://` image; heading string | centered logo + `<h1>`                                                                           |
-| `p.Text(path)`          | markdown file (local or `https://`)                                                | rendered HTML, `w`/`s` to scroll, scroll position persisted                                      |
-| `p.Slides(dir)`         | image directory (local), or `https://` URL of a `Save`'d bundle                    | full-screen viewer; tap halves or `a`/`d` to page; index persisted. Internally calls `Load(dir)` |
-| `p.Keyboard()`          | none                                                                               | the default keyboard **panel** — a live map of the shell's reserved keys, layout, and focus      |
-
-`Home`, `Text`, and `Slides` register **space frames**. `Keyboard` registers a **panel frame** (see §2.1). If a template fits, stop here — only the `main.go` line is needed.
-
----
-
-## 2. Path two: custom frames — registration (Go `main.go`)
-
-```go
-package main
-
-import "github.com/timefactoryio/pathless"
-
-func main() {
-    p := pathless.NewPathless()
-
-    // templates and custom frames compose freely
-    p.Home("./logo.svg", "Title")
-
-    // custom data frame: expose the data, register the frame
-    p.Load("./data/catalog.json") // route "catalog.json" (base name of path)
-    p.Load("./pics")              // route "pics"         (directory → bundle)
-    p.Frame("./catalog.html")     // frame; file authors <div class="catalog">
-
-    p.Keyboard()                  // optional: default keyboard panel
-
-    p.Serve()
-}
-```
-
-Rules an agent must follow when emitting `main.go`:
-
-- `p.Frame(path)` registers a space frame. The file authors its own root container div, classed by convention after the filename stem (`catalog.html` → `<div class="catalog">…</div>`). Nothing is wrapped for you. The content is trusted as-is — **local, developer-controlled files only.**
-- `p.Load(path)` exposes a file or directory as a fetchable route. **The route key is `filepath.Base(path)`** — `./data/catalog.json` → `catalog.json`, `./pics` → `pics`. A directory becomes a bundle of all its files. Any file type works — the wire carries typed bytes, and the frame decides how to decode them. MIME type is inferred from extension, with content sniffing as fallback.
-- `p.Load(url)` with an `http(s)://` URL expects a **pre-encoded wire blob** (produced by `Save`) and decodes it back into a bundle. It is not for arbitrary remote files.
-- `p.Save(key)` writes the wire encoding of a loaded route to `s3/<key>`, ready to sync to object storage (e.g. `rclone sync s3 remote:bucket`). A saved route round-trips: `Save("slides")` → upload → `p.Slides("https://bucket.example.com/slides")`.
-- Every route a frame reads via `p.source(...)` **must** be registered with `p.Load(...)` (or by a template that loads internally).
-
-### 2.1 Panel frames
-
-The **panel** is a strip appended below the universe, toggled with `z`, hidden by default. It has its own frame pool, fetched from `/panel` and rendered by `p.panel` (`toggle()`, `nav(dir)`). Register panel frames from Go with `p.BuildPanel(&html)` — same consolidation as space frames — or use the built-in `p.Keyboard()`. A panel frame authors its own root div exactly like a space frame; it renders into `p.panel.el`, not a space.
-
-### 2.2 Ordering: `sort.txt`
-
-Bundle entries carry **no filenames on the wire — order is the contract.** A directory route's order defaults to filesystem walk order. To pin it, place a `sort.txt` in the directory: one file stem (name without extension) per line. Listed files come first, in that order; unlisted files follow. `sort.txt` itself is never included in the bundle.
-
-```
-cover
-intro
-alpha
-```
-
-Frames reference bundle entries **by index**, so `sort.txt` is how data and companion files stay aligned. When the agent designs a data structure alongside a bundle (e.g. records referencing images), it should reference entries by index and emit the matching `sort.txt`.
-
-### 2.3 Wire format
-
-One binary format, both directions. A bundle flattens to its leaves in order; per leaf, back-to-back:
-
-```
-[1B typeLen][type] [4B dataLen (big-endian)][data]
-```
-
-There is no leaf count — the response's length is the terminator. Names are never encoded.
-
----
-
-## 3. Data access (client `p.source`)
-
-```js
-p.source(key) // → Promise<Array<{ type, data, url }>>
-```
-
-- `key` is the route key **without a leading slash**: `p.source('catalog.json')`, `p.source('pics')`. The empty key is reserved for the shell.
-- Each entry:
-  - `type` — MIME type string (`image/avif`, `application/json`, `text/plain`, …)
-  - `data` — `Uint8Array` of the raw bytes, already in memory
-  - `url` — lazy getter; creates a `blob:` object URL from `data` on first access
-- There are **no names**. Entries are identified by position (see `sort.txt`).
-- The promise is cached per key — repeated calls cause one fetch.
-- A single-file route yields a **one-element array**.
-
-Decode `data` however the format requires — the bytes are already local, so no second fetch is ever needed:
-
-```js
-// structured text (JSON here; same idea for CSV, NDJSON, etc.)
-const [entry] = await p.source('catalog.json');
-const data = JSON.parse(new TextDecoder().decode(entry.data));
-
-// media: hand the lazy blob url to the element
-const pics = await p.source('pics');
-img.src = pics[i].url; // index i per sort.txt order
-
-// data + companion bundle, referenced by index
-const [[file], pics] = await Promise.all([
-    p.source('catalog.json'),
-    p.source('pics'),
-]);
-const records = JSON.parse(new TextDecoder().decode(file.data));
-// record { "image": 2 } → pics[2].url
-```
-
----
-
-## 4. Frame anatomy
-
-A frame file has three parts: `<style>`, **static markup (the shell)**, and a `<script>`. The Go build step **automatically**: hoists styles to the top (when a frame has more than one block), wraps every `<script>` body in a `{ }` block if it isn't already, and moves all scripts to the end.
-
-The shell — including its root container div — is authored as divs directly in the HTML. Because the data is known ahead of time, its structure (root, sections, lists, an `<img>` per slot, …) is written statically. The script does **not** build the DOM; it queries the shell, wires interaction, and updates the dynamic slots (`textContent`, `src`, `hidden`, dataset/state attributes).
+A frame is one `.html` file with three parts: `<style>`, static markup (the shell), and a `<script>`. The shell — including its root container div — is authored as divs directly in the HTML. Because the data is known ahead of time, its structure (root, sections, lists, an `<img>` per slot, …) is written statically. The script does **not** build the DOM; it queries the shell, wires interaction, and updates the dynamic slots (`textContent`, `src`, `hidden`, dataset/state attributes).
 
 ```html
 <style>
@@ -178,24 +45,24 @@ The shell — including its root container div — is authored as divs directly 
 
 ### Hard rules
 
-| Rule                                                                                                                                                          | Reason                                                                                                                                                                                                                                                                        |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Wrap script body in `{ }`                                                                                                                                     | scripts re-execute on every render; block scope prevents redeclaration errors (the build wraps unwrapped scripts, but author them wrapped)                                                                                                                                    |
-| No `id` attributes                                                                                                                                            | the same frame may render into multiple spaces simultaneously; ids would collide                                                                                                                                                                                              |
-| Query DOM via `p.universe.space.el.querySelector(...)`, never `document`                                                                                      | isolates per-space DOM                                                                                                                                                                                                                                                        |
-| Never call `addEventListener` for navigation/tap/keys                                                                                                         | use `p.input.bind`; the shell owns input                                                                                                                                                                                                                                      |
-| Read state before registering input; write state before any `sync()`                                                                                          | state must be current at render time                                                                                                                                                                                                                                          |
-| Capture `const { read, write } = p.universe.pin()` at construction; use the returned `read`/`write` in every async callback (promises, event listeners, bind) | the default index reflects whichever space is *currently* focused, evaluated at call time — correct only synchronously during construction. `pin()` captures it once and binds `read`/`write` to it, so an async callback firing later can't spill state into the wrong space |
-| Author the shell as static markup, including the root container div                                                                                           | data is known at build time — structure belongs in HTML, behavior in script                                                                                                                                                                                                   |
-| Update dynamic slots via `textContent` / `src`, never `innerHTML` with data                                                                                   | prevents injection                                                                                                                                                                                                                                                            |
-| All sizing in `cqw` / `cqh`                                                                                                                                   | spaces are containers; `vw`/`vh` break in multi-space layouts                                                                                                                                                                                                                 |
-| Do not set `width`/`height` on the frame root                                                                                                                 | the space sizes it (see §6)                                                                                                                                                                                                                                                   |
+| Rule                                                                                                                         | Reason                                                                                                                                                 |
+| ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Wrap script body in `{ }`                                                                                                    | scripts re-execute on every render; block scope prevents redeclaration errors (the build wraps unwrapped scripts, but author them wrapped)             |
+| No `id` attributes                                                                                                           | the same frame may render into multiple spaces simultaneously; ids would collide                                                                       |
+| Query DOM via `p.universe.space.el.querySelector(...)`, never `document`                                                     | isolates per-space DOM                                                                                                                                 |
+| Never call `addEventListener` for navigation/tap/keys                                                                        | use `p.input.bind`; the shell owns input                                                                                                               |
+| Read state before registering input; write state before any `sync()`                                                         | state must be current at render time                                                                                                                   |
+| Capture `p.universe.pin()` at construction; use its `read`/`write` in every async callback (promises, event listeners, bind) | the default focused index is only valid synchronously during construction — see **State semantics** under [zero](#zero--what-a-frame-calls-at-runtime) |
+| Author the shell as static markup, including the root container div                                                          | data is known at build time — structure belongs in HTML, behavior in script                                                                            |
+| Update dynamic slots via `textContent` / `src`, never `innerHTML` with data                                                  | prevents injection                                                                                                                                     |
+| All sizing in `cqw` / `cqh`, never `vw`/`vh`                                                                                 | a frame is sized by its own container, not the viewport — see **Sizing** under zero                                                                    |
+| Do not set `width`/`height` on the frame root                                                                                | the container that hosts the frame already sizes it                                                                                                    |
 
 ---
 
-## 5. APIs available inside a frame
+## zero — what a frame calls at runtime
 
-`window.pathless` (passed as `p`) is the only global. `p` is the thin wire client; `p.universe`, `p.input`, `p.panel`, and (when the keyboard panel is registered) `p.keyboard` are the modules attached to it.
+`zero` is the browser runtime a frame executes inside. `window.pathless` (passed as `p`) is the only global; `p.universe`, `p.input`, `p.panel`, and (when the keyboard panel is registered) `p.keyboard` are the modules attached to it.
 
 | Member                       | Signature                                | Behavior                                                                                  |
 | ---------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------- |
@@ -207,11 +74,47 @@ The shell — including its root container div — is authored as divs directly 
 | `p.universe.sync(...i)`      | `(...number) => void`                    | re-render the given spaces, or all visible spaces if none given                           |
 | `p.input.bind(binds)`        | `(object) => void`                       | register gesture and key handlers for the focused space                                   |
 | `p.panel.toggle()`           | `() => void`                             | show/hide the panel strip (also bound to reserved key `z`)                                |
-| `p.panel.nav(dir)`           | `(number) => void`                       | page through panel frames                                                                 |
+
+### `p.source(key)` — data access
+
+```js
+p.source(key) // → Promise<Array<{ type, data, url }>>
+```
+
+- `key` is the route key **without a leading slash**: `p.source('catalog.json')`, `p.source('pics')`. The empty key is reserved for the shell.
+- Each entry:
+  - `type` — MIME type string (`image/avif`, `application/json`, `text/plain`, …)
+  - `data` — `Uint8Array` of the raw bytes, already in memory
+  - `url` — lazy getter; creates a `blob:` object URL from `data` on first access
+- There are **no names**. Entries are identified by position (see `sort.txt` under [fx](#fx--authoring-and-registering-a-frame)).
+- The promise is cached per key — repeated calls cause one fetch.
+- A single-file route yields a **one-element array**.
+
+Decode `data` however the format requires — the bytes are already local, so no second fetch is ever needed:
+
+```js
+// structured text (JSON here; same idea for CSV, NDJSON, etc.)
+const [entry] = await p.source('catalog.json');
+const data = JSON.parse(new TextDecoder().decode(entry.data));
+
+// media: hand the lazy blob url to the element
+const pics = await p.source('pics');
+img.src = pics[i].url; // index i per sort.txt order
+
+// data + companion bundle, referenced by index
+const [[file], pics] = await Promise.all([
+    p.source('catalog.json'),
+    p.source('pics'),
+]);
+const records = JSON.parse(new TextDecoder().decode(file.data));
+// record { "image": 2 } → pics[2].url
+```
 
 ### `p.input.bind(binds)`
 
-A frame has exactly one way to register input, for both touch and keyboard: `p.input.bind({...})`. Every trigger — tap or key — is a named property on one plain object, passed in a single call; calling `bind` again replaces the whole set for the focused space. A gesture and a key press are, underneath, the same thing: a named event the shell resolves and routes. One object means a frame thinks about *what* should happen, not *where* the input came from.
+A frame has exactly one way to register input, for both touch and keyboard: `p.input.bind({...})`. Every trigger — tap or key — is a named property on one plain object, passed in a single call; calling `bind` again replaces the whole set for the focused space.
+
+Underneath, a tap and a keypress are the same thing: a named event the shell resolves and routes to one binding table. That's why there's no separate touch/mouse handling to author — a gesture is a literal alias of a key, so a feature bound once works from a thumb or a keyboard.
 
 The value shape tells `bind` what kind of trigger it is:
 
@@ -231,15 +134,13 @@ Gesture names map to a function because a gesture is instantaneous. Key names (a
 
 Reserved names are resolved by the shell before a frame's bindings are ever consulted, so they can't be overridden:
 
-| Name               | Action                                             |
-| ------------------ | -------------------------------------------------- |
-| `q` / `swipeLeft`  | previous frame in the focused space                |
-| `e` / `swipeRight` | next frame in the focused space                    |
-| `1`                | single-space layout ⇄ previous multi-space layout  |
-| `2`                | two-space layout; repeat to cycle its 2 variants   |
-| `3`                | three-space layout; repeat to cycle its 4 variants |
-| `tab`              | move focus to the next visible space               |
-| `z`                | toggle the panel                                   |
+| Name               | Action                                                    |
+| ------------------ | --------------------------------------------------------- |
+| `q` / `swipeLeft`  | previous frame in the focused space                       |
+| `e` / `swipeRight` | next frame in the focused space                           |
+| `1` / `2` / `3`    | space-layout controls — reserved, not available to frames |
+| `tab`              | move focus to the next visible space                      |
+| `z`                | toggle the panel                                          |
 
 Pressing anywhere inside a space also moves focus to it before the gesture is classified.
 
@@ -260,40 +161,119 @@ constructor(p) {
 this.write('index', this.index);
 ```
 
+### Sizing
+
+The container a frame renders into is always a flex child with `container-type: size` already set — that's what enables container query units. `1cqw` = 1% of that container's width, `1cqh` = 1% of its height, correct no matter how many other spaces happen to be on screen at the same time, because sizing is relative to the frame's own container, never the viewport. Use `clamp(min, Ncqw, max)` for fluid type. For a scrollable frame, set `overflow-y: auto` and `height: 100%` on the root.
+
 ---
 
-## 6. Layout contract (CSS the frame inherits)
+## fx — authoring and registering a frame
 
-Three spaces — `#zero`, `#fx`, `#one` — compose into layouts: single (`1`, focused space only), split (`2`, two variants), and a three-space grid (`3`, four variants). The shell provides, for every space:
+```go
+package main
 
-```css
-:is(#zero, #fx, #one) {
-  flex: 1;
-  overflow: hidden;
-  container-type: size;     /* enables cqw / cqh */
-  display: flex;
-  flex-direction: column;
+import "github.com/timefactoryio/pathless"
+
+func main() {
+    p := pathless.NewPathless()
+
+    // templates and custom frames compose freely
+    p.Home("./logo.svg", "Title")
+
+    // custom data frame: expose the data, register the frame
+    p.Load("./data/catalog.json") // route "catalog.json" (base name of path)
+    p.Load("./pics")              // route "pics"         (directory → bundle)
+    p.Frame("./catalog.html")     // frame; file authors <div class="catalog">
+
+    p.Keyboard()                  // optional: default keyboard panel
+
+    p.Serve()
 }
-:is(#zero, #fx, #one) > *            { width: 100%; }
-:is(#zero, #fx, #one) > :first-child { flex: 1; min-height: 0; }
 ```
 
-Consequences for the frame root (`.<framename>`):
+Rules an agent must follow when emitting `main.go`:
 
-- It is the space's first child → already full-width and flex-grown to fill height. **Do not** set its `width`/`height`.
-- It is a block in a flex column; give it its own `display: flex` + `flex-direction` for internal layout.
-- `1cqw` = 1% of the space's width, `1cqh` = 1% of its height — correct under any layout. Use `clamp(min, Ncqw, max)` for fluid type.
-- For a scrollable frame, set `overflow-y: auto` and `height: 100%` on the root.
+- `p.Frame(path)` registers a space frame. The file authors its own root container div, classed by convention after the filename stem (`catalog.html` → `<div class="catalog">…</div>`). Nothing is wrapped for you. The content is trusted as-is — **local, developer-controlled files only.**
+- `p.Load(path)` exposes a file or directory as a fetchable route. **The route key is `filepath.Base(path)`** — `./data/catalog.json` → `catalog.json`, `./pics` → `pics`. A directory becomes a bundle of all its files. Any file type works — the wire carries typed bytes, and the frame decides how to decode them. MIME type is inferred from extension, with content sniffing as fallback.
+- `p.Load(url)` with an `http(s)://` URL expects a **pre-encoded wire blob** (produced by `Save`) and decodes it back into a bundle. It is not for arbitrary remote files.
+- `p.Save(key)` writes the wire encoding of a loaded route to `s3/<key>`, ready to sync to object storage (e.g. `rclone sync s3 remote:bucket`). A saved route round-trips: `Save("slides")` → upload → `p.Slides("https://bucket.example.com/slides")`.
+- Every route a frame reads via `p.source(...)` **must** be registered with `p.Load(...)` (or by a template that loads internally).
+
+### Panel frames
+
+The **panel** is a strip appended below the universe, toggled with `z`, hidden by default. Its frame pool travels as item 2 of the `/` payload (present only once at least one panel is registered) and is rendered by `p.panel` (`toggle()`). Build a panel frame with `p.Panel(path)` or `p.BuildPanel(elements...)` — same consolidation as space frames — then register it by passing the result to `p.Panels(...)`, e.g. `p.Panels(p.Keyboard())`. A panel frame authors its own root div exactly like a space frame; it renders into `p.panel.el`, not a space.
+
+### Ordering: `sort.txt`
+
+Bundle entries carry **no filenames on the wire — order is the contract.** A directory route's order defaults to filesystem walk order. To pin it, place a `sort.txt` in the directory: one file stem (name without extension) per line. Listed files come first, in that order; unlisted files follow. `sort.txt` itself is never included in the bundle.
+
+```
+cover
+intro
+alpha
+```
+
+Frames reference bundle entries **by index**, so `sort.txt` is how data and companion files stay aligned. When the agent designs a data structure alongside a bundle (e.g. records referencing images), it should reference entries by index and emit the matching `sort.txt`.
+
+### Wire format
+
+One binary format, both directions. A bundle flattens to its leaves in order; per leaf, back-to-back:
+
+```
+[1B typeLen][type] [4B dataLen (big-endian)][data]
+```
+
+There is no leaf count — the response's length is the terminator. Names are never encoded.
+
+### Build-time transforms
+
+The frame file authored under [The frame file](#the-frame-file) is not served as-written — `fx` consolidates it once at build time: styles are hoisted to the top (when a frame has more than one block), every script body is wrapped in `{ }` if it isn't already, and all scripts are moved to the end. This happens once, before `Serve()` freezes the routes — not per request.
 
 ---
 
-## 7. Designing a frame for known data
+## one — templates and serving
 
-Because the data is fixed at build time, the agent should tailor the frame to it rather than generalize:
+`one` decides whether a frame needs to be authored at all, and turns a fully registered `pathless` into two running listeners.
 
-- Choose interactions that fit the data's shape: paging for sequences, taps on halves for prev/next, held keys for scrubbing/scrolling, per-record expansion for hierarchies.
-- Author the shell to mirror the data: root container div plus one static structure per record type, repeated/nested in the markup as the known data dictates.
-- The script queries the shell (`p.universe.space.el.querySelector('.<framename>')`), registers input, and populates dynamic slots via `textContent` / `src`.
-- Decode each route's bytes according to its known format (`entry.data` for text/structured data, `entry.url` for media) — never a second network fetch.
-- Reference bundle entries by index (`sort.txt` order); emit the `sort.txt` alongside any index-referencing data the agent authors.
-- Persist only view state through the pinned `read` / `write` from `p.universe.pin()`.
+### Construction
+
+```go
+p := pathless.NewPathless()                                  // development
+p := pathless.NewPathless("timefactory.io", "api.timefactory.io") // production
+```
+
+- **No arguments** — localhost. The HTML shell is served on `:1000`, the wire gateway on `:1001`, CORS open (`*`).
+- **Two arguments** — `origin` (the domain serving the shell) and `circuit` (the wire gateway host). Both are assumed HTTPS; CORS on the gateway is restricted to the origin. Any other argument count is fatal.
+
+### Templates (the brainless path)
+
+Before authoring a custom frame, check whether the data maps cleanly onto a built-in — if it does, only the one-line `main.go` registration is needed, no HTML authoring:
+
+| Builder                 | Input                                                                              | Produces                                                                                         |
+| ----------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `p.Home(logo, heading)` | `.svg` (inlined), local image (auto-`Load`ed), or `https://` image; heading string | centered logo + `<h1>`                                                                           |
+| `p.Text(path)`          | markdown file (local or `https://`)                                                | rendered HTML, `w`/`s` to scroll, scroll position persisted                                      |
+| `p.Slides(dir)`         | image directory (local), or `https://` URL of a `Save`'d bundle                    | full-screen viewer; tap halves or `a`/`d` to page; index persisted. Internally calls `Load(dir)` |
+| `p.Keyboard()`          | none                                                                               | the default keyboard **panel** — a live map of the shell's reserved keys, layout, and focus      |
+
+`Home`, `Text`, and `Slides` register **space frames**. `Keyboard` registers a **panel frame** (see [Panel frames](#panel-frames)).
+
+### `Serve()`
+
+```go
+p.Home("./logo.svg", "Title")
+p.Load("./data/catalog.json")
+p.Load("./pics")
+p.Frame("./catalog.html")
+p.Keyboard()
+p.Serve()
+```
+
+`p.Serve()` is the last call. At that point every registered route is wire-encoded and gzip-compressed **once**; requests are served from memory. Route map:
+
+| Route    | Content                                                                                                                                                                                                |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/`      | item 0: the universe HTML; item 1: every space frame, pre-encoded as one nested bundle; item 2: every panel frame, pre-encoded as one nested bundle (present only if at least one panel is registered) |
+| `/<key>` | one bundle per `Load`ed path, keyed by `filepath.Base(path)`                                                                                                                                           |
+
+Item 0 is used as-is; items 1 and 2 are themselves wire-encoded — the client decodes them a second time to recover the individual frames.
