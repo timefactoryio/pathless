@@ -42,8 +42,9 @@
 	{
 		class Home {
 			constructor(p) {
-				const { el } = p.universe.space;
-				const logoImg = el.querySelector('.home .logo img[data-src]');
+				const logoImg = p.universe.frame.querySelector(
+					'.logo img[data-src]',
+				);
 				if (logoImg) {
 					p.source(logoImg.dataset.src).then(([entry]) => {
 						logoImg.src = entry.url;

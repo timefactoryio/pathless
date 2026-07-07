@@ -26,15 +26,20 @@
 			get space() {
 				return this.spaces[this.state.focused];
 			}
-
+			get frame() {
+				return this.space.el.querySelector('div');
+			}
 			visible(l = this.state.l) {
 				return l === 0 ? [this.state.focused] : Universe.layouts[l];
 			}
 
-			init(frames) {
-				this.frames = frames;
+			init(frames, panels) {
+				const unwrap = (v) =>
+					this.pathless.decode(v.data).map((f) => f.data);
+				this.frames = unwrap(frames);
 				this.spaces.forEach((s) => (s.frame = 0));
 				this.layout(0);
+				if (panels) this.panel.init(unwrap(panels));
 			}
 
 			read(i = this.state.focused) {

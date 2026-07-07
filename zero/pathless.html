@@ -130,6 +130,18 @@
 				location.hostname,
 			);
 			class Pathless {
+				static #Value = class {
+					#url;
+					constructor(type, data) {
+						this.type = type;
+						this.data = data;
+					}
+					get url() {
+						return (this.#url ??= URL.createObjectURL(
+							new Blob([this.data], { type: this.type }),
+						));
+					}
+				};
 				#td = new TextDecoder();
 				#range = document.createRange();
 				constructor() {
@@ -142,38 +154,34 @@
 						bytes.byteOffset,
 						bytes.byteLength,
 					);
-					const frames = [];
-					let pos = 0;
-					while (pos < bytes.length) {
+					const tableCount = bytes[0];
+					let pos = 1;
+					const table = new Array(tableCount);
+					for (let i = 0; i < tableCount; i++) {
 						const tl = bytes[pos++];
-						const type = this.#td.decode(
+						table[i] = this.#td.decode(
 							bytes.subarray(pos, (pos += tl)),
 						);
+					}
+					const v = [];
+					while (pos < bytes.length) {
+						const type = table[bytes[pos++]];
 						const n = view.getUint32(pos);
 						pos += 4;
-						frames.push({
-							type,
-							data: bytes.subarray(pos, (pos += n)),
-						});
+						const data = bytes.subarray(pos, (pos += n));
+						v.push(new Pathless.#Value(type, data));
 					}
-					return frames;
+					return v;
 				}
 				source(path = '') {
 					let p = this.cache.get(path);
 					if (!p) {
 						p = fetch(`${window.circuit}/${path}`)
-							.then((r) => r.bytes())
-							.then((bytes) =>
-								this.decode(bytes).map((e) => {
-									let u;
-									return Object.defineProperty(e, 'url', {
-										get: () =>
-											(u ??= URL.createObjectURL(
-												new Blob([e.data], e),
-											)),
-									});
-								}),
-							);
+							.then(async (r) => this.decode(await r.bytes()))
+							.catch((err) => {
+								this.cache.delete(path);
+								throw err;
+							});
 						this.cache.set(path, p);
 					}
 					return p;
@@ -191,14 +199,7 @@
 						document.getElementById('universe'),
 						universe.data,
 					);
-					this.universe.init(
-						this.decode(frames.data).map((f) => f.data),
-					);
-					if (panels) {
-						this.universe.panel.init(
-							this.decode(panels.data).map((f) => f.data),
-						);
-					}
+					this.universe.init(frames, panels);
 				}
 			}
 			document.addEventListener('DOMContentLoaded', () => {

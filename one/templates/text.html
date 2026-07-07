@@ -180,7 +180,7 @@
 
 			constructor(p) {
 				const { read, write } = p.universe.pin();
-				this.el = p.universe.space.el.querySelector('.text');
+				this.el = p.universe.frame;
 				const saved = read().get('scroll');
 				if (saved) {
 					const restore = () => {

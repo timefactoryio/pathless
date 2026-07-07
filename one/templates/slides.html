@@ -24,7 +24,7 @@
 			constructor(p) {
 				const { read, write } = p.universe.pin();
 				this.write = write;
-				this.img = p.universe.space.el.querySelector('.slides img');
+				this.img = p.universe.frame.querySelector('img');
 				this.entries = [];
 				this.index = read().get(prefix) || 0;
 				p.input.bind({

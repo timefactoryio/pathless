@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
+	"encoding/gob"
 	"fmt"
 	"io"
 	"mime"
@@ -23,7 +24,8 @@ func NewCircuit() *Circuit {
 
 // Value is one encoded entry, or a bundle of them. A leaf carries Type + Data;
 // a bundle carries Values (its children). Name is server-internal — used for
-// sort.txt ordering — and is never written to the wire.
+// sort.txt ordering — and is never written to the wire (Encode/Decode), though
+// it is preserved when persisted via Save/Load.
 type Value struct {
 	Name   string
 	Type   string
@@ -32,7 +34,9 @@ type Value struct {
 }
 
 // Encode flattens a Value tree to its leaves in order and writes the wire
-// format the client decodes: repeated, back-to-back, per leaf:
+// format the client decodes. This is purely the over-the-network format —
+// Save/Load use gob instead, so changing this format never requires
+// re-saving or re-uploading anything already persisted. Layout:
 //
 //	[1B typeLen][type] [4B dataLen][data]
 //
@@ -40,6 +44,10 @@ type Value struct {
 // terminator. Names are not encoded — order is the contract.
 func (c *Circuit) Encode(v *Value) []byte {
 	var leaves []*Value
+	var table []string
+	index := make(map[string]byte, 8)
+	tableSize, dataSize := 1, 0
+
 	var walk func(*Value)
 	walk = func(n *Value) {
 		if len(n.Values) > 0 {
@@ -49,36 +57,51 @@ func (c *Circuit) Encode(v *Value) []byte {
 			return
 		}
 		leaves = append(leaves, n)
+		if _, ok := index[n.Type]; !ok {
+			index[n.Type] = byte(len(table))
+			table = append(table, n.Type)
+			tableSize += 1 + len(n.Type)
+		}
+		dataSize += 1 + 4 + len(n.Data)
 	}
 	walk(v)
-	total := 0
-	for _, l := range leaves {
-		total += len(l.Type) + len(l.Data)
+
+	out := make([]byte, tableSize+dataSize)
+	out[0] = byte(len(table))
+	pos := 1
+	for _, t := range table {
+		out[pos] = byte(len(t))
+		pos++
+		pos += copy(out[pos:], t)
 	}
-	buf := bytes.NewBuffer(make([]byte, 0, 5*len(leaves)+total))
-	var hdr [4]byte
 	for _, l := range leaves {
-		buf.WriteByte(byte(len(l.Type)))
-		buf.WriteString(l.Type)
-		binary.BigEndian.PutUint32(hdr[:], uint32(len(l.Data)))
-		buf.Write(hdr[:])
-		buf.Write(l.Data)
+		out[pos] = index[l.Type]
+		pos++
+		binary.BigEndian.PutUint32(out[pos:], uint32(len(l.Data)))
+		pos += 4
+		pos += copy(out[pos:], l.Data)
 	}
-	return buf.Bytes()
+	return out
 }
 
 // Decode is the inverse of Encode.
 func (c *Circuit) Decode(buf []byte) []*Value {
-	var leaves []*Value
-	pos := 0
-	for pos < len(buf) {
+	tableCount := int(buf[0])
+	pos := 1
+	table := make([]string, tableCount)
+	for i := range table {
 		tl := int(buf[pos])
 		pos++
-		typ := string(buf[pos : pos+tl])
+		table[i] = string(buf[pos : pos+tl])
 		pos += tl
+	}
+	var leaves []*Value
+	for pos < len(buf) {
+		idx := buf[pos]
+		pos++
 		n := int(binary.BigEndian.Uint32(buf[pos : pos+4]))
 		pos += 4
-		leaves = append(leaves, &Value{Type: typ, Data: buf[pos : pos+n]})
+		leaves = append(leaves, &Value{Type: table[idx], Data: buf[pos : pos+n]})
 		pos += n
 	}
 	return leaves
@@ -111,13 +134,17 @@ func (c *Circuit) ToBytes(input string) ([]byte, error) {
 
 // Load reads a file or directory at path and stores it in Routes keyed by the
 // base name of path. A file becomes a leaf Value; a directory becomes a
-// bundle. An http(s) path is treated as a pre-encoded wire blob (from Save)
-// and decoded back into a bundle.
+// bundle. An http(s) path is treated as a gob-encoded Value tree (written by
+// Save) and decoded directly — independent of whatever Encode/Decode's wire
+// format currently is.
 func (c *Circuit) Load(path string) {
 	key := filepath.Base(path)
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
 		if data, err := c.ToBytes(path); err == nil {
-			c.Routes[key] = &Value{Name: key, Values: c.Decode(data)}
+			var v Value
+			if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&v); err == nil {
+				c.Routes[key] = &v
+			}
 		}
 		return
 	}
@@ -185,9 +212,11 @@ func (c *Circuit) walk(path string) *Value {
 	return bundle
 }
 
-// Save writes the wire-encoded bytes of the route at key to s3/key, ready
-// to be synced to S3 (e.g. rclone sync s3 remote:bucket) under the same
-// object name Load expects when fetching it back.
+// Save persists the Value tree at key (Name, Type, Data, Values — the full
+// structure, not the wire format) to s3/key using gob, so changes to
+// Encode/Decode never require re-saving or re-uploading anything already
+// in S3. Encode is only ever applied fresh, at serve time, to whatever
+// tree Load reconstructs.
 func (c *Circuit) Save(key string) error {
 	v, ok := c.Routes[key]
 	if !ok {
@@ -196,5 +225,10 @@ func (c *Circuit) Save(key string) error {
 	if err := os.MkdirAll("s3", 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join("s3", key), c.Encode(v), 0644)
+	f, err := os.Create(filepath.Join("s3", key))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return gob.NewEncoder(f).Encode(v)
 }
