@@ -6,22 +6,18 @@ import (
 	"os"
 	"regexp"
 	"strings"
-
-	"github.com/timefactoryio/markdown"
 )
 
 type Fx struct {
 	*Circuit
 	frames []*template.HTML
 	panels []*template.HTML
-	md     *markdown.Markdown
 }
 
 func NewFx() *Fx {
 	return &Fx{
 		frames:  []*template.HTML{},
 		panels:  []*template.HTML{},
-		md:      markdown.New(""),
 		Circuit: NewCircuit(),
 	}
 }
@@ -62,11 +58,6 @@ func (f *Fx) Frames(frame ...*template.HTML) *Value {
 		f.frames = append(f.frames, frame[0])
 	}
 	return f.bundle(f.frames)
-}
-
-// Markdown returns the configured goldmark instance for rendering markdown to HTML.
-func (f *Fx) Markdown() *markdown.Markdown {
-	return f.md
 }
 
 const (

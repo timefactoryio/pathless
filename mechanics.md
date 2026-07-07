@@ -62,7 +62,7 @@ A frame is one `.html` file with three parts: `<style>`, static markup (the shel
 
 ## zero — what a frame calls at runtime
 
-`zero` is the browser runtime a frame executes inside. `window.pathless` (passed as `p`) is the only global; `p.universe`, `p.input`, `p.panel`, and (when the keyboard panel is registered) `p.keyboard` are the modules attached to it.
+`zero` is the browser runtime a frame executes inside. `window.pathless` (passed as `p`) is the only global; `p.universe` (including `p.universe.panel`), `p.input`, and `p.keyboard` (the default keyboard panel, always registered) are the modules attached to it.
 
 | Member                       | Signature                                | Behavior                                                                                  |
 | ---------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------- |
@@ -73,7 +73,7 @@ A frame is one `.html` file with three parts: `<style>`, static markup (the shel
 | `p.universe.pin(i?)`         | `(number?) => {i, read, write}`          | captures the focused index once and returns read/write bound to it                        |
 | `p.universe.sync(...i)`      | `(...number) => void`                    | re-render the given spaces, or all visible spaces if none given                           |
 | `p.input.bind(binds)`        | `(object) => void`                       | register gesture and key handlers for the focused space                                   |
-| `p.panel.toggle()`           | `() => void`                             | show/hide the panel strip (also bound to reserved key `z`)                                |
+| `p.universe.panel.toggle()`  | `() => void`                             | show/hide the panel strip (also bound to reserved key `z`)                                |
 
 ### `p.source(key)` — data access
 
@@ -185,8 +185,6 @@ func main() {
     p.Load("./pics")              // route "pics"         (directory → bundle)
     p.Frame("./catalog.html")     // frame; file authors <div class="catalog">
 
-    p.Keyboard()                  // optional: default keyboard panel
-
     p.Serve()
 }
 ```
@@ -201,7 +199,7 @@ Rules an agent must follow when emitting `main.go`:
 
 ### Panel frames
 
-The **panel** is a strip appended below the universe, toggled with `z`, hidden by default. Its frame pool travels as item 2 of the `/` payload (present only once at least one panel is registered) and is rendered by `p.panel` (`toggle()`). Build a panel frame with `p.Panel(path)` or `p.BuildPanel(elements...)` — same consolidation as space frames — then register it by passing the result to `p.Panels(...)`, e.g. `p.Panels(p.Keyboard())`. A panel frame authors its own root div exactly like a space frame; it renders into `p.panel.el`, not a space.
+The **panel** is a strip appended below the universe, toggled with `z`, hidden by default. Its frame pool travels as item 2 of the `/` payload — always present, since a keyboard panel is registered automatically (see [Templates](#templates-the-brainless-path)) — and is rendered by `p.universe.panel` (`toggle()`). Build a panel frame with `p.Panel(path)` or `p.BuildPanel(elements...)` — same consolidation as space frames — then register it by passing the result to `p.Panels(...)`, e.g. `p.Panels(myPanel)`. A panel frame authors its own root div exactly like a space frame; it renders into `p.universe.panel.el`, not a space. Registering more panels appends after the keyboard, so `p.universe.panel`'s index cycles through all of them.
 
 ### Ordering: `sort.txt`
 
@@ -254,9 +252,10 @@ Before authoring a custom frame, check whether the data maps cleanly onto a buil
 | `p.Home(logo, heading)` | `.svg` (inlined), local image (auto-`Load`ed), or `https://` image; heading string | centered logo + `<h1>`                                                                           |
 | `p.Text(path)`          | markdown file (local or `https://`)                                                | rendered HTML, `w`/`s` to scroll, scroll position persisted                                      |
 | `p.Slides(dir)`         | image directory (local), or `https://` URL of a `Save`'d bundle                    | full-screen viewer; tap halves or `a`/`d` to page; index persisted. Internally calls `Load(dir)` |
-| `p.Keyboard()`          | none                                                                               | the default keyboard **panel** — a live map of the shell's reserved keys, layout, and focus      |
 
-`Home`, `Text`, and `Slides` register **space frames**. `Keyboard` registers a **panel frame** (see [Panel frames](#panel-frames)).
+`Home`, `Text`, and `Slides` register **space frames**.
+
+A default keyboard panel — a live map of the shell's reserved keys, layout, and focus — is registered automatically by `NewPathless`/`NewOne`; there's no builder call needed to get it (see [Panel frames](#panel-frames)). `p.Keyboard()` still exists to build the same panel frame on demand, if something other than automatic registration ever needs it.
 
 ### `Serve()`
 
@@ -265,7 +264,6 @@ p.Home("./logo.svg", "Title")
 p.Load("./data/catalog.json")
 p.Load("./pics")
 p.Frame("./catalog.html")
-p.Keyboard()
 p.Serve()
 ```
 
@@ -273,7 +271,7 @@ p.Serve()
 
 | Route    | Content                                                                                                                                                                                                |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/`      | item 0: the universe HTML; item 1: every space frame, pre-encoded as one nested bundle; item 2: every panel frame, pre-encoded as one nested bundle (present only if at least one panel is registered) |
+| `/`      | item 0: the universe HTML; item 1: every space frame, pre-encoded as one nested bundle; item 2: every panel frame (keyboard plus any registered via `p.Panels(...)`), pre-encoded as one nested bundle |
 | `/<key>` | one bundle per `Load`ed path, keyed by `filepath.Base(path)`                                                                                                                                           |
 
 Item 0 is used as-is; items 1 and 2 are themselves wire-encoded — the client decodes them a second time to recover the individual frames.

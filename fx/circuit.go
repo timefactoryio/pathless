@@ -2,7 +2,6 @@ package fx
 
 import (
 	"bytes"
-	"compress/gzip"
 	"encoding/binary"
 	"encoding/gob"
 	"fmt"
@@ -105,17 +104,6 @@ func (c *Circuit) Decode(buf []byte) []*Value {
 		pos += n
 	}
 	return leaves
-}
-
-// Compress gzip-compresses data at maximum compression.
-// Bundles are compressed once at build time and served directly
-// with Content-Encoding: gzip.
-func (c *Circuit) Compress(data []byte) []byte {
-	var buf bytes.Buffer
-	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
-	w.Write(data)
-	w.Close()
-	return buf.Bytes()
 }
 
 // ToBytes fetches the content at input, either from an HTTP URL or a local file.

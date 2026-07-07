@@ -1,8 +1,6 @@
 package zero
 
 import (
-	"bytes"
-	"compress/gzip"
 	_ "embed"
 	"html/template"
 	"regexp"
@@ -15,15 +13,12 @@ var pathlessHtml string
 //go:embed universe.html
 var universeHtml []byte
 
-// Zero holds the compiled HTML shell (Pathless) and the universe payload.
+// Zero holds the origin and circuit host a shell is compiled against.
 // Origin is the CORS-allowed root domain; Circuit is the API endpoint URL
-// baked into the shell at build time. Universe is the single item-0 blob:
-// the plane DOM plus its folded input/keyboard modules.
+// baked into the shell at build time.
 type Zero struct {
-	Pathless []byte
-	Universe []byte
-	Origin   string
-	Circuit  string
+	Origin  string
+	Circuit string
 }
 
 // NewZero constructs Zero from an origin and circuit host.
@@ -34,23 +29,31 @@ func NewZero(origin, circuit string) *Zero {
 	if circuit == "" {
 		circuit = "http://localhost:1001"
 	}
+	return &Zero{
+		Origin:  origin,
+		Circuit: circuit,
+	}
+}
+
+// Compile builds the HTML shell (pathless) and returns it alongside the
+// universe payload (universe). pathless is templated with z.Circuit,
+// minified, and gzip-compressed. universe is the single item-0 blob — the
+// plane DOM plus its folded input/keyboard modules — returned raw: fx
+// performs its own consolidation pass over it before anything is
+// wire-encoded.
+func (z *Zero) Compile() (pathless []byte, universe []byte) {
 	tmpl := template.Must(template.New("pathless").Parse(pathlessHtml))
 	var b strings.Builder
-	if err := tmpl.Execute(&b, map[string]string{"CIRCUIT": circuit}); err != nil {
+	if err := tmpl.Execute(&b, map[string]string{"CIRCUIT": z.Circuit}); err != nil {
 		panic(err)
 	}
-	return &Zero{
-		Pathless: minify(b.String()),
-		Universe: universeHtml,
-		Origin:   origin,
-		Circuit:  circuit,
-	}
+	return minify(b.String()), universeHtml
 }
 
 // minify: <style> -> <script> -> <html>
 // minify aggressively strips pathless.html's <style>/<script> markup down to
-// its minimum byte size, then gzip-compresses the result. This is hand-tuned
-// for pathless.html's exact content — not a general-purpose minifier.
+// its minimum byte size. This is hand-tuned for pathless.html's exact
+// content — not a general-purpose minifier.
 func minify(html string) []byte {
 	html = regexp.MustCompile(`<style>([\s\S]*?)</style>`).ReplaceAllStringFunc(html, func(s string) string {
 		s = regexp.MustCompile(`\s*([{}:;,>+~])\s*`).ReplaceAllString(s, "$1")
@@ -65,13 +68,5 @@ func minify(html string) []byte {
 	html = strings.ReplaceAll(html, " />", ">")
 	html = strings.TrimSpace(html)
 
-	var buf bytes.Buffer
-	gz, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
-	if _, err := gz.Write([]byte(html)); err != nil {
-		panic("gzip write error: " + err.Error())
-	}
-	if err := gz.Close(); err != nil {
-		panic("gzip close error: " + err.Error())
-	}
-	return buf.Bytes()
+	return []byte(html)
 }

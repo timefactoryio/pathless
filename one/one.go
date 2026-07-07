@@ -1,6 +1,8 @@
 package one
 
 import (
+	"bytes"
+	"compress/gzip"
 	"net/http"
 
 	"github.com/timefactoryio/pathless/fx"
@@ -12,15 +14,21 @@ type One struct {
 	*fx.Fx
 	pathless *http.ServeMux
 	circuit  *http.ServeMux
+	Pathless []byte
+	Universe []byte
 }
 
 func NewOne(z *zero.Zero, f *fx.Fx) *One {
+	pathless, universe := z.Compile()
 	o := &One{
 		Zero:     z,
 		Fx:       f,
 		pathless: http.NewServeMux(),
 		circuit:  http.NewServeMux(),
+		Pathless: zip(pathless),
+		Universe: universe,
 	}
+	o.Panels(o.Keyboard())
 	o.pathless.HandleFunc("/", o.handlePathless)
 	return o
 }
@@ -36,7 +44,7 @@ func (o *One) handlePathless(w http.ResponseWriter, r *http.Request) {
 }
 
 func (o *One) wire(path string, v *fx.Value) {
-	data := o.Compress(o.Encode(v))
+	data := zip(o.Encode(v))
 	o.circuit.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Encoding", "gzip")
@@ -57,14 +65,11 @@ func (o *One) cors(next http.Handler) http.Handler {
 }
 
 func (o *One) Serve() {
-	values := []*fx.Value{
+	o.wire("/", &fx.Value{Values: []*fx.Value{
 		{Type: "text/html", Data: o.Universe},
 		o.Frames(),
-	}
-	if panels := o.Panels(); panels != nil {
-		values = append(values, panels)
-	}
-	o.wire("/", &fx.Value{Values: values})
+		o.Panels(),
+	}})
 
 	for key, v := range o.Fx.Routes {
 		o.wire("/"+key, v)
@@ -72,4 +77,15 @@ func (o *One) Serve() {
 
 	go http.ListenAndServe(":1001", o.cors(o.circuit))
 	http.ListenAndServe(":1000", o.pathless)
+}
+
+// zip gzip-zipes data at maximum zipion.
+// Bundles are ziped once at build time and served directly
+// with Content-Encoding: gzip.
+func zip(data []byte) []byte {
+	var buf bytes.Buffer
+	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	w.Write(data)
+	w.Close()
+	return buf.Bytes()
 }

@@ -9,6 +9,8 @@ import (
 	"html/template"
 	"path/filepath"
 	"strings"
+
+	"github.com/timefactoryio/markdown"
 )
 
 //go:embed templates/home.html
@@ -58,13 +60,14 @@ func (o *One) Logo(path string) template.HTML {
 	))
 }
 
+// Markdown returns the configured goldmark instance for rendering markdown to HTML.
 func (o *One) Text(path string) {
 	content, err := o.ToBytes(path)
 	if err != nil {
 		return
 	}
 	var md bytes.Buffer
-	if err := o.Markdown().Convert(content, &md); err != nil {
+	if err := markdown.New("").Convert(content, &md); err != nil {
 		return
 	}
 	tmpl, err := template.New("text").Parse(textHtml)
