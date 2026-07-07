@@ -6,7 +6,7 @@ Three files:
 
 | File            | Role                                                                                  |
 | --------------- | ------------------------------------------------------------------------------------- |
-| `main.go`       | Go package `zero` — embeds the two HTML files, templates/minifies the shell           |
+| `main.go`       | Go package `zero` — embeds the two HTML files, templates/minifies/gzips the shell     |
 | `pathless.html` | the shell: page chrome + `Pathless` client (wire fetch/decode, render, bootstrap)     |
 | `universe.html` | the universe payload: `Universe`, `Input`, `Panel` — layout, state, and input runtime |
 
@@ -16,23 +16,21 @@ Three files:
 
 ```go
 type Zero struct {
-    Origin  string // CORS-allowed root domain
-    Circuit string // wire gateway URL baked into the shell
+    Pathless []byte // compiled shell: templated, minified, gzip-compressed
+    Universe []byte // universe.html, raw bytes
+    Origin   string // CORS-allowed root domain
+    Circuit  string // wire gateway URL baked into the shell
 }
 
 func NewZero(origin, circuit string) *Zero
-func (z *Zero) Compile() (pathless []byte, universe []byte)
 ```
 
-`NewZero` only defaults `origin` to `"*"` and `circuit` to `http://localhost:1001` when empty (dev) — it does no compilation itself.
+`NewZero`:
 
-`Compile`:
-
-1. Executes `pathless.html` as a Go template with `{{.CIRCUIT}}` substituted from `z.Circuit`.
-2. Runs the result through `minify` → `pathless`.
-3. Passes `universe.html` through untouched → `universe`. It is not minified here — `fx` performs its own consolidation pass over frame-authored HTML (style hoisting, script wrapping) before anything is wire-encoded, so `zero` hands it over raw.
-
-`Compile` is called once, by `one.NewOne`, which holds on to both return values for the life of the process — nothing here is recomputed per request.
+1. Defaults `origin` to `"*"` and `circuit` to `http://localhost:1001` when empty (dev).
+2. Executes `pathless.html` as a Go template with `{{.CIRCUIT}}` substituted.
+3. Runs the result through `minify` → `Zero.Pathless`.
+4. Passes `universe.html` through untouched → `Zero.Universe`. It is not minified here — `fx` performs its own consolidation pass over frame-authored HTML (style hoisting, script wrapping) before anything is wire-encoded, so `zero` hands it over raw.
 
 ### `minify`
 
@@ -42,9 +40,9 @@ Hand-tuned for `pathless.html`'s exact markup — not a general-purpose minifier
 2. Strip whitespace inside `<script>` blocks around operators/punctuation, drop trailing `;` before `}`.
 3. Collapse `>\s+<` and all remaining runs of whitespace to a single space.
 4. Drop the space in self-closing tags (`<... />` → `<...>`).
-5. Trim.
+5. Trim, then gzip at `BestCompression`.
 
-`minify` only strips bytes — it does not compress. `one` gzip-compresses the returned `pathless` bytes once at startup (alongside every other wire route), so `Content-Encoding: gzip` is consistent across the shell and the wire gateway.
+The result is what `one` serves for every shell request — computed once, never touched again.
 
 ---
 
@@ -177,7 +175,3 @@ pathless.universe.panel = new Panel(pathless);
 `Panel` is attached as `universe.panel` (not `pathless.panel`) — every reference elsewhere (`Input.dispatch`, `Universe.init`) goes through `pathless.universe.panel`.
 
 ---
-
-## See also
-
-[mechanics.md](../mechanics.md) documents the same runtime from a **frame author's** point of view — the subset of `Universe`/`Input` surfaced as `p.universe`/`p.input`, and the rules a frame's own `.html` file must follow. This document covers the implementation those calls run against.

@@ -1,16 +1,12 @@
-# pathless frame specification
+# pathless 
 
 pathless renders **frames** — single `.html` files built for data the developer already knows: its shape, its cardinality, its natural interactions. The data can be anything expressible as bytes — JSON, markdown, images, CSV, logs, binary formats, generated structures — there is no schema requirement. There's also no separate mobile path: one `Input` model resolves mouse, touch, and pen into the same events, and one sizing unit (`cqw`/`cqh`) fits a frame to whatever container it's given. A frame is authored once and rendered wherever it's observed.
-
-This document is the contract for building **one frame**: its file, what it can call at runtime, how it's registered, and how it's served. Frames can be observed side by side in multiple spaces at once — that's a property of the shell's layout system, not something a frame needs to author for, so it isn't covered here.
-
-Because the data is known at build time, the frame should be designed *for* it — not as a generic viewer. Match interactions to the data's shape: paging for sequences, taps on halves for prev/next, held keys for scrubbing/scrolling, per-record expansion for hierarchies.
 
 The three sections below follow the Go packages a frame touches, in the order it touches them: **zero** (what the frame calls at runtime), **fx** (how the frame's file is authored and registered), **one** (how it's templated and served).
 
 ---
 
-## The frame file
+## frame
 
 A frame is one `.html` file with three parts: `<style>`, static markup (the shell), and a `<script>`. The shell — including its root container div — is authored as divs directly in the HTML. Because the data is known ahead of time, its structure (root, sections, lists, an `<img>` per slot, …) is written statically. The script does **not** build the DOM; it queries the shell, wires interaction, and updates the dynamic slots (`textContent`, `src`, `hidden`, dataset/state attributes).
 
@@ -20,10 +16,7 @@ A frame is one `.html` file with three parts: `<style>`, static markup (the shel
 </style>
 
 <!-- the shell: root container + static structure mirroring the known data -->
-<div class="catalog">
-  <div class="viewer"><img></div>
-  <div class="detail"><p class="desc"></p><span class="count"></span></div>
-</div>
+<div class="frame"></div>
 
 <script>
 {
@@ -33,7 +26,8 @@ A frame is one `.html` file with three parts: `<style>`, static markup (the shel
       // 2. query the shell under p.universe.space.el
       // 3. register p.input.bind
       // 4. load async data, then populate the shell
-      this.el = p.universe.space.el.querySelector('.catalog');
+      p.universe.frame.querySelector(
+      this.el = p.universe.frame.querySelector('.catalog');
       this.img = this.el.querySelector('.viewer img');
       this.desc = this.el.querySelector('.desc');
     }
@@ -242,6 +236,35 @@ p := pathless.NewPathless("timefactory.io", "api.timefactory.io") // production
 
 - **No arguments** — localhost. The HTML shell is served on `:1000`, the wire gateway on `:1001`, CORS open (`*`).
 - **Two arguments** — `origin` (the domain serving the shell) and `circuit` (the wire gateway host). Both are assumed HTTPS; CORS on the gateway is restricted to the origin. Any other argument count is fatal.
+
+### What goes between `NewPathless()` and `Serve()`
+
+Every call in between registers something — into `Fx`'s frame/panel pools, or into `Circuit`'s route map — and returns immediately. Nothing here talks to the network or renders anything; `Serve()` is the one point where all of it gets frozen: wire-encoded and gzip-compressed once, then served from memory for the life of the process. So this section of `main.go` is a **declaration** of what the shell contains, not a sequence of runtime actions.
+
+What goes here, in practice:
+
+- **Space frames** — `p.Home(...)`, `p.Text(...)`, `p.Slides(...)`, `p.Frame(path)`. Registration order is navigation order: `q`/`e` page through frames in exactly the order they were registered, since the wire carries no names, only position.
+- **Routes for a frame's own data** — `p.Load(path)`, whenever a hand-authored `p.Frame(...)` will call `p.source(key)` for data a built-in template doesn't already load internally (`Slides`/a non-`.svg` `Logo` call `Load` for you). Must happen before `Serve()`, since that's the point routes get frozen:
+
+  ```go
+  p.Load("./data/catalog.json") // registers route "catalog.json"
+  p.Load("./pics")              // registers route "pics" (directory -> bundle)
+  p.Frame("./catalog.html")     // its script reads both back via p.source(...)
+  ```
+
+- **Persisting a route for reuse** — `p.Save(key)`, once `key`'s route is registered, writes its wire encoding to `s3/<key>` so it can be synced to object storage and `Load`ed back later by URL, instead of every deploy re-reading local files:
+
+  ```go
+  p.Load("./pics") // registers route "pics" from local files
+  p.Save("pics")   // writes s3/pics — sync this to a bucket separately
+
+  // later, any deploy (this one, or a different app entirely):
+  p.Slides("https://bucket.example.com/pics") // Load(url) decodes the saved bundle directly
+  ```
+
+- **Extra panels** — `p.Panels(...)`. The keyboard panel is registered automatically now, so this is only needed for additional panels; anything passed here is appended after the keyboard.
+
+Order only matters among calls that share a pool (frames, panels) — it's the sole ordering signal the client has, since nothing is named on the wire. `Load`/`Save` calls need no particular order relative to each other, only relative to `Serve()` (must come before it) and, for `Save`, relative to the `Load` that registered the route being saved.
 
 ### Templates (the brainless path)
 

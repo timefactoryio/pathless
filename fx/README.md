@@ -99,8 +99,3 @@ The result is exactly one `<style>` (if any) → markup → one `<script>{ ... }
 Wraps each frame's HTML as a `text/html` leaf, then pre-encodes the list with `Encode` into a single `application/octet-stream` `Value`. This is what lets `Frames`/`Panels` hand back one `*Value` that already contains a fully wire-encoded bundle — `one.Serve` embeds it directly as one leaf of the root payload, and the client's `decode` recurses one level (see [zero](../zero/README.md#decodebytes--wire-format)) to unpack it.
 
 ---
-
-## See also
-
-- [mechanics.md](../mechanics.md#fx--authoring-and-registering-a-frame) — the frame-author-facing rules for `main.go` (`p.Frame`, `p.Load`, `p.Panels`, `sort.txt`) that this package implements.
-- [zero/README.md](../zero/README.md) — the client that decodes what `Encode`/`bundle` produce here.

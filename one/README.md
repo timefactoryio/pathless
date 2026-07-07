@@ -76,8 +76,3 @@ Because the keyboard panel is guaranteed, a consumer only needs to call `Panels(
 
 ---
 
-## See also
-
-- [fx/README.md](../fx/README.md) — `Build`/`BuildPanel`/`Frames`/`Panels`/`Load` are all promoted onto `One` and used throughout this package.
-- [zero/README.md](../zero/README.md) — `Compile()` (consumed once in `NewOne`) and the client that fetches what `Serve()` wires up.
-- [mechanics.md](../mechanics.md) — the frame-author-facing contract these templates themselves follow.
