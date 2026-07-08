@@ -1,6 +1,6 @@
 # zero
 
-`zero` compiles the two artifacts every request is built from — the HTML shell and the universe payload — once, at startup, from embedded sources. Nothing in this package runs per request; `one` just holds the bytes `zero` produced and serves them from memory.
+`zero` compiles the two artifacts every request is built from — the HTML shell and the universe payload — once, at startup, from embedded sources to be served from memory.
 
 Three files:
 
@@ -16,33 +16,20 @@ Three files:
 
 ```go
 type Zero struct {
-    Pathless []byte // compiled shell: templated, minified, gzip-compressed
-    Universe []byte // universe.html, raw bytes
-    Origin   string // CORS-allowed root domain
-    Circuit  string // wire gateway URL baked into the shell
+    Origin  string // CORS-allowed root domain
+    Circuit string // wire gateway URL baked into the shell
 }
 
 func NewZero(origin, circuit string) *Zero
+func (z *Zero) Compile() (pathless []byte, universe []byte)
 ```
 
-`NewZero`:
+`NewZero` defaults `origin` to `"*"` and `circuit` to `http://localhost:1001` when empty (dev). It only stores config — no compilation happens here.
 
-1. Defaults `origin` to `"*"` and `circuit` to `http://localhost:1001` when empty (dev).
-2. Executes `pathless.html` as a Go template with `{{.CIRCUIT}}` substituted.
-3. Runs the result through `minify` → `Zero.Pathless`.
-4. Passes `universe.html` through untouched → `Zero.Universe`. It is not minified here — `fx` performs its own consolidation pass over frame-authored HTML (style hoisting, script wrapping) before anything is wire-encoded, so `zero` hands it over raw.
+`Compile`:
 
-### `minify`
-
-Hand-tuned for `pathless.html`'s exact markup — not a general-purpose minifier. In order:
-
-1. Strip whitespace inside `<style>` blocks around `{ } : ; , > + ~`, drop trailing `;` before `}`.
-2. Strip whitespace inside `<script>` blocks around operators/punctuation, drop trailing `;` before `}`.
-3. Collapse `>\s+<` and all remaining runs of whitespace to a single space.
-4. Drop the space in self-closing tags (`<... />` → `<...>`).
-5. Trim, then gzip at `BestCompression`.
-
-The result is what `one` serves for every shell request — computed once, never touched again.
+1. Executes `pathless.html` as a Go template with `{{.CIRCUIT}}` substituted, minifies the result.
+2. Returns `universe.html`'s embedded bytes untouched. 
 
 ---
 

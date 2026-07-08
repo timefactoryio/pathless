@@ -6,27 +6,20 @@ import (
 	"net/http"
 
 	"github.com/timefactoryio/pathless/fx"
-	"github.com/timefactoryio/pathless/zero"
 )
 
 type One struct {
-	*zero.Zero
 	*fx.Fx
 	pathless *http.ServeMux
 	circuit  *http.ServeMux
-	Pathless []byte
-	Universe []byte
 }
 
-func NewOne(z *zero.Zero, f *fx.Fx) *One {
-	pathless, universe := z.Compile()
+func NewOne(f *fx.Fx) *One {
+	f.Pathless = zip(f.Pathless)
 	o := &One{
-		Zero:     z,
 		Fx:       f,
 		pathless: http.NewServeMux(),
 		circuit:  http.NewServeMux(),
-		Pathless: zip(pathless),
-		Universe: universe,
 	}
 	o.Panels(o.Keyboard())
 	o.pathless.HandleFunc("/", o.handlePathless)

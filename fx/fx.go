@@ -6,19 +6,28 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/timefactoryio/pathless/zero"
 )
 
 type Fx struct {
-	*Circuit
-	frames []*template.HTML
-	panels []*template.HTML
+	Pathless []byte
+	Universe []byte
+	frames   []*template.HTML
+	panels   []*template.HTML
+	Routes   map[string]*Value
+	*zero.Zero
 }
 
-func NewFx() *Fx {
+func NewFx(zero *zero.Zero) *Fx {
+	pathless, universe := zero.Compile()
 	return &Fx{
-		frames:  []*template.HTML{},
-		panels:  []*template.HTML{},
-		Circuit: NewCircuit(),
+		frames:   []*template.HTML{},
+		panels:   []*template.HTML{},
+		Routes:   make(map[string]*Value),
+		Pathless: pathless,
+		Universe: universe,
+		Zero:     zero,
 	}
 }
 

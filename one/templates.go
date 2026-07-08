@@ -52,7 +52,7 @@ func (o *One) Logo(path string) template.HTML {
 	attr, src := "src", path
 	if !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") {
 		o.Load(path)
-		attr, src = "data-src", o.Origin+"/"+filepath.Base(path)
+		attr, src = "data-src", o.Zero.Origin+"/"+filepath.Base(path)
 	}
 	alt := strings.TrimSuffix(filepath.Base(path), ext)
 	return template.HTML(fmt.Sprintf(`<img %s="%s" alt="%s">`,

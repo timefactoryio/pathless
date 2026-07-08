@@ -3,6 +3,7 @@ package zero
 import (
 	_ "embed"
 	"html/template"
+	"log"
 	"regexp"
 	"strings"
 )
@@ -21,13 +22,27 @@ type Zero struct {
 	Circuit string
 }
 
-// NewZero constructs Zero from an origin and circuit host.
-func NewZero(origin, circuit string) *Zero {
-	if origin == "" {
+// NewZero constructs Zero.
+//
+// Development — call with no arguments: origin defaults to "*", circuit
+// defaults to "http://localhost:1001".
+//
+// Production — call with origin and circuit hostnames:
+//
+//	zero.NewZero("timefactory.io", "api.timefactory.io")
+//
+// HTTPS is assumed for both.
+func NewZero(args ...string) *Zero {
+	var origin, circuit string
+	switch len(args) {
+	case 0:
 		origin = "*"
-	}
-	if circuit == "" {
 		circuit = "http://localhost:1001"
+	case 2:
+		origin = "https://" + args[0]
+		circuit = "https://" + args[1]
+	default:
+		log.Fatalf("NewZero: expected 0 or 2 arguments, got %d", len(args))
 	}
 	return &Zero{
 		Origin:  origin,
