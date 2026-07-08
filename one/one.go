@@ -6,22 +6,24 @@ import (
 	"net/http"
 
 	"github.com/timefactoryio/pathless/fx"
+	"github.com/timefactoryio/pathless/zero"
 )
 
 type One struct {
+	*zero.Zero
 	*fx.Fx
 	pathless *http.ServeMux
 	circuit  *http.ServeMux
 }
 
-func NewOne(f *fx.Fx) *One {
-	f.Pathless = zip(f.Pathless)
+func NewOne(zero *zero.Zero, f *fx.Fx) *One {
 	o := &One{
+		Zero:     zero,
 		Fx:       f,
 		pathless: http.NewServeMux(),
 		circuit:  http.NewServeMux(),
 	}
-	o.Panels(o.Keyboard())
+	o.Pathless = zip(o.Pathless)
 	o.pathless.HandleFunc("/", o.handlePathless)
 	return o
 }
@@ -36,7 +38,7 @@ func (o *One) handlePathless(w http.ResponseWriter, r *http.Request) {
 	w.Write(o.Pathless)
 }
 
-func (o *One) wire(path string, v *fx.Value) {
+func (o *One) wire(path string, v []*fx.Value) {
 	data := zip(o.Encode(v))
 	o.circuit.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -58,11 +60,8 @@ func (o *One) cors(next http.Handler) http.Handler {
 }
 
 func (o *One) Serve() {
-	o.wire("/", &fx.Value{Values: []*fx.Value{
-		{Type: "text/html", Data: o.Universe},
-		o.Frames(),
-		o.Panels(),
-	}})
+	o.Fx.Build()
+	o.wire("/", o.Hello)
 
 	for key, v := range o.Fx.Routes {
 		o.wire("/"+key, v)

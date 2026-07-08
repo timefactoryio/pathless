@@ -1,4 +1,4 @@
-package one
+package fx
 
 import (
 	"bytes"
@@ -13,46 +13,46 @@ import (
 	"github.com/timefactoryio/markdown"
 )
 
-//go:embed templates/home.html
+//go:embed frames/home.html
 var homeHtml string
 
-//go:embed templates/slides.html
+//go:embed frames/slides.html
 var slidesHtml string
 
-//go:embed templates/text.html
+//go:embed frames/text.html
 var textHtml string
 
-//go:embed templates/keyboard.html
+//go:embed panels/keyboard.html
 var keyboardHtml string
 
-func (o *One) Home(logo, heading string) {
+func (f *Fx) Home(logo, heading string) {
 	tmpl, err := template.New("home").Parse(homeHtml)
 	if err != nil {
 		return
 	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, map[string]any{
-		"LOGO":    o.Logo(logo),
+		"LOGO":    f.Logo(logo),
 		"HEADING": heading,
 	}); err != nil {
 		return
 	}
-	result := template.HTML(buf.String())
-	o.Build(&result)
+	f.Frames = append(f.Frames, f.build(buf.String()))
+
 }
 
-func (o *One) Logo(path string) template.HTML {
+func (f *Fx) Logo(path string) template.HTML {
 	ext := filepath.Ext(path)
 	if strings.ToLower(ext) == ".svg" {
-		if b, err := o.ToBytes(path); err == nil {
-			return template.HTML(b)
+		if v, err := f.ToBytes(path); err == nil {
+			return template.HTML(v.Data)
 		}
 	}
 
 	attr, src := "src", path
 	if !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") {
-		o.Load(path)
-		attr, src = "data-src", o.Zero.Origin+"/"+filepath.Base(path)
+		f.Load(path)
+		attr, src = "data-src", f.Origin+"/"+filepath.Base(path)
 	}
 	alt := strings.TrimSuffix(filepath.Base(path), ext)
 	return template.HTML(fmt.Sprintf(`<img %s="%s" alt="%s">`,
@@ -61,13 +61,13 @@ func (o *One) Logo(path string) template.HTML {
 }
 
 // Markdown returns the configured goldmark instance for rendering markdown to HTML.
-func (o *One) Text(path string) {
-	content, err := o.ToBytes(path)
+func (f *Fx) Text(path string) {
+	v, err := f.ToBytes(path)
 	if err != nil {
 		return
 	}
 	var md bytes.Buffer
-	if err := markdown.New("").Convert(content, &md); err != nil {
+	if err := markdown.New("").Convert(v.Data, &md); err != nil {
 		return
 	}
 	tmpl, err := template.New("text").Parse(textHtml)
@@ -80,12 +80,11 @@ func (o *One) Text(path string) {
 	}); err != nil {
 		return
 	}
-	result := template.HTML(buf.String())
-	o.Build(&result)
+	f.Frames = append(f.Frames, f.build(buf.String()))
 }
 
-func (o *One) Slides(dir string) {
-	o.Load(dir)
+func (f *Fx) Slides(dir string) {
+	f.Load(dir)
 	base := filepath.Base(dir)
 	tmpl, err := template.New("slides").Parse(slidesHtml)
 	if err != nil {
@@ -95,14 +94,12 @@ func (o *One) Slides(dir string) {
 	if err := tmpl.Execute(&buf, map[string]string{"PREFIX": base}); err != nil {
 		return
 	}
-	result := template.HTML(buf.String())
-	o.Build(&result)
+	f.Frames = append(f.Frames, f.build(buf.String()))
 }
 
 // Keyboard builds the default keyboard panel frame — an example of a
 // self-contained panel frame template, same shape as Home/Text/Slides.
 // Pass the result to Panels(...) to register it.
-func (o *One) Keyboard() *template.HTML {
-	result := template.HTML(keyboardHtml)
-	return o.BuildPanel(&result)
+func (f *Fx) Keyboard() {
+	f.Panels = append(f.Panels, f.build(keyboardHtml))
 }

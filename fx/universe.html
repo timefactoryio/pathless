@@ -12,11 +12,13 @@
 			constructor(pathless) {
 				this.pathless = pathless;
 				this.el = document.getElementById('universe');
+				this.panel = document.getElementById('panel');
 				this.spaces = Universe.ids.map((id) => ({
 					el: document.getElementById(id),
 					frame: 0,
 				}));
 				this.frames = [];
+				this.panels = [];
 				this.store = new Map();
 				this.state = { focused: 0, prev: null, l: 0, v: 0 };
 				this.tap = 0.1;
@@ -32,13 +34,19 @@
 			visible(l = this.state.l) {
 				return l === 0 ? [this.state.focused] : Universe.layouts[l];
 			}
-			init(frames, panels) {
-				const unwrap = (v) =>
-					this.pathless.decode(v.data).map((f) => f.data);
-				this.frames = unwrap(frames);
+			init() {
 				this.spaces.forEach((s) => (s.frame = 0));
 				this.layout(0);
-				this.panel.init(unwrap(panels));
+			}
+			togglePanel() {
+				this.panel.hidden = !this.panel.hidden;
+				if (!this.panel.hidden) this.showPanel(this.space.frame);
+			}
+			showPanel(i) {
+				this.pathless.exec(
+					this.panel,
+					this.panels[i % this.panels.length],
+				);
 			}
 			read(i = this.state.focused) {
 				const s = this.spaces[i];
@@ -155,7 +163,7 @@
 				tab: { fn: (u) => u.focus() },
 				q: { fn: (u) => u.nav(-1), desc: 'back', touch: 'swipeLeft' },
 				e: { fn: (u) => u.nav(1), desc: 'next', touch: 'swipeRight' },
-				z: { fn: (u) => u.panel.toggle() },
+				z: { fn: (u) => u.togglePanel() },
 			};
 
 			static gestureNames = Object.fromEntries(
@@ -245,32 +253,7 @@
 				return this;
 			}
 		}
-		class Panel {
-			constructor(pathless) {
-				this.pathless = pathless;
-				this.el = document.getElementById('panel');
-				this.frames = [];
-			}
-
-			init(frames = []) {
-				this.frames = frames;
-				this.show(this.pathless.universe.space.frame);
-			}
-
-			toggle() {
-				this.el.hidden = !this.el.hidden;
-			}
-
-			show(i) {
-				this.pathless.exec(
-					this.el,
-					this.frames[i % this.frames.length],
-				);
-			}
-		}
-
 		pathless.universe = new Universe(pathless);
 		pathless.input = new Input(pathless);
-		pathless.universe.panel = new Panel(pathless);
 	}
 </script>

@@ -1,6 +1,8 @@
 package pathless
 
 import (
+	"log"
+
 	"github.com/timefactoryio/pathless/fx"
 	"github.com/timefactoryio/pathless/one"
 	"github.com/timefactoryio/pathless/zero"
@@ -29,7 +31,19 @@ type Pathless struct {
 // The HTML shell is served from origin; the wire gateway is served from circuit.
 // CORS on the gateway is restricted to origin. HTTPS is assumed.
 func NewPathless(args ...string) *Pathless {
-	z := zero.NewZero(args...)
-	x := fx.NewFx(z)
-	return &Pathless{One: one.NewOne(x)}
+	var origin, circuit string
+	switch len(args) {
+	case 0:
+		origin = "*"
+		circuit = "http://localhost:1001"
+	case 2:
+		origin = "https://" + args[0]
+		circuit = "https://" + args[1]
+	default:
+		log.Fatalf("NewPathless: expected 0 or 2 arguments, got %d", len(args))
+	}
+
+	z := zero.NewZero(circuit)
+	x := fx.NewFx(origin)
+	return &Pathless{One: one.NewOne(z, x)}
 }

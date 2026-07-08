@@ -154,21 +154,20 @@
 						bytes.byteOffset,
 						bytes.byteLength,
 					);
-					const tableCount = bytes[0];
-					let pos = 1;
-					const table = new Array(tableCount);
-					for (let i = 0; i < tableCount; i++) {
-						const tl = bytes[pos++];
-						table[i] = this.#td.decode(
-							bytes.subarray(pos, (pos += tl)),
-						);
-					}
+					let pos = 0;
 					const v = [];
 					while (pos < bytes.length) {
-						const type = table[bytes[pos++]];
 						const n = view.getUint32(pos);
 						pos += 4;
-						const data = bytes.subarray(pos, (pos += n));
+						const tl = bytes[pos];
+						pos += 1;
+						const type = this.#td.decode(
+							bytes.subarray(pos, pos + tl),
+						);
+						pos += tl;
+						const dataLen = n - 1 - tl;
+						const data = bytes.subarray(pos, pos + dataLen);
+						pos += dataLen;
 						v.push(new Pathless.#Value(type, data));
 					}
 					return v;
@@ -193,13 +192,18 @@
 						),
 					);
 				}
+				unwrap(v) {
+					return this.decode(v.data).map((f) => f.data);
+				}
 				async init() {
 					const [universe, frames, panels] = await this.source();
 					this.exec(
 						document.getElementById('universe'),
-						universe.data,
+						this.unwrap(universe)[0],
 					);
-					this.universe.init(frames, panels);
+					this.universe.frames = this.unwrap(frames);
+					this.universe.panels = this.unwrap(panels);
+					this.universe.init();
 				}
 			}
 			document.addEventListener('DOMContentLoaded', () => {

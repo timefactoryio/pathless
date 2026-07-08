@@ -2,157 +2,96 @@ package fx
 
 import (
 	_ "embed"
-	"html/template"
-	"os"
+	"log"
 	"regexp"
 	"strings"
-
-	"github.com/timefactoryio/pathless/zero"
 )
 
+//go:embed universe.html
+var universeHtml []byte
+
 type Fx struct {
-	Pathless []byte
-	Universe []byte
-	frames   []*template.HTML
-	panels   []*template.HTML
-	Routes   map[string]*Value
-	*zero.Zero
+	Frames []*Value
+	Panels []*Value
+	Routes map[string][]*Value
+	Origin string
+	Hello  []*Value
 }
 
-func NewFx(zero *zero.Zero) *Fx {
-	pathless, universe := zero.Compile()
+func NewFx(origin string) *Fx {
 	return &Fx{
-		frames:   []*template.HTML{},
-		panels:   []*template.HTML{},
-		Routes:   make(map[string]*Value),
-		Pathless: pathless,
-		Universe: universe,
-		Zero:     zero,
+		Frames: []*Value{},
+		Panels: []*Value{},
+		Routes: make(map[string][]*Value),
+		Origin: origin,
 	}
+}
+
+// Build encodes the universe shell, frames, and panels each into their own
+// self-contained blob, wrapped as the three entries of Hello — this is
+// what the circuit server serves for "/". Since each blob is already a
+// valid Encode() output, the client decodes Hello once to get the three
+// blobs, then decodes each one again the same way.
+func (f *Fx) Build() {
+	f.Hello = []*Value{
+		{Type: "universe", Data: f.Encode([]*Value{{Type: "text/html", Data: universeHtml}})},
+		{Type: "frames", Data: f.Encode(f.Frames)},
+		{Type: "panels", Data: f.Encode(f.Panels)},
+	}
+}
+
+// load fetches an .html fragment from path — a local file or an http(s)
+// URL, so custom frames can be served from S3 like any persisted route.
+// Everything a program serves must be available at startup, so a failed
+// read is fatal: fix the path.
+func (f *Fx) load(path string) string {
+	v, err := f.ToBytes(path)
+	if err != nil {
+		log.Fatalf("fx: load %q: %v", path, err)
+	}
+	return string(v.Data)
+}
+
+// build consolidates a fragment's <style>/<script> assets into a single
+// text/html leaf Value.
+func (f *Fx) build(s string) *Value {
+	if styles := style.FindAllStringSubmatch(s, -1); len(styles) > 1 {
+		var merged strings.Builder
+		for _, m := range styles {
+			merged.WriteString(m[1])
+			merged.WriteByte('\n')
+		}
+		s = "<style>" + merged.String() + "</style>" + style.ReplaceAllString(s, "")
+	}
+
+	if matches := script.FindAllStringSubmatch(s, -1); len(matches) > 0 {
+		var merged strings.Builder
+		for _, m := range matches {
+			if t := strings.TrimSpace(m[1]); !strings.HasPrefix(t, "{") {
+				merged.WriteString("{" + m[1] + "}\n")
+			} else {
+				merged.WriteString(m[1] + "\n")
+			}
+		}
+		s = script.ReplaceAllString(s, "") + "<script>{" + merged.String() + "}</script>"
+	}
+
+	return &Value{Type: "text/html", Data: []byte(s)}
+}
+
+// Frame reads a custom .html file at path (local or S3) and registers it
+// into the frame pool.
+func (f *Fx) Frame(path string) {
+	f.Frames = append(f.Frames, f.build(f.load(path)))
+}
+
+// Panel reads a custom .html file at path (local or S3) and registers it
+// into the panel pool.
+func (f *Fx) Panel(path string) {
+	f.Panels = append(f.Panels, f.build(f.load(path)))
 }
 
 var (
 	style  = regexp.MustCompile(`(?s)<style>(.*?)</style>`)
 	script = regexp.MustCompile(`(?s)<script>(.*?)</script>`)
 )
-
-// Frame registers a frame from a local file. The file authors its own root
-// container div (by convention <div class="<filename stem>">). Nothing is
-// wrapped for you — the content is trusted as-is, so only pass local,
-// developer-controlled paths.
-func (f *Fx) Frame(path string) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	raw := template.HTML(data)
-	f.Build(&raw)
-}
-
-// Build registers a frame from its elements. The frame's root container is
-// authored by the caller (template builder or custom frame file), not added
-// here.
-func (f *Fx) Build(elements ...*template.HTML) {
-	var b strings.Builder
-	for _, el := range elements {
-		b.WriteString(string(*el))
-	}
-	cleaned := f.consolidateAssets(b.String())
-	result := template.HTML(cleaned)
-	f.Frames(&result)
-}
-
-func (f *Fx) Frames(frame ...*template.HTML) *Value {
-	if len(frame) > 0 && frame[0] != nil {
-		f.frames = append(f.frames, frame[0])
-	}
-	return f.bundle(f.frames)
-}
-
-const (
-	openStyle   = "<style>"
-	closeStyle  = "</style>"
-	openScript  = "<script>"
-	closeScript = "</script>"
-	openBlock   = "<script>{"
-	closeBlock  = "}</script>"
-)
-
-func (f *Fx) consolidateAssets(s string) string {
-	if styles := style.FindAllStringSubmatch(s, -1); len(styles) > 1 {
-		var sb strings.Builder
-		for _, m := range styles {
-			sb.WriteString(m[1])
-			sb.WriteByte('\n')
-		}
-		s = openStyle + sb.String() + closeStyle + style.ReplaceAllString(s, "")
-	}
-
-	var scripts strings.Builder
-	s = script.ReplaceAllStringFunc(s, func(m string) string {
-		content := m[len(openScript) : len(m)-len(closeScript)]
-		if t := strings.TrimSpace(content); !strings.HasPrefix(t, "{") {
-			scripts.WriteByte('{')
-			scripts.WriteString(content)
-			scripts.WriteString("}\n")
-		} else {
-			scripts.WriteString(content)
-			scripts.WriteByte('\n')
-		}
-		return ""
-	})
-	if scripts.Len() > 0 {
-		s += openBlock + scripts.String() + closeBlock
-	}
-	return s
-}
-
-// Panel builds a panel frame from a local file. It does not register the
-// frame — pass the result to Panels(...) to do that.
-func (f *Fx) Panel(path string) *template.HTML {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	raw := template.HTML(data)
-	return f.BuildPanel(&raw)
-}
-
-// BuildPanel consolidates elements into a single panel frame, the same way
-// Build consolidates space frames. It does not register the frame — pass
-// the result to Panels(...) to do that.
-func (f *Fx) BuildPanel(elements ...*template.HTML) *template.HTML {
-	var b strings.Builder
-	for _, el := range elements {
-		if el != nil {
-			b.WriteString(string(*el))
-		}
-	}
-	cleaned := f.consolidateAssets(b.String())
-	result := template.HTML(cleaned)
-	return &result
-}
-
-// Panels registers any given panel frames, then returns the wire payload
-// for every panel frame registered so far.
-func (f *Fx) Panels(panels ...*template.HTML) *Value {
-	for _, p := range panels {
-		if p != nil {
-			f.panels = append(f.panels, p)
-		}
-	}
-	return f.bundle(f.panels)
-}
-
-// bundle wraps frames as text/html leaves and pre-encodes them into a single
-// application/octet-stream Value for the client to decode as a nested bundle.
-func (f *Fx) bundle(frames []*template.HTML) *Value {
-	if len(frames) == 0 {
-		return nil
-	}
-	values := make([]*Value, len(frames))
-	for i, fr := range frames {
-		values[i] = &Value{Type: "text/html", Data: []byte(*fr)}
-	}
-	return &Value{Type: "application/octet-stream", Data: f.Encode(&Value{Values: values})}
-}

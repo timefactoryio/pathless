@@ -13,117 +13,108 @@ import (
 	"strings"
 )
 
-// Value is one encoded entry, or a bundle of them. A leaf carries Type + Data;
-// a bundle carries Values (its children). Name is server-internal — used for
-// sort.txt ordering — and is never written to the wire (Encode/Decode), though
-// it is preserved when persisted via Save/Load.
+// Value is one encoded entry. Name is server-internal — used for sort.txt
+// ordering — and is never written to the wire (Encode/Decode), though it is
+// preserved when persisted via Save/Load. Length is len(Type)+len(Data),
+// set by Encode and populated by Decode.
 type Value struct {
 	Name   string
 	Type   string
+	Length int
 	Data   []byte
-	Values []*Value
 }
 
-// Encode flattens a Value tree to its leaves in order and writes the wire
-// format the client decodes. This is purely the over-the-network format —
-// Save/Load use gob instead, so changing this format never requires
-// re-saving or re-uploading anything already persisted. Layout:
+// Encode writes the wire format the client decodes: a "railroad track" of
+// self-contained entries, one after another — no shared table, no separate
+// metadata section. Each entry carries its own type and length, so the
+// client hops from one entry straight to the next purely by size. This is
+// purely the over-the-network format — Save/Load use gob instead, so
+// changing this format never requires re-saving or re-uploading anything
+// already persisted. Layout:
 //
-//	[1B typeLen][type] [4B dataLen][data]
+//	[4B n][1B typeLen][type][data]...  (repeated, one per value)
+//	n = 1 + typeLen + len(data)
 //
-// There is no leaf count on the wire — the response's length is the
-// terminator. Names are not encoded — order is the contract.
-func (f *Fx) Encode(v *Value) []byte {
-	var leaves []*Value
-	var table []string
-	index := make(map[string]byte, 8)
-	tableSize, dataSize := 1, 0
-
-	var walk func(*Value)
-	walk = func(n *Value) {
-		if len(n.Values) > 0 {
-			for _, ch := range n.Values {
-				walk(ch)
-			}
-			return
-		}
-		leaves = append(leaves, n)
-		if _, ok := index[n.Type]; !ok {
-			index[n.Type] = byte(len(table))
-			table = append(table, n.Type)
-			tableSize += 1 + len(n.Type)
-		}
-		dataSize += 1 + 4 + len(n.Data)
+// Names are not encoded — order is the contract.
+func (f *Fx) Encode(values []*Value) []byte {
+	size := 0
+	for _, v := range values {
+		v.Length = len(v.Type) + len(v.Data)
+		size += 4 + 1 + v.Length
 	}
-	walk(v)
 
-	out := make([]byte, tableSize+dataSize)
-	out[0] = byte(len(table))
-	pos := 1
-	for _, t := range table {
-		out[pos] = byte(len(t))
-		pos++
-		pos += copy(out[pos:], t)
-	}
-	for _, l := range leaves {
-		out[pos] = index[l.Type]
-		pos++
-		binary.BigEndian.PutUint32(out[pos:], uint32(len(l.Data)))
+	out := make([]byte, size)
+	pos := 0
+	for _, v := range values {
+		binary.BigEndian.PutUint32(out[pos:], uint32(1+v.Length))
 		pos += 4
-		pos += copy(out[pos:], l.Data)
+		out[pos] = byte(len(v.Type))
+		pos++
+		pos += copy(out[pos:], v.Type)
+		pos += copy(out[pos:], v.Data)
 	}
 	return out
 }
 
 // Decode is the inverse of Encode.
 func (f *Fx) Decode(buf []byte) []*Value {
-	tableCount := int(buf[0])
-	pos := 1
-	table := make([]string, tableCount)
-	for i := range table {
+	var values []*Value
+	pos := 0
+	for pos < len(buf) {
+		n := int(binary.BigEndian.Uint32(buf[pos:]))
+		pos += 4
 		tl := int(buf[pos])
 		pos++
-		table[i] = string(buf[pos : pos+tl])
+		typ := string(buf[pos : pos+tl])
 		pos += tl
+		dataLen := n - 1 - tl
+		values = append(values, &Value{Type: typ, Length: n - 1, Data: buf[pos : pos+dataLen]})
+		pos += dataLen
 	}
-	var leaves []*Value
-	for pos < len(buf) {
-		idx := buf[pos]
-		pos++
-		n := int(binary.BigEndian.Uint32(buf[pos : pos+4]))
-		pos += 4
-		leaves = append(leaves, &Value{Type: table[idx], Data: buf[pos : pos+n]})
-		pos += n
-	}
-	return leaves
+	return values
 }
 
-// ToBytes fetches the content at input, either from an HTTP URL or a local file.
-func (f *Fx) ToBytes(input string) ([]byte, error) {
+// ToBytes fetches the content at input — a local file path or an http(s)
+// URL, so custom content can be sourced from S3 exactly like a local file
+// — and returns it as a leaf Value. Name is inferred from the base name
+// and Type from the extension, falling back to content detection.
+func (f *Fx) ToBytes(input string) (*Value, error) {
+	var raw []byte
+	var err error
 	if strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://") {
-
-		resp, err := http.Get(input)
-		if err != nil {
-			return nil, err
+		resp, e := http.Get(input)
+		if e != nil {
+			return nil, e
 		}
 		defer resp.Body.Close()
-		return io.ReadAll(resp.Body)
+		raw, err = io.ReadAll(resp.Body)
+	} else {
+		raw, err = os.ReadFile(input)
 	}
-	return os.ReadFile(input)
+	if err != nil {
+		return nil, err
+	}
+	base := filepath.Base(input)
+	ext := filepath.Ext(base)
+	ct := mime.TypeByExtension(ext)
+	if ct == "" {
+		ct = http.DetectContentType(raw)
+	}
+	return &Value{Name: base[:len(base)-len(ext)], Type: ct, Data: raw}, nil
 }
 
 // Load reads a file or directory at path and stores it in Routes keyed by the
-// base name of path. A file becomes a leaf Value; a directory becomes a
-// bundle. An http(s) path is treated as a gob-encoded Value tree (written by
-// Save) and decoded directly — independent of whatever Encode/Decode's wire
-// format currently is.
+// base name of path. A file becomes a single-entry route; a directory
+// becomes a multi-entry route. An http(s) path is treated as a gob-encoded
+// []*Value (written by Save) and decoded directly — independent of whatever
+// Encode/Decode's wire format currently is.
 func (f *Fx) Load(path string) {
 	key := filepath.Base(path)
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		if data, err := f.ToBytes(path); err == nil {
-			var v Value
-			if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&v); err == nil {
-				f.Routes[key] = &v
+		if b, err := f.ToBytes(path); err == nil {
+			var v []*Value
+			if err := gob.NewDecoder(bytes.NewReader(b.Data)).Decode(&v); err == nil {
+				f.Routes[key] = v
 			}
 		}
 		return
@@ -134,69 +125,53 @@ func (f *Fx) Load(path string) {
 	}
 	if info.IsDir() {
 		f.Routes[key] = f.walk(path)
-	} else if v := f.read(path); v != nil {
-		f.Routes[key] = v
+	} else if v, err := f.ToBytes(path); err == nil {
+		f.Routes[key] = []*Value{v}
 	}
 }
 
-// read loads a single file into a leaf Value, inferring MIME type from the
-// extension or content detection as a fallback.
-func (f *Fx) read(path string) *Value {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	base := filepath.Base(path)
-	ext := filepath.Ext(base)
-	ct := mime.TypeByExtension(ext)
-	if ct == "" {
-		ct = http.DetectContentType(raw)
-	}
-	return &Value{Name: base[:len(base)-len(ext)], Type: ct, Data: raw}
-}
-
-// walk reads all files in a directory into a bundle Value. If a sort.txt file
-// is present, it defines the order by name; files not listed are appended after.
-func (f *Fx) walk(path string) *Value {
-	bundle := &Value{Name: filepath.Base(path)}
+// walk reads all files in a directory into a flat slice of Values. If a
+// sort.txt file is present, it defines the order by name; files not listed
+// are appended after.
+func (f *Fx) walk(path string) []*Value {
+	var values []*Value
 	filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || filepath.Base(p) == "sort.txt" {
 			return err
 		}
-		if v := f.read(p); v != nil {
-			bundle.Values = append(bundle.Values, v)
+		if v, err := f.ToBytes(p); err == nil {
+			values = append(values, v)
 		}
 		return nil
 	})
 	if raw, err := os.ReadFile(filepath.Join(path, "sort.txt")); err == nil {
 		order := strings.Split(strings.TrimSpace(string(raw)), "\n")
-		byName := make(map[string]int, len(bundle.Values))
-		for i, v := range bundle.Values {
+		byName := make(map[string]int, len(values))
+		for i, v := range values {
 			byName[v.Name] = i
 		}
-		out := make([]*Value, 0, len(bundle.Values))
+		out := make([]*Value, 0, len(values))
 		seen := make(map[int]bool)
 		for _, name := range order {
 			if idx, ok := byName[strings.TrimSpace(name)]; ok && !seen[idx] {
-				out = append(out, bundle.Values[idx])
+				out = append(out, values[idx])
 				seen[idx] = true
 			}
 		}
-		for i, v := range bundle.Values {
+		for i, v := range values {
 			if !seen[i] {
 				out = append(out, v)
 			}
 		}
-		bundle.Values = out
+		values = out
 	}
-	return bundle
+	return values
 }
 
-// Save persists the Value tree at key (Name, Type, Data, Values — the full
-// structure, not the wire format) to s3/key using gob, so changes to
-// Encode/Decode never require re-saving or re-uploading anything already
-// in S3. Encode is only ever applied fresh, at serve time, to whatever
-// tree Load reconstructs.
+// Save persists the []*Value at key (Name, Type, Data — the full structure,
+// not the wire format) to s3/key using gob, so changes to Encode/Decode
+// never require re-saving or re-uploading anything already in S3. Encode is
+// only ever applied fresh, at serve time, to whatever Load reconstructs.
 func (f *Fx) Save(key string) error {
 	v, ok := f.Routes[key]
 	if !ok {
