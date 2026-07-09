@@ -31,25 +31,14 @@ func NewFx(origin string) *Fx {
 // self-contained blob, wrapped as the three entries of Hello — this is
 // what the circuit server serves for "/". Since each blob is already a
 // valid Encode() output, the client decodes Hello once to get the three
-// blobs, then decodes each one again the same way.
+// blobs, then decodes each one again the same way. Order is the contract:
+// universe, frames, panels — the client doesn't look these up by name.
 func (f *Fx) Build() {
 	f.Hello = []*Value{
-		{Type: "universe", Data: f.Encode([]*Value{{Type: "text/html", Data: universeHtml}})},
-		{Type: "frames", Data: f.Encode(f.Frames)},
-		{Type: "panels", Data: f.Encode(f.Panels)},
+		{Type: "text/html", Data: f.Encode([]*Value{{Type: "text/html", Data: universeHtml}})},
+		{Type: "text/html", Data: f.Encode(f.Frames)},
+		{Type: "text/html", Data: f.Encode(f.Panels)},
 	}
-}
-
-// load fetches an .html fragment from path — a local file or an http(s)
-// URL, so custom frames can be served from S3 like any persisted route.
-// Everything a program serves must be available at startup, so a failed
-// read is fatal: fix the path.
-func (f *Fx) load(path string) string {
-	v, err := f.ToBytes(path)
-	if err != nil {
-		log.Fatalf("fx: load %q: %v", path, err)
-	}
-	return string(v.Data)
 }
 
 // build consolidates a fragment's <style>/<script> assets into a single
@@ -80,15 +69,25 @@ func (f *Fx) build(s string) *Value {
 }
 
 // Frame reads a custom .html file at path (local or S3) and registers it
-// into the frame pool.
+// into the frame pool. Everything a program serves must be available at
+// startup, so a failed read is fatal: fix the path.
 func (f *Fx) Frame(path string) {
-	f.Frames = append(f.Frames, f.build(f.load(path)))
+	v, err := f.ToBytes(path)
+	if err != nil {
+		log.Fatalf("fx: Frame %q: %v", path, err)
+	}
+	f.Frames = append(f.Frames, f.build(string(v.Data)))
 }
 
 // Panel reads a custom .html file at path (local or S3) and registers it
-// into the panel pool.
+// into the panel pool. Everything a program serves must be available at
+// startup, so a failed read is fatal: fix the path.
 func (f *Fx) Panel(path string) {
-	f.Panels = append(f.Panels, f.build(f.load(path)))
+	v, err := f.ToBytes(path)
+	if err != nil {
+		log.Fatalf("fx: Panel %q: %v", path, err)
+	}
+	f.Panels = append(f.Panels, f.build(string(v.Data)))
 }
 
 var (
