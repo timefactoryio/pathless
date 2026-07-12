@@ -8,23 +8,26 @@ import (
 )
 
 //go:embed universe.html
-var universeHtml []byte
+var universeHtml string
 
 type Fx struct {
 	Frames []*Value
 	Panels []*Value
-	Routes map[string][]*Value
+	Routes map[string]*Value
 	Origin string
 	Hello  []*Value
 }
 
 func NewFx(origin string) *Fx {
-	return &Fx{
+	fx := &Fx{
 		Frames: []*Value{},
 		Panels: []*Value{},
-		Routes: make(map[string][]*Value),
+		Routes: make(map[string]*Value),
 		Origin: origin,
+		Hello:  []*Value{},
 	}
+	fx.Hello = append(fx.Hello, fx.build(universeHtml))
+	return fx
 }
 
 // Build encodes the universe shell, frames, and panels each into their own
@@ -35,9 +38,8 @@ func NewFx(origin string) *Fx {
 // universe, frames, panels — the client doesn't look these up by name.
 func (f *Fx) Build() {
 	f.Hello = []*Value{
-		{Type: "text/html", Data: f.Encode([]*Value{{Type: "text/html", Data: universeHtml}})},
-		{Type: "text/html", Data: f.Encode(f.Frames)},
-		{Type: "text/html", Data: f.Encode(f.Panels)},
+		{Type: "text/html", Data: f.Encode(f.Frames...)},
+		{Type: "text/html", Data: f.Encode(f.Panels...)},
 	}
 }
 
@@ -72,7 +74,7 @@ func (f *Fx) build(s string) *Value {
 // into the frame pool. Everything a program serves must be available at
 // startup, so a failed read is fatal: fix the path.
 func (f *Fx) Frame(path string) {
-	v, err := f.ToBytes(path)
+	v, err := f.ToValue(path)
 	if err != nil {
 		log.Fatalf("fx: Frame %q: %v", path, err)
 	}
@@ -83,7 +85,7 @@ func (f *Fx) Frame(path string) {
 // into the panel pool. Everything a program serves must be available at
 // startup, so a failed read is fatal: fix the path.
 func (f *Fx) Panel(path string) {
-	v, err := f.ToBytes(path)
+	v, err := f.ToValue(path)
 	if err != nil {
 		log.Fatalf("fx: Panel %q: %v", path, err)
 	}

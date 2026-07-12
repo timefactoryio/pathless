@@ -1,7 +1,6 @@
 package fx
 
 import (
-	"bytes"
 	"encoding/binary"
 	"encoding/gob"
 	"fmt"
@@ -15,13 +14,11 @@ import (
 
 // Value is one encoded entry. Name is server-internal — used for sort.txt
 // ordering — and is never written to the wire (Encode/Decode), though it is
-// preserved when persisted via Save/Load. Length is len(Type)+len(Data),
-// set by Encode and populated by Decode.
+// preserved when persisted via Save/Load.
 type Value struct {
-	Name   string
-	Type   string
-	Length int
-	Data   []byte
+	Name string
+	Type string
+	Data []byte
 }
 
 // Encode writes the wire format the client decodes: a "railroad track" of
@@ -36,17 +33,17 @@ type Value struct {
 //	n = 1 + typeLen + len(data)
 //
 // Names are not encoded — order is the contract.
-func (f *Fx) Encode(values []*Value) []byte {
+func (f *Fx) Encode(values ...*Value) []byte {
 	size := 0
 	for _, v := range values {
-		v.Length = len(v.Type) + len(v.Data)
-		size += 4 + 1 + v.Length
+		size += 4 + 1 + len(v.Type) + len(v.Data)
 	}
 
 	out := make([]byte, size)
 	pos := 0
 	for _, v := range values {
-		binary.BigEndian.PutUint32(out[pos:], uint32(1+v.Length))
+		n := 1 + len(v.Type) + len(v.Data)
+		binary.BigEndian.PutUint32(out[pos:], uint32(n))
 		pos += 4
 		out[pos] = byte(len(v.Type))
 		pos++
@@ -68,20 +65,34 @@ func (f *Fx) Decode(buf []byte) []*Value {
 		typ := string(buf[pos : pos+tl])
 		pos += tl
 		dataLen := n - 1 - tl
-		values = append(values, &Value{Type: typ, Length: n - 1, Data: buf[pos : pos+dataLen]})
+		values = append(values, &Value{Type: typ, Data: buf[pos : pos+dataLen]})
 		pos += dataLen
 	}
 	return values
 }
 
-// ToBytes fetches the content at input — a local file path or an http(s)
-// URL, so custom content can be sourced from S3 exactly like a local file
-// — and returns it as a leaf Value. Name is inferred from the base name
-// and Type from the extension, falling back to content detection.
-func (f *Fx) ToBytes(input string) (*Value, error) {
+// ToValue builds the single *Value for input — a local file, a local
+// directory, or an http(s) URL, so custom content can be sourced from S3
+// exactly like a local file. A directory's files are read via walk and
+// pre-encoded into one blob, so the result is always exactly one Value
+// regardless of source. Name is inferred from the base name and Type from
+// the extension, falling back to content detection.
+func (f *Fx) ToValue(input string) (*Value, error) {
+	remote := strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://")
+
+	if !remote {
+		if info, err := os.Stat(input); err == nil && info.IsDir() {
+			return &Value{
+				Name: filepath.Base(input),
+				Type: "application/octet-stream",
+				Data: f.Encode(f.walk(input)...),
+			}, nil
+		}
+	}
+
 	var raw []byte
 	var err error
-	if strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://") {
+	if remote {
 		resp, e := http.Get(input)
 		if e != nil {
 			return nil, e
@@ -94,40 +105,14 @@ func (f *Fx) ToBytes(input string) (*Value, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	base := filepath.Base(input)
 	ext := filepath.Ext(base)
 	ct := mime.TypeByExtension(ext)
 	if ct == "" {
 		ct = http.DetectContentType(raw)
 	}
-	return &Value{Name: base[:len(base)-len(ext)], Type: ct, Data: raw}, nil
-}
-
-// Load reads a file or directory at path and stores it in Routes keyed by the
-// base name of path. A file becomes a single-entry route; a directory
-// becomes a multi-entry route. An http(s) path is treated as a gob-encoded
-// []*Value (written by Save) and decoded directly — independent of whatever
-// Encode/Decode's wire format currently is.
-func (f *Fx) Load(path string) {
-	key := filepath.Base(path)
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		if b, err := f.ToBytes(path); err == nil {
-			var v []*Value
-			if err := gob.NewDecoder(bytes.NewReader(b.Data)).Decode(&v); err == nil {
-				f.Routes[key] = v
-			}
-		}
-		return
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return
-	}
-	if info.IsDir() {
-		f.Routes[key] = f.walk(path)
-	} else if v, err := f.ToBytes(path); err == nil {
-		f.Routes[key] = []*Value{v}
-	}
+	return &Value{Name: strings.TrimSuffix(base, ext), Type: ct, Data: raw}, nil
 }
 
 // walk reads all files in a directory into a flat slice of Values. If a
@@ -139,7 +124,7 @@ func (f *Fx) walk(path string) []*Value {
 		if err != nil || d.IsDir() || filepath.Base(p) == "sort.txt" {
 			return err
 		}
-		if v, err := f.ToBytes(p); err == nil {
+		if v, err := f.ToValue(p); err == nil {
 			values = append(values, v)
 		}
 		return nil
@@ -168,7 +153,7 @@ func (f *Fx) walk(path string) []*Value {
 	return values
 }
 
-// Save persists the []*Value at key (Name, Type, Data — the full structure,
+// Save persists the *Value at key (Name, Type, Data — the full structure,
 // not the wire format) to s3/key using gob, so changes to Encode/Decode
 // never require re-saving or re-uploading anything already in S3. Encode is
 // only ever applied fresh, at serve time, to whatever Load reconstructs.

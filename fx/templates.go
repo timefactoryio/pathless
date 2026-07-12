@@ -44,14 +44,16 @@ func (f *Fx) Home(logo, heading string) {
 func (f *Fx) Logo(path string) template.HTML {
 	ext := filepath.Ext(path)
 	if strings.ToLower(ext) == ".svg" {
-		if v, err := f.ToBytes(path); err == nil {
+		if v, err := f.ToValue(path); err == nil {
 			return template.HTML(v.Data)
 		}
 	}
 
 	attr, src := "src", path
 	if !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") {
-		f.Load(path)
+		if v, err := f.ToValue(path); err == nil {
+			f.Routes[filepath.Base(path)] = v
+		}
 		attr, src = "data-src", f.Origin+"/"+filepath.Base(path)
 	}
 	alt := strings.TrimSuffix(filepath.Base(path), ext)
@@ -62,7 +64,7 @@ func (f *Fx) Logo(path string) template.HTML {
 
 // Markdown returns the configured goldmark instance for rendering markdown to HTML.
 func (f *Fx) Text(path string) {
-	v, err := f.ToBytes(path)
+	v, err := f.ToValue(path)
 	if err != nil {
 		return
 	}
@@ -84,7 +86,9 @@ func (f *Fx) Text(path string) {
 }
 
 func (f *Fx) Slides(dir string) {
-	f.Load(dir)
+	if v, err := f.ToValue(dir); err == nil {
+		f.Routes[filepath.Base(dir)] = v
+	}
 	base := filepath.Base(dir)
 	tmpl, err := template.New("slides").Parse(slidesHtml)
 	if err != nil {

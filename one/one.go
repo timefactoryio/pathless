@@ -39,7 +39,7 @@ func (o *One) handlePathless(w http.ResponseWriter, r *http.Request) {
 }
 
 func (o *One) wire(path string, v []*fx.Value) {
-	data := zip(o.Encode(v))
+	data := zip(o.Encode(v...))
 	o.circuit.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Encoding", "gzip")
@@ -64,7 +64,7 @@ func (o *One) Serve() {
 	o.wire("/", o.Hello)
 
 	for key, v := range o.Fx.Routes {
-		o.wire("/"+key, v)
+		o.wire("/"+key, []*fx.Value{v})
 	}
 
 	go http.ListenAndServe(":1001", o.cors(o.circuit))
