@@ -155,20 +155,28 @@
 						bytes.byteLength,
 					);
 					let pos = 0;
-					const v = [];
-					while (pos < bytes.length) {
-						const n = view.getUint32(pos);
-						pos += 4;
+					const types = [];
+					for (let i = bytes[pos++]; i > 0; i--) {
 						const tl = bytes[pos];
 						pos += 1;
-						const type = this.#td.decode(
-							bytes.subarray(pos, pos + tl),
+						types.push(
+							this.#td.decode(bytes.subarray(pos, pos + tl)),
 						);
 						pos += tl;
-						const dataLen = n - 1 - tl;
-						const data = bytes.subarray(pos, pos + dataLen);
-						pos += dataLen;
-						v.push(new Pathless.#Value(type, data));
+					}
+					const v = [];
+					while (pos < bytes.length) {
+						const type = types[bytes[pos]];
+						pos += 1;
+						const n = view.getUint32(pos);
+						pos += 4;
+						v.push(
+							new Pathless.#Value(
+								type,
+								bytes.subarray(pos, pos + n),
+							),
+						);
+						pos += n;
 					}
 					return v;
 				}
@@ -192,17 +200,16 @@
 						),
 					);
 				}
-				unwrap(v) {
-					return this.decode(v.data).map((f) => f.data);
-				}
 				async init() {
-					const [universe, frames, panels] = await this.source();
+					const [header, universe, ...rest] = await this.source();
+					const frames = rest.slice(0, header.data[0]);
+					const panels = rest.slice(header.data[0]);
 					this.exec(
 						document.getElementById('universe'),
-						this.unwrap(universe)[0],
+						universe.data,
 					);
-					this.universe.frames = this.unwrap(frames);
-					this.universe.panels = this.unwrap(panels);
+					this.universe.frames = frames.map((f) => f.data);
+					this.universe.panels = panels.map((f) => f.data);
 					this.universe.init();
 				}
 			}

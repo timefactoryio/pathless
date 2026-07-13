@@ -21,33 +21,50 @@ type Value struct {
 	Data []byte
 }
 
-// Encode writes the wire format the client decodes: a "railroad track" of
-// self-contained entries, one after another — no shared table, no separate
-// metadata section. Each entry carries its own type and length, so the
-// client hops from one entry straight to the next purely by size. This is
-// purely the over-the-network format — Save/Load use gob instead, so
-// changing this format never requires re-saving or re-uploading anything
-// already persisted. Layout:
+// Encode writes the wire format the client decodes: distinct types are
+// written once, up front, as a small dictionary; each entry then costs
+// just a 1-byte type id and a 4-byte length ahead of its data — no shared
+// table beyond that, no repeated type strings. This is purely the
+// over-the-network format — Save/Load use gob instead, so changing this
+// format never requires re-saving or re-uploading anything already
+// persisted. Layout:
 //
-//	[4B n][1B typeLen][type][data]...  (repeated, one per value)
-//	n = 1 + typeLen + len(data)
+//	[1B typeCount][typeCount x ([1B typeLen][type])]
+//	[1B typeID][4B len(data)][data]...  (repeated, one per value)
 //
 // Names are not encoded — order is the contract.
 func (f *Fx) Encode(values ...*Value) []byte {
-	size := 0
+	typeID := make(map[string]byte, 4)
+	var types []string
 	for _, v := range values {
-		size += 4 + 1 + len(v.Type) + len(v.Data)
+		if _, ok := typeID[v.Type]; !ok {
+			typeID[v.Type] = byte(len(types))
+			types = append(types, v.Type)
+		}
+	}
+
+	size := 1
+	for _, t := range types {
+		size += 1 + len(t)
+	}
+	for _, v := range values {
+		size += 1 + 4 + len(v.Data)
 	}
 
 	out := make([]byte, size)
 	pos := 0
-	for _, v := range values {
-		n := 1 + len(v.Type) + len(v.Data)
-		binary.BigEndian.PutUint32(out[pos:], uint32(n))
-		pos += 4
-		out[pos] = byte(len(v.Type))
+	out[pos] = byte(len(types))
+	pos++
+	for _, t := range types {
+		out[pos] = byte(len(t))
 		pos++
-		pos += copy(out[pos:], v.Type)
+		pos += copy(out[pos:], t)
+	}
+	for _, v := range values {
+		out[pos] = typeID[v.Type]
+		pos++
+		binary.BigEndian.PutUint32(out[pos:], uint32(len(v.Data)))
+		pos += 4
 		pos += copy(out[pos:], v.Data)
 	}
 	return out
@@ -55,18 +72,27 @@ func (f *Fx) Encode(values ...*Value) []byte {
 
 // Decode is the inverse of Encode.
 func (f *Fx) Decode(buf []byte) []*Value {
-	var values []*Value
+	if len(buf) == 0 {
+		return nil
+	}
 	pos := 0
-	for pos < len(buf) {
-		n := int(binary.BigEndian.Uint32(buf[pos:]))
-		pos += 4
+	types := make([]string, buf[pos])
+	pos++
+	for i := range types {
 		tl := int(buf[pos])
 		pos++
-		typ := string(buf[pos : pos+tl])
+		types[i] = string(buf[pos : pos+tl])
 		pos += tl
-		dataLen := n - 1 - tl
-		values = append(values, &Value{Type: typ, Data: buf[pos : pos+dataLen]})
-		pos += dataLen
+	}
+
+	var values []*Value
+	for pos < len(buf) {
+		typ := types[buf[pos]]
+		pos++
+		n := int(binary.BigEndian.Uint32(buf[pos:]))
+		pos += 4
+		values = append(values, &Value{Type: typ, Data: buf[pos : pos+n]})
+		pos += n
 	}
 	return values
 }

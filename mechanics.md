@@ -175,8 +175,10 @@ func main() {
     p.Home("./logo.svg", "Title")
 
     // custom data frame: expose the data, register the frame
-    p.Load("./data/catalog.json") // route "catalog.json" (base name of path)
-    p.Load("./pics")              // route "pics"         (directory → bundle)
+    v, _ := p.ToValue("./data/catalog.json")
+    p.Routes["catalog.json"] = v  // route "catalog.json" (base name of path)
+    v, _ = p.ToValue("./pics")
+    p.Routes["pics"] = v          // route "pics" (directory → pre-encoded bundle)
     p.Frame("./catalog.html")     // frame; file authors <div class="catalog">
 
     p.Serve()
@@ -186,14 +188,14 @@ func main() {
 Rules an agent must follow when emitting `main.go`:
 
 - `p.Frame(path)` registers a space frame. The file authors its own root container div, classed by convention after the filename stem (`catalog.html` → `<div class="catalog">…</div>`). Nothing is wrapped for you. The content is trusted as-is — **local, developer-controlled files only.**
-- `p.Load(path)` exposes a file or directory as a fetchable route. **The route key is `filepath.Base(path)`** — `./data/catalog.json` → `catalog.json`, `./pics` → `pics`. A directory becomes a bundle of all its files. Any file type works — the wire carries typed bytes, and the frame decides how to decode them. MIME type is inferred from extension, with content sniffing as fallback.
-- `p.Load(url)` with an `http(s)://` URL expects a **pre-encoded wire blob** (produced by `Save`) and decodes it back into a bundle. It is not for arbitrary remote files.
-- `p.Save(key)` writes the wire encoding of a loaded route to `s3/<key>`, ready to sync to object storage (e.g. `rclone sync s3 remote:bucket`). A saved route round-trips: `Save("slides")` → upload → `p.Slides("https://bucket.example.com/slides")`.
-- Every route a frame reads via `p.source(...)` **must** be registered with `p.Load(...)` (or by a template that loads internally).
+- `p.ToValue(path)` builds a `*Value` for a file or directory; assign it into `p.Routes[filepath.Base(path)]` to make it a fetchable route. **The route key is `filepath.Base(path)`** — `./data/catalog.json` → `catalog.json`, `./pics` → `pics`. A directory becomes one `Value` whose `Data` is already a pre-encoded bundle of all its files. Any file type works — the wire carries typed bytes, and the frame decides how to decode them. MIME type is inferred from extension, with content sniffing as fallback.
+- `p.ToValue(url)` with an `http(s)://` URL fetches it directly and treats it like a file (same extension/content-sniffing rules). It does not decode a `Save`-produced blob back into a bundle.
+- `p.Save(key)` gob-encodes an already-registered route's `Value` to `s3/<key>`, ready to sync to object storage (e.g. `rclone sync s3 remote:bucket`). There is currently no counterpart that loads a saved blob back through `ToValue`.
+- Every route a frame reads via `p.source(...)` **must** be registered in `p.Routes` (directly, or by a template that registers internally).
 
 ### Panel frames
 
-The **panel** is a strip appended below the universe, toggled with `z`, hidden by default. Its frame pool travels as item 2 of the `/` payload — always present, since a keyboard panel is registered automatically (see [Templates](#templates-the-brainless-path)) — and is rendered by `p.universe.panel` (`toggle()`). Build a panel frame with `p.Panel(path)` or `p.BuildPanel(elements...)` — same consolidation as space frames — then register it by passing the result to `p.Panels(...)`, e.g. `p.Panels(myPanel)`. A panel frame authors its own root div exactly like a space frame; it renders into `p.universe.panel.el`, not a space. Registering more panels appends after the keyboard, so `p.universe.panel`'s index cycles through all of them.
+The **panel** is a strip appended below the universe, toggled with `z`, hidden by default. Its frame pool travels alongside the frame pool in the `/` payload. Build a panel frame with `p.Panel(path)` — same consolidation as `p.Frame`, but appends to the panel pool instead of the frame pool. A panel frame authors its own root div exactly like a space frame; it renders into `p.universe.panel.el`, not a space. Registering more panels appends after any already registered, so `p.universe.panel`'s index cycles through all of them.
 
 ### Ordering: `sort.txt`
 
@@ -209,13 +211,16 @@ Frames reference bundle entries **by index**, so `sort.txt` is how data and comp
 
 ### Wire format
 
-One binary format, both directions. A bundle flattens to its leaves in order; per leaf, back-to-back:
+One binary format, both directions:
 
 ```
-[1B typeLen][type] [4B dataLen (big-endian)][data]
+[1B typeCount]
+typeCount × [1B typeLen][type]        // string table: distinct MIME types
+repeated until EOF:
+  [1B typeID][4B dataLen (big-endian)][data]
 ```
 
-There is no leaf count — the response's length is the terminator. Names are never encoded.
+Distinct types are written once, up front; each entry then costs a 1-byte type id and a 4-byte length. There is no entry count — the response's length is the terminator. Names are never encoded.
 
 ### Build-time transforms
 
@@ -239,62 +244,67 @@ p := pathless.NewPathless("timefactory.io", "api.timefactory.io") // production
 
 ### What goes between `NewPathless()` and `Serve()`
 
-Every call in between registers something — into `Fx`'s frame/panel pools, or into `Circuit`'s route map — and returns immediately. Nothing here talks to the network or renders anything; `Serve()` is the one point where all of it gets frozen: wire-encoded and gzip-compressed once, then served from memory for the life of the process. So this section of `main.go` is a **declaration** of what the shell contains, not a sequence of runtime actions.
+Every call in between registers something — into `Fx`'s frame/panel pools, or into `Fx`'s route map (`Routes`) — and returns immediately. Nothing here talks to the network or renders anything; `Serve()` is the one point where all of it gets frozen: wire-encoded and gzip-compressed once, then served from memory for the life of the process. So this section of `main.go` is a **declaration** of what the shell contains, not a sequence of runtime actions.
 
 What goes here, in practice:
 
 - **Space frames** — `p.Home(...)`, `p.Text(...)`, `p.Slides(...)`, `p.Frame(path)`. Registration order is navigation order: `q`/`e` page through frames in exactly the order they were registered, since the wire carries no names, only position.
-- **Routes for a frame's own data** — `p.Load(path)`, whenever a hand-authored `p.Frame(...)` will call `p.source(key)` for data a built-in template doesn't already load internally (`Slides`/a non-`.svg` `Logo` call `Load` for you). Must happen before `Serve()`, since that's the point routes get frozen:
+- **Routes for a frame's own data** — `p.ToValue(path)` + `p.Routes[key] = v`, whenever a hand-authored `p.Frame(...)` will call `p.source(key)` for data a built-in template doesn't already register internally (`Slides`/a non-`.svg` `Logo` do this for you). Must happen before `Serve()`, since that's the point routes get frozen:
 
   ```go
-  p.Load("./data/catalog.json") // registers route "catalog.json"
-  p.Load("./pics")              // registers route "pics" (directory -> bundle)
+  v, _ := p.ToValue("./data/catalog.json")
+  p.Routes["catalog.json"] = v  // registers route "catalog.json"
+  v, _ = p.ToValue("./pics")
+  p.Routes["pics"] = v          // registers route "pics" (directory -> pre-encoded bundle)
   p.Frame("./catalog.html")     // its script reads both back via p.source(...)
   ```
 
-- **Persisting a route for reuse** — `p.Save(key)`, once `key`'s route is registered, writes its wire encoding to `s3/<key>` so it can be synced to object storage and `Load`ed back later by URL, instead of every deploy re-reading local files:
+- **Persisting a route for reuse** — `p.Save(key)`, once `key`'s route is registered, gob-encodes its `Value` to `s3/<key>` so it can be synced to object storage, instead of every deploy re-reading local files:
 
   ```go
-  p.Load("./pics") // registers route "pics" from local files
-  p.Save("pics")   // writes s3/pics — sync this to a bucket separately
+  v, _ := p.ToValue("./pics")
+  p.Routes["pics"] = v // registers route "pics" from local files
+  p.Save("pics")       // writes s3/pics — sync this to a bucket separately
 
   // later, any deploy (this one, or a different app entirely):
-  p.Slides("https://bucket.example.com/pics") // Load(url) decodes the saved bundle directly
+  p.Slides("https://bucket.example.com/pics") // ToValue(url) fetches the bucket URL directly
   ```
 
-- **Extra panels** — `p.Panels(...)`. The keyboard panel is registered automatically now, so this is only needed for additional panels; anything passed here is appended after the keyboard.
+- **Extra panels** — `p.Panel(path)`, called again for each additional panel; anything registered here is appended after any already registered.
 
-Order only matters among calls that share a pool (frames, panels) — it's the sole ordering signal the client has, since nothing is named on the wire. `Load`/`Save` calls need no particular order relative to each other, only relative to `Serve()` (must come before it) and, for `Save`, relative to the `Load` that registered the route being saved.
+Order only matters among calls that share a pool (frames, panels) — it's the sole ordering signal the client has, since nothing is named on the wire. `ToValue`/`Save` calls need no particular order relative to each other, only relative to `Serve()` (must come before it) and, for `Save`, relative to the `Routes` assignment for the route being saved.
 
 ### Templates (the brainless path)
 
 Before authoring a custom frame, check whether the data maps cleanly onto a built-in — if it does, only the one-line `main.go` registration is needed, no HTML authoring:
 
-| Builder                 | Input                                                                              | Produces                                                                                         |
-| ----------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `p.Home(logo, heading)` | `.svg` (inlined), local image (auto-`Load`ed), or `https://` image; heading string | centered logo + `<h1>`                                                                           |
-| `p.Text(path)`          | markdown file (local or `https://`)                                                | rendered HTML, `w`/`s` to scroll, scroll position persisted                                      |
-| `p.Slides(dir)`         | image directory (local), or `https://` URL of a `Save`'d bundle                    | full-screen viewer; tap halves or `a`/`d` to page; index persisted. Internally calls `Load(dir)` |
+| Builder                 | Input                                                                                         | Produces                                                                                                                                 |
+| ----------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `p.Home(logo, heading)` | `.svg` (inlined), local image (registered via `ToValue`), or `https://` image; heading string | centered logo + `<h1>`                                                                                                                   |
+| `p.Text(path)`          | markdown file (local or `https://`)                                                           | rendered HTML, `w`/`s` to scroll, scroll position persisted                                                                              |
+| `p.Slides(dir)`         | image directory (local), or `https://` URL                                                    | full-screen viewer; tap halves or `a`/`d` to page; index persisted. Internally calls `ToValue(dir)` and assigns the result into `Routes` |
 
 `Home`, `Text`, and `Slides` register **space frames**.
 
-A default keyboard panel — a live map of the shell's reserved keys, layout, and focus — is registered automatically by `NewPathless`/`NewOne`; there's no builder call needed to get it (see [Panel frames](#panel-frames)). `p.Keyboard()` still exists to build the same panel frame on demand, if something other than automatic registration ever needs it.
+A keyboard panel — a live map of the shell's reserved keys, layout, and focus — is built by `p.Keyboard()`, but nothing calls it automatically: a program must call `p.Keyboard()` itself to get one registered (see [Panel frames](#panel-frames)).
 
 ### `Serve()`
 
 ```go
 p.Home("./logo.svg", "Title")
-p.Load("./data/catalog.json")
-p.Load("./pics")
+v, _ := p.ToValue("./data/catalog.json")
+p.Routes["catalog.json"] = v
+v, _ = p.ToValue("./pics")
+p.Routes["pics"] = v
 p.Frame("./catalog.html")
 p.Serve()
 ```
 
 `p.Serve()` is the last call. At that point every registered route is wire-encoded and gzip-compressed **once**; requests are served from memory. Route map:
 
-| Route    | Content                                                                                                                                                                                                |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/`      | item 0: the universe HTML; item 1: every space frame, pre-encoded as one nested bundle; item 2: every panel frame (keyboard plus any registered via `p.Panels(...)`), pre-encoded as one nested bundle |
-| `/<key>` | one bundle per `Load`ed path, keyed by `filepath.Base(path)`                                                                                                                                           |
+| Route    | Content                                                                                                                                                                           |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`      | a 1-byte frame-count header; the universe HTML; every space frame; every panel frame — all `Encode`d together as one flat list (see [fx](fx/README.md#fxgo--framepanel-building)) |
+| `/<key>` | one `Value` per registered `Routes` entry, keyed by `filepath.Base(path)`                                                                                                         |
 
-Item 0 is used as-is; items 1 and 2 are themselves wire-encoded — the client decodes them a second time to recover the individual frames.
+Frame/panel entries that are themselves directories (e.g. a `Slides` bundle reached via `Routes`) are wire-encoded a second time — the client decodes them again to recover the individual files.

@@ -37,10 +37,10 @@ func NewFx(origin string) *Fx {
 // blobs, then decodes each one again the same way. Order is the contract:
 // universe, frames, panels — the client doesn't look these up by name.
 func (f *Fx) Build() {
-	f.Hello = []*Value{
-		{Type: "text/html", Data: f.Encode(f.Frames...)},
-		{Type: "text/html", Data: f.Encode(f.Panels...)},
-	}
+	universe := f.Hello[0]
+	header := &Value{Type: "application/x-count", Data: []byte{byte(len(f.Frames))}}
+	f.Hello = append([]*Value{header, universe}, f.Frames...)
+	f.Hello = append(f.Hello, f.Panels...)
 }
 
 // build consolidates a fragment's <style>/<script> assets into a single
