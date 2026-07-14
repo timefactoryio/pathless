@@ -6,25 +6,40 @@ import (
 	"net/http"
 
 	"github.com/timefactoryio/pathless/fx"
-	"github.com/timefactoryio/pathless/zero"
 )
 
+// One is the HTTP layer. It takes zero's compiled assets and fx's processed
+// Values, encodes them into the client wire format, gzips everything once at
+// startup, and serves it from memory: the shell on :1000, the wire gateway
+// on :1001.
 type One struct {
-	*zero.Zero
-	*fx.Fx
+	origin   string
+	shell    []byte
 	pathless *http.ServeMux
 	circuit  *http.ServeMux
 }
 
-func NewOne(zero *zero.Zero, f *fx.Fx) *One {
+// NewOne assembles the "/" payload — [frame-count header, universe, frames…,
+// panels…] — plus one endpoint per route, encoding and gzipping each once.
+// origin is the CORS allow-origin; shell and universe are zero's asset bytes;
+// f supplies the frame/panel pools and route map.
+func NewOne(origin string, shell, universe []byte, f *fx.Fx) *One {
 	o := &One{
-		Zero:     zero,
-		Fx:       f,
+		origin:   origin,
+		shell:    zip(shell),
 		pathless: http.NewServeMux(),
 		circuit:  http.NewServeMux(),
 	}
-	o.Pathless = zip(o.Pathless)
 	o.pathless.HandleFunc("/", o.handlePathless)
+
+	header := &fx.Value{Type: "application/x-count", Data: []byte{byte(len(f.Frames))}}
+	hello := append([]*fx.Value{header, {Type: "text/html", Data: universe}}, f.Frames...)
+	hello = append(hello, f.Panels...)
+	o.wire("/", Encode(hello...))
+
+	for key, v := range f.Routes {
+		o.wire("/"+key, Encode(v))
+	}
 	return o
 }
 
@@ -35,11 +50,11 @@ func (o *One) handlePathless(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Encoding", "gzip")
-	w.Write(o.Pathless)
+	w.Write(o.shell)
 }
 
-func (o *One) wire(path string, v []*fx.Value) {
-	data := zip(o.Encode(v...))
+func (o *One) wire(path string, data []byte) {
+	data = zip(data)
 	o.circuit.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Encoding", "gzip")
@@ -49,7 +64,7 @@ func (o *One) wire(path string, v []*fx.Value) {
 
 func (o *One) cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", o.Origin)
+		w.Header().Set("Access-Control-Allow-Origin", o.origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -60,20 +75,12 @@ func (o *One) cors(next http.Handler) http.Handler {
 }
 
 func (o *One) Serve() {
-	o.Fx.Build()
-	o.wire("/", o.Hello)
-
-	for key, v := range o.Fx.Routes {
-		o.wire("/"+key, []*fx.Value{v})
-	}
-
 	go http.ListenAndServe(":1001", o.cors(o.circuit))
 	http.ListenAndServe(":1000", o.pathless)
 }
 
-// zip gzip-zipes data at maximum zipion.
-// Bundles are ziped once at build time and served directly
-// with Content-Encoding: gzip.
+// zip gzip-compresses data at maximum compression. Bundles are compressed
+// once at build time and served directly with Content-Encoding: gzip.
 func zip(data []byte) []byte {
 	var buf bytes.Buffer
 	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)

@@ -10,17 +10,24 @@ import (
 //go:embed pathless.html
 var pathlessHtml string
 
-// Zero holds the circuit host a shell is compiled against. Circuit is the
-// API endpoint URL baked into the shell at build time.
+//go:embed universe.html
+var universeHtml string
+
+// Zero compiles the two browser-runtime assets every request is built from:
+// Pathless, the HTML shell, and Universe, the client controller payload. The
+// circuit URL is baked into the shell at build time (as window.circuit) and
+// not retained — nothing reads it after compilation.
 type Zero struct {
-	Circuit  string
 	Pathless []byte
+	Universe []byte
 }
 
 // NewZero constructs Zero, compiling the HTML shell (Pathless) against
-// circuit.
+// circuit and carrying the universe payload untouched.
 //
-// Pathless is templated with circuit and minified.
+// Pathless is templated with circuit and minified. Universe needs no
+// consolidation — it is a single, already-wrapped <script> with no <style>,
+// so it is served as-is (one wraps it in a wire Value at serve time).
 func NewZero(circuit string) *Zero {
 	var b strings.Builder
 	tmpl := template.Must(template.New("pathless").Parse(pathlessHtml))
@@ -29,8 +36,8 @@ func NewZero(circuit string) *Zero {
 	}
 
 	return &Zero{
-		Circuit:  circuit,
 		Pathless: minify(b.String()),
+		Universe: []byte(universeHtml),
 	}
 }
 

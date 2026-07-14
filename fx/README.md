@@ -1,54 +1,41 @@
 # fx
 
-`fx` encodes content into the wire format and registers routes and frames on top of it. `circuit.go` defines `Value`, its wire encoding, and route persistence; `fx.go` defines `Fx` — the frame/panel pools, the route map, and asset consolidation.
+`fx` sources and processes content into `Value`s and builds the frame/panel pools and route map. It knows nothing of the wire format, HTTP, or where content is served from — [one](../one/README.md) encodes and serves what `fx` produces.
 
-| File         | Role                                                                         |
-| ------------ | ---------------------------------------------------------------------------- |
-| `circuit.go` | `Value` — wire `Encode`/`Decode`, `ToValue`/`walk`, `Save`                   |
-| `fx.go`      | `Fx` — frame/panel pools, route map (`Routes`), asset consolidation, `Build` |
+| File           | Role                                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `value.go`     | `Value` — the content tree; `ToValue`/`walk` build it from files, dirs, and URLs                                         |
+| `fx.go`        | `Fx` — frame/panel pools, route map (`Routes`), `<style>`/`<script>` consolidation                                       |
+| `templates.go` | `Home`/`Logo`/`Text`/`Slides`/`Keyboard` — built-in frame builders (see [below](#templatesgo--built-in-frame-templates)) |
 
 ---
 
-## `circuit.go` — wire format & routes
+## `value.go` — content values
 
 ### `Value`
 
 ```go
 type Value struct {
-    Name string // server-internal only — sort.txt ordering; never wire-encoded
-    Type string // MIME type
-    Data []byte // raw bytes — a directory's Data is itself a pre-encoded Encode() blob
+    Name     string   // server-internal only — sort.txt ordering & Save; never on the wire
+    Type     string   // MIME type
+    Data     []byte   // leaf bytes
+    Children []*Value // directory bundle — its files, in sort.txt order
 }
 ```
 
-A directory has no separate tree shape: `ToValue` walks it (`walk`) and pre-encodes every file into one `Value` whose `Data` is already a complete `Encode()` blob (`Type: "application/octet-stream"`). `Name` is never wire-encoded; it only orders/re-identifies entries for `sort.txt` and `Save`.
+`Value` is a **tree**: a leaf carries `Data`; a directory carries `Children` and no `Data` of its own. `fx` never encodes — turning this tree into wire bytes (a directory's payload becomes `Encode(Children)`) is [one](../one/README.md#wirego--wire-format--persistence)'s job. `Name` is never sent on the wire; it only orders/re-identifies entries for `sort.txt` and `Save`.
 
-`Routes map[string]*Value` is a plain field on `Fx` (see [fx.go](#fxgo--framepanel-building)) — there is no separate `Circuit` wrapper type.
+`Routes map[string]*Value` is a plain field on `Fx` (see [fx.go](#fxgo--framepanel-building)).
 
-### `Encode(v) []byte` / `Decode(buf) []*Value` — wire format
+### `ToValue(input) (*Value, error)` — building a value
 
-```
-[1B tableCount]
-tableCount × [1B typeLen][type]        // string table: distinct MIME types
-repeated until EOF:
-  [1B tableIndex][4B dataLen BE][data]
-```
+| `input`          | Result                                                                                        |
+| ---------------- | --------------------------------------------------------------------------------------------- |
+| local file       | one leaf `Value` — `Type` from extension, content-sniffed as fallback                         |
+| local directory  | one directory `Value` (`walk`) — every file as a child leaf, in `sort.txt` order if present   |
+| `http(s)://` URL | fetched directly and treated like a file — `Type` from extension, content-sniffed as fallback |
 
-`Encode` takes the `*Value`s directly — there's no tree to flatten — deduplicates MIME types into a table, and writes the layout above — no entry count, the response's length is the terminator. `Decode` is the exact inverse. This is purely the wire format, applied fresh at serve time — changing it never invalidates anything already persisted via `Save`, since `Save` gob-encodes the `Value` itself, not this wire encoding.
-
-### `ToValue(input) (*Value, error)` — building a route value
-
-| `input`          | Result                                                                                                                   |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| local file       | one `Value` — `Type` from extension, content-sniffed as fallback                                                         |
-| local directory  | one `Value` (`walk`) — every file in the directory, pre-encoded via `Encode` into `Data`, in `sort.txt` order if present |
-| `http(s)://` URL | fetched directly and treated like a file — `Type` from extension, content-sniffed as fallback                            |
-
-`ToValue` only builds the `*Value`; it doesn't register anything. Callers assign the result into `Routes` themselves, keyed by `filepath.Base(input)` (e.g. `f.Routes[filepath.Base(path)] = v`, as `Logo`/`Slides` do in [templates.go](../one/README.md#templatesgo--built-in-frame-templates)). `walk` skips `sort.txt` itself, then, if present, reorders entries to match it: listed stems first in listed order, unlisted files appended after.
-
-### `Save(key) error`
-
-Gob-encodes the `Value` at `Routes[key]` (`Name`, `Type`, `Data` — not `Encode`'s wire output) to `s3/<key>`. Because it's gob, `Encode`/`Decode` can change freely without ever requiring a re-save. Note `ToValue` doesn't currently gob-decode a `Save`d blob back — an `http(s)://` input is just fetched and treated as a plain file, so a full round trip through a remote URL isn't wired up yet.
+`ToValue` only builds the `*Value`; it doesn't register anything. Callers assign the result into `Routes` themselves, keyed by `filepath.Base(input)` (e.g. `f.Routes[filepath.Base(path)] = v`, as `Logo`/`Slides` do in [templates.go](#templatesgo--built-in-frame-templates)). `walk` skips `sort.txt` itself, then, if present, reorders entries to match it: listed stems first in listed order, unlisted files appended after.
 
 ---
 
@@ -59,23 +46,18 @@ type Fx struct {
     Frames []*Value          // registered space frames, in registration order
     Panels []*Value          // registered panel frames, in registration order
     Routes map[string]*Value // custom data routes, keyed by filepath.Base
-    Origin string            // CORS-allowed root domain
-    Hello  []*Value          // the "/" payload — assembled by Build
 }
 
-func NewFx(origin string) *Fx
+func NewFx() *Fx
 ```
 
-`NewFx` builds the universe shell (`build(universeHtml)`) as `Hello[0]`; `Build()` turns that into the final ordered payload.
+`Fx` holds only content — no config, no wire state. Assembling the `/` payload from these pools is done in [one](../one/README.md#onego--server), not here.
 
 | Member        | Behavior                                                                                                                                                                       |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `Frame(path)` | reads a local/remote `.html` file (`ToValue`) and appends its consolidated (`build`) form to `Frames`. A failed read is fatal — everything served must be available at startup |
 | `Panel(path)` | same as `Frame`, but appends to `Panels` instead                                                                                                                               |
 | `build(s)`    | consolidates a fragment's `<style>`/`<script>` blocks into one `text/html` `Value` (see below)                                                                                 |
-| `Build()`     | prepends a 1-byte frame-count header to `Frames`, then assembles `Hello = [header, universe, ...Frames, ...Panels]`                                                            |
-
-`Build`'s header lets the client slice `Frames` from `Panels` without either needing its own wire entry — `Hello` as a whole is `Encode`d once, by `one.wire("/", o.Hello)`.
 
 ### `build(s)` — build-time transform
 
@@ -86,5 +68,21 @@ Runs once per `Frame`/`Panel`/template-builder call, never per request:
 3. All script content is concatenated into one block, appended at the end.
 
 The result is exactly one `<style>` (if any) → markup → one `<script>{ ... }</script>`, regardless of how many blocks the source had.
+
+---
+
+## `templates.go` — built-in frame templates
+
+Four embedded template sources (`frames/home.html`, `frames/slides.html`, `frames/text.html`, `panels/keyboard.html`), parsed and executed on demand by these builders. Each appends directly to `Frames`/`Panels` via `build`, so registration follows the same rules as any hand-authored frame.
+
+| Builder               | Behavior                                                                                                                                                                                                                                                                                                 |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Home(logo, heading)` | renders `frames/home.html` with `{{.LOGO}}` (via `Logo`) and `{{.HEADING}}`, registers it as a space frame                                                                                                                                                                                               |
+| `Logo(path)`          | `.svg` → inlined verbatim (`<svg>` markup, via `ToValue`). Anything else → registered as a route (`ToValue` + `Routes[key] = v`) and referenced by `data-src="{routekey}"` — the client's `p.source` prepends `window.circuit` when it lazily fetches. A remote URL is used as `src` directly, unfetched |
+| `Text(path)`          | fetches `path` (`ToValue`), renders it as Markdown (`markdown.New("")`), injects the HTML into `frames/text.html`, registers it as a space frame                                                                                                                                                         |
+| `Slides(dir)`         | registers `dir` as a route (`ToValue` + `Routes[key] = v`; its images, in `sort.txt` order if present), renders `frames/slides.html` with `{{.PREFIX}}` set to the route's key, registers it as a space frame — the frame's own script then fetches that route client-side                               |
+| `Keyboard()`          | builds `panels/keyboard.html` via `build` and appends it directly to `Panels`. Nothing calls it automatically — a program must call `p.Keyboard()` itself to get the default panel                                                                                                                       |
+
+`Logo`'s two paths mirror the two things a frame can point at: embed small/local assets directly, or register anything larger as its own route and let the client fetch it lazily against `window.circuit`.
 
 ---

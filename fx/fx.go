@@ -1,46 +1,27 @@
 package fx
 
 import (
-	_ "embed"
 	"log"
 	"regexp"
 	"strings"
 )
 
-//go:embed universe.html
-var universeHtml string
-
+// Fx sources and processes content into Values: it builds the frame and
+// panel pools and the route map. It knows nothing of the wire format, HTTP,
+// or where content is served from — one encodes and serves what fx produces,
+// and route URLs are resolved client-side against window.circuit.
 type Fx struct {
 	Frames []*Value
 	Panels []*Value
 	Routes map[string]*Value
-	Origin string
-	Hello  []*Value
 }
 
-func NewFx(origin string) *Fx {
-	fx := &Fx{
+func NewFx() *Fx {
+	return &Fx{
 		Frames: []*Value{},
 		Panels: []*Value{},
 		Routes: make(map[string]*Value),
-		Origin: origin,
-		Hello:  []*Value{},
 	}
-	fx.Hello = append(fx.Hello, fx.build(universeHtml))
-	return fx
-}
-
-// Build encodes the universe shell, frames, and panels each into their own
-// self-contained blob, wrapped as the three entries of Hello — this is
-// what the circuit server serves for "/". Since each blob is already a
-// valid Encode() output, the client decodes Hello once to get the three
-// blobs, then decodes each one again the same way. Order is the contract:
-// universe, frames, panels — the client doesn't look these up by name.
-func (f *Fx) Build() {
-	universe := f.Hello[0]
-	header := &Value{Type: "application/x-count", Data: []byte{byte(len(f.Frames))}}
-	f.Hello = append([]*Value{header, universe}, f.Frames...)
-	f.Hello = append(f.Hello, f.Panels...)
 }
 
 // build consolidates a fragment's <style>/<script> assets into a single

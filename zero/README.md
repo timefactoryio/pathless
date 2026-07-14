@@ -1,35 +1,34 @@
 # zero
 
-`zero` compiles the two artifacts every request is built from — the HTML shell and the universe payload — once, at startup, from embedded sources to be served from memory.
-
-Three files:
+`zero` compiles the two browser-runtime assets every request is built from — the HTML shell and the universe payload — once, at startup, from embedded sources to be served from memory.
 
 | File            | Role                                                                                  |
 | --------------- | ------------------------------------------------------------------------------------- |
-| `main.go`       | Go package `zero` — embeds the two HTML files, templates/minifies/gzips the shell     |
+| `zero.go`       | Go package `zero` — embeds the two HTML files, templates + minifies the shell         |
 | `pathless.html` | the shell: page chrome + `Pathless` client (wire fetch/decode, render, bootstrap)     |
 | `universe.html` | the universe payload: `Universe`, `Input`, `Panel` — layout, state, and input runtime |
 
 ---
 
-## `main.go` — build-time compilation
+## `zero.go` — build-time compilation
 
 ```go
 type Zero struct {
-    Origin  string // CORS-allowed root domain
-    Circuit string // wire gateway URL baked into the shell
+    Pathless []byte // minified, templated HTML shell
+    Universe []byte // universe payload, embedded bytes untouched
 }
 
-func NewZero(origin, circuit string) *Zero
-func (z *Zero) Compile() (pathless []byte, universe []byte)
+func NewZero(circuit string) *Zero
 ```
 
-`NewZero` defaults `origin` to `"*"` and `circuit` to `http://localhost:1001` when empty (dev). It only stores config — no compilation happens here.
+`NewZero` does all the work up front:
 
-`Compile`:
+1. Executes `pathless.html` as a Go template with `{{.CIRCUIT}}` substituted (baking `circuit` in as `window.circuit`), then minifies the result into `Pathless`.
+2. Carries `universe.html`'s embedded bytes into `Universe` untouched — it needs no consolidation, being a single already-wrapped `<script>` with no `<style>`.
 
-1. Executes `pathless.html` as a Go template with `{{.CIRCUIT}}` substituted, minifies the result.
-2. Returns `universe.html`'s embedded bytes untouched. 
+`circuit` is only used during templating; it is **not** stored on `Zero` — nothing reads it after compilation. Wrapping `Universe` in a wire `Value` and encoding both artifacts is [one](../one/README.md)'s job.
+
+`minify` aggressively strips `pathless.html`'s `<style>`/`<script>`/markup down to its minimum byte size. It is hand-tuned for `pathless.html`'s exact content — not a general-purpose minifier — and runs once, inside `NewZero`.
 
 ---
 

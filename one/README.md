@@ -1,12 +1,11 @@
 # one
 
-`one` is the HTTP server. It wires `zero`'s compiled shell and `fx`'s registered frames/routes into two listeners, gzip-compressing everything once at startup and serving it from memory thereafter. `templates.go` builds the handful of ready-made frame templates (`Home`, `Text`, `Slides`, `Keyboard`) shipped with the package.
+`one` is the HTTP layer. It takes [zero](../zero/README.md)'s compiled assets and [fx](../fx/README.md)'s processed `Value`s, encodes them into the client wire format, gzip-compresses everything once at startup, and serves it from memory: the shell on `:1000`, the wire gateway on `:1001`.
 
-| File               | Role                                                                                           |
-| ------------------ | ---------------------------------------------------------------------------------------------- |
-| `one.go`           | `One` (embeds `*zero.Zero`, `*fx.Fx`) — two `http.ServeMux`s, gzip, `Serve()`                  |
-| `templates.go`     | `Home`/`Logo`/`Text`/`Slides`/`Keyboard` — template builders that call `Frame`/`Panel`/`build` |
-| `templates/*.html` | the four embedded template sources these builders parse                                        |
+| File      | Role                                                                   |
+| --------- | ---------------------------------------------------------------------- |
+| `one.go`  | `One` — two `http.ServeMux`s, `/` payload assembly, gzip, `Serve()`    |
+| `wire.go` | `Encode`/`Decode` (the wire format) and `Save` (gob route persistence) |
 
 ---
 
@@ -14,67 +13,57 @@
 
 ```go
 type One struct {
-    *zero.Zero
-    *fx.Fx
-    pathless *http.ServeMux // ":1000" — the compiled shell
+    origin   string         // CORS allow-origin
+    shell    []byte         // gzipped HTML shell, served at "/"
+    pathless *http.ServeMux // ":1000" — the shell
     circuit  *http.ServeMux // ":1001" — wire routes
 }
 
-func NewOne(z *zero.Zero, f *fx.Fx) *One
+func NewOne(origin string, shell, universe []byte, f *fx.Fx) *One
 ```
 
-`One` embeds both `*zero.Zero` and `*fx.Fx`, so their fields/methods (`Pathless`, `Origin`, `ToValue`, `Build`, `Frame`, `Panel`, `Routes`, `Hello`, ...) are all directly callable on `One` — `templates.go`'s builders rely on this promotion.
+`One` embeds no `zero`/`fx` structs — it receives their outputs as plain bytes plus a `*fx.Fx` to read the pools. `NewOne` does all assembly up front:
 
-`NewOne` gzip-compresses the shell (`o.Pathless = zip(o.Pathless)`, promoted from `zero.Zero`), registers `Keyboard()` as the first panel (guaranteeing the panel pool is never empty), and registers the shell's catch-all handler. There is no separately-tracked universe field — the universe payload is `Hello[0]`, assembled by `Fx.Build()` inside `Serve()`.
+1. gzips the shell.
+2. assembles the `/` payload — `[1-byte frame-count header, universe, ...Frames, ...Panels]` — `Encode`s it, gzips it, and registers it on `circuit`.
+3. `Encode`s + gzips each `Routes` entry and registers it at `/`+key on `circuit`.
+4. registers the shell's catch-all handler on `pathless`.
 
-| Member                 | Behavior                                                                                                                                                    |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `handlePathless(w, r)` | serves `Pathless` at `/` (gzip). Any other path or a non-empty query redirects to `/` — the shell is a single page, routing lives entirely on the wire side |
-| `wire(path, v)`        | gzip-compresses `Encode(v)` once and registers a handler on `circuit` that serves those fixed bytes as `application/octet-stream`                           |
-| `cors(next)`           | sets `Access-Control-Allow-Origin: o.Origin` (from `zero.Zero`) on every response, short-circuits `OPTIONS` with `204` — wraps `circuit` only               |
-| `Serve()`              | assembles and registers every route, then blocks (see below)                                                                                                |
+The 1-byte header lets the client slice `Frames` from `Panels` without either needing its own wire entry; `universe` is `zero`'s payload bytes wrapped as a `text/html` `Value` here.
 
-### `Serve()`
+| Member                 | Behavior                                                                                                                                                   |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `handlePathless(w, r)` | serves the shell at `/` (gzip). Any other path or a non-empty query redirects to `/` — the shell is a single page, routing lives entirely on the wire side |
+| `wire(path, data)`     | gzip-compresses `data` once and registers a handler on `circuit` that serves those fixed bytes as `application/octet-stream`                               |
+| `cors(next)`           | sets `Access-Control-Allow-Origin: origin`, short-circuits `OPTIONS` with `204` — wraps `circuit` only                                                     |
+| `Serve()`              | starts `:1001` (wire, CORS-wrapped) in a goroutine, `:1000` (shell) blocking on the main goroutine                                                         |
 
-```go
-func (o *One) Serve() {
-    o.Fx.Build()
-    o.wire("/", o.Hello)
-
-    for key, v := range o.Fx.Routes {
-        o.wire("/"+key, []*fx.Value{v})
-    }
-    ...
-}
-```
-
-`Build()` assembles `Hello` as `[header, universe, ...Frames, ...Panels]` — a 1-byte frame-count header lets the client slice `Frames` from `Panels` without either needing its own wire entry. `Hello` as a whole is `Encode`d once, at `/` on `:1001`. `NewOne` always registers `Keyboard()` as the first panel, so the panel pool is never empty.
-
-Every other `fx.Routes` entry (populated by a direct `Routes[key] = v` assignment after `ToValue`, e.g. in `Slides` or a non-SVG `Logo`) is wired individually at `/`+key.
-
-`Serve()` then starts both listeners — `:1001` (wire, CORS-wrapped) in a goroutine, `:1000` (shell) blocking on the main goroutine. Both mux's routes are fixed by this point; nothing is registered after `Serve()` is called.
+Both muxes' routes are fixed by the time `NewOne` returns; nothing is registered after. Whether the panel pool is non-empty is up to the caller — `pathless` registers `Keyboard()` before serving if nothing else did.
 
 ### `zip(data) []byte`
 
-Gzips `data` at `gzip.BestCompression`. Used for the shell (once, in `NewOne`) and for every wire route (once, in `wire`) — never per request. Every response this package writes sets `Content-Encoding: gzip` to match.
+Gzips `data` at `gzip.BestCompression`. Used for the shell (once) and every wire route (once) — never per request. Every response this package writes sets `Content-Encoding: gzip` to match.
 
 ---
 
-## `templates.go` — built-in frame templates
+## `wire.go` — wire format & persistence
 
-Five embedded `templates/*.html` files, parsed and executed on demand by these builders. Each one appends directly to `Frames`/`Panels` (promoted from `fx.Fx`) via `build`, so registration follows the same rules as any hand-authored frame (see [fx](../fx/README.md#fxgo--framepanel-building)).
+### `Encode(values ...*fx.Value) []byte` / `Decode(buf) []*fx.Value`
 
-| Builder               | Behavior                                                                                                                                                                                                                                                                      |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Home(logo, heading)` | renders `templates/home.html` with `{{.LOGO}}` (via `Logo`) and `{{.HEADING}}`, registers it as a space frame                                                                                                                                                                 |
-| `Logo(path)`          | `.svg` → inlined verbatim (`<svg>` markup, via `ToValue`). Anything else → registered as a route (`ToValue` + `Routes[key] = v`) and referenced by `data-src="{Origin}/{basename}"`; a remote URL is used as `src` directly, unfetched                                        |
-| `Text(path)`          | fetches `path` (`ToValue`), renders it as Markdown (`markdown.New("")`), injects the HTML into `templates/text.html`, registers it as a space frame                                                                                                                           |
-| `Slides(dir)`         | registers `dir` as a route (`ToValue` + `Routes[key] = v`; its images, in `sort.txt` order if present), renders `templates/slides.html` with `{{.PREFIX}}` set to the route's key, registers it as a space frame — the frame's own script then fetches that route client-side |
-| `Keyboard()`          | builds `templates/keyboard.html` via `build` and appends it directly to `Panels`. Nothing currently calls it automatically — a program must call `o.Keyboard()` itself to get the default panel                                                                               |
+```
+[1B typeCount]
+typeCount × [1B typeLen][type]        // string table: distinct MIME types
+repeated until EOF:
+  [1B typeID][4B dataLen BE][data]
+```
 
-`Logo`'s two paths mirror the two things a frame can point at: embed small/local assets directly, or register anything larger as its own route and let the client fetch it lazily.
+Distinct MIME types are written once, up front, as a table; each entry then costs just a 1-byte type id and a 4-byte length ahead of its data. There is no entry count — the response's length is the terminator. Names are never encoded — order is the contract.
 
-Nothing currently registers the keyboard panel automatically — a program must call `o.Keyboard()` itself (e.g. right after `NewPathless()`) to get a working panel strip.
+A directory `Value` carries no bytes of its own: its wire payload is `Encode(Children)`, so the client decodes it exactly the way it decodes the top-level response (decode once, then decode a directory entry's data again). `Decode` is the one-level inverse. This is purely the over-the-network format — `Save` uses gob instead, so changing it never invalidates anything already persisted.
+
+### `Save(key, v) error`
+
+Gob-encodes the full `Value` tree (`Name`, `Type`, `Data`, `Children` — not the wire format) to `s3/<key>`, ready to sync to object storage. Because it's gob, `Encode`/`Decode` can change freely without ever requiring a re-save. `pathless.Save(key)` looks up `Routes[key]` and delegates here.
 
 ---
 

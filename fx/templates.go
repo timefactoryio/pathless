@@ -54,7 +54,9 @@ func (f *Fx) Logo(path string) template.HTML {
 		if v, err := f.ToValue(path); err == nil {
 			f.Routes[filepath.Base(path)] = v
 		}
-		attr, src = "data-src", f.Origin+"/"+filepath.Base(path)
+		// data-src is the route key; the client's p.source prepends
+		// window.circuit when it lazily fetches the image.
+		attr, src = "data-src", filepath.Base(path)
 	}
 	alt := strings.TrimSuffix(filepath.Base(path), ext)
 	return template.HTML(fmt.Sprintf(`<img %s="%s" alt="%s">`,
