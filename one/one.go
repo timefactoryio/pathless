@@ -19,10 +19,14 @@ type One struct {
 	circuit  *http.ServeMux
 }
 
-// NewOne assembles the "/" payload — [universe, frames bundle, panels
-// bundle] — plus one endpoint per route, encoding and gzipping each once.
-// origin is the CORS allow-origin; shell and universe are zero's asset bytes;
-// f supplies the frame/panel pools and route map.
+// NewOne registers the wire endpoints served from :1001. Every route — the
+// root and each registered route alike — is exactly one *fx.Value, served by
+// serve as Encode(v): the value's type travels in-band in the wire table, so
+// the response needs no meaningful Content-Type. The root is just a bundle
+// whose children are the universe payload and the frame and panel pools, so
+// it needs no special handling. origin is the CORS allow-origin; shell and
+// universe are zero's asset bytes; f supplies the frame/panel pools and route
+// map.
 func NewOne(origin string, shell, universe []byte, f *fx.Fx) *One {
 	o := &One{
 		origin:   origin,
@@ -32,15 +36,13 @@ func NewOne(origin string, shell, universe []byte, f *fx.Fx) *One {
 	}
 	o.pathless.HandleFunc("/", o.handlePathless)
 
-	hello := []*fx.Value{
+	o.serve("/", &fx.Value{Type: "application/x-bundle", Children: []*fx.Value{
 		{Type: "text/html", Data: universe},
 		{Type: "application/x-bundle", Children: f.Frames},
 		{Type: "application/x-bundle", Children: f.Panels},
-	}
-	o.wire("/", Encode(hello...))
-
+	}})
 	for key, v := range f.Routes {
-		o.wire("/"+key, Encode(v))
+		o.serve("/"+key, v)
 	}
 	return o
 }
@@ -55,8 +57,12 @@ func (o *One) handlePathless(w http.ResponseWriter, r *http.Request) {
 	w.Write(o.shell)
 }
 
-func (o *One) wire(path string, data []byte) {
-	data = zip(data)
+// serve registers one wire endpoint: Encode(v) — the value and its type,
+// self-describing — gzipped once at startup and written from memory. The
+// response carries no meaningful Content-Type; the bytes are the whole
+// contract, and the client decodes them into a Value.
+func (o *One) serve(path string, v *fx.Value) {
+	data := zip(Encode(v))
 	o.circuit.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Encoding", "gzip")

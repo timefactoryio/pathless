@@ -55,49 +55,48 @@ Two further rules are runtime concerns, covered where they apply: input goes thr
 
 `zero` is the browser runtime a frame executes inside. `window.pathless` (passed as `p`) is the only global; `p.universe` (including `p.universe.panel`), `p.input`, and `p.keyboard` (the default keyboard panel, always registered) are the modules attached to it.
 
-| Member                       | Signature                                | Behavior                                                                                  |
-| ---------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `p.source(key)`              | `(string) => Promise<[{type,data,url}]>` | fetch + decode a route; cached per key                                                    |
-| `p.universe.frame`           | `HTMLElement`                            | the focused frame's root container — the base for querying your own markup                |
-| `p.universe.space.el`        | `HTMLElement`                            | the space element hosting the frame (shell layer); sizing context, not your query root    |
-| `p.universe.read(i?)`        | `(number?) => Map`                       | per-(frame, space) state map; survives re-render; defaults to the currently focused space |
-| `p.universe.write(k, v, i?)` | `(string, any, number?) => void`         | persist `k → v` into the state map; same default caveat as `read`                         |
-| `p.universe.pin(i?)`         | `(number?) => {i, read, write}`          | captures the focused index once and returns read/write bound to it                        |
-| `p.universe.sync(...i)`      | `(...number) => void`                    | re-render the given spaces, or all visible spaces if none given                           |
-| `p.input.bind(binds)`        | `(object) => void`                       | register gesture and key handlers for the focused space                                   |
-| `p.universe.panel.toggle()`  | `() => void`                             | show/hide the panel strip (also bound to reserved key `z`)                                |
+| Member                       | Signature                                       | Behavior                                                                                  |
+| ---------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `p.source(key)`              | `(string) => Promise<{type,data,url,children}>` | fetch one route as a single `Value`; cached per key                                       |
+| `p.universe.frame`           | `HTMLElement`                                   | the focused frame's root container — the base for querying your own markup                |
+| `p.universe.space.el`        | `HTMLElement`                                   | the space element hosting the frame (shell layer); sizing context, not your query root    |
+| `p.universe.read(i?)`        | `(number?) => Map`                              | per-(frame, space) state map; survives re-render; defaults to the currently focused space |
+| `p.universe.write(k, v, i?)` | `(string, any, number?) => void`                | persist `k → v` into the state map; same default caveat as `read`                         |
+| `p.universe.pin(i?)`         | `(number?) => {i, read, write}`                 | captures the focused index once and returns read/write bound to it                        |
+| `p.universe.sync(...i)`      | `(...number) => void`                           | re-render the given spaces, or all visible spaces if none given                           |
+| `p.input.bind(binds)`        | `(object) => void`                              | register gesture and key handlers for the focused space                                   |
+| `p.universe.panel.toggle()`  | `() => void`                                    | show/hide the panel strip (also bound to reserved key `z`)                                |
 
 ### `p.source(key)` — data access
 
 ```js
-p.source(key) // → Promise<Array<{ type, data, url }>>
+p.source(key) // → Promise<Value>   // one Value, not an array
 ```
 
 - `key` is the route key **without a leading slash**: `p.source('catalog.json')`, `p.source('pics')`. The empty key is reserved for the shell.
-- Each entry:
-  - `type` — MIME type string (`image/avif`, `application/json`, `text/plain`, …)
-  - `data` — `Uint8Array` of the raw bytes, already in memory
-  - `url` — lazy getter; creates a `blob:` object URL from `data` on first access
-- There are **no names**. Entries are identified by position (see `sort.txt` under [fx](#fx--authoring-and-registering-a-frame)).
-- The promise is cached per key — repeated calls cause one fetch.
-- A single-file route yields a **one-element array** whose one entry is the file's raw bytes.
-- A **directory route** is, on the wire, one entry wrapping its children — decode recognizes that (`application/x-bundle`) and recurses automatically, so the route still resolves to a one-element array, but that single element is itself the per-file array, not a `Value` to decode again: `const [pics] = await p.source('pics')`.
+- It resolves to exactly **one `Value`** — a node mirroring the server's, read one of two ways by its `type`:
+  - `type` — MIME type string (`image/avif`, `application/json`, `text/plain`, `application/x-bundle`, …)
+  - `data` — a **leaf**'s raw bytes (`Uint8Array`), already in memory
+  - `url` — lazy getter; a `blob:` object URL from a leaf's `data` (for something you render)
+  - `children` — a **bundle**'s per-file `Value[]` (a directory), decoded up front when the `Value` is built
+- A **leaf route** (a single file) is read via `.data`/`.url`. A **bundle route** (a directory) is read via `.children`; there are **no names** — children are identified by position (see `sort.txt` under [fx](#fx--authoring-and-registering-a-frame)).
+- The promise is cached per key — repeated calls share one fetch, one decode, and one set of blob urls, even across spaces.
 
-Decode `data` however the format requires — the bytes are already local, so no second fetch is ever needed:
+Read the `Value` however its shape requires — the bytes are already local, so no second fetch is ever needed:
 
 ```js
-// structured text (JSON here; same idea for CSV, NDJSON, etc.) — a single-file route
-const [entry] = await p.source('catalog.json');
-const data = JSON.parse(new TextDecoder().decode(entry.data));
+// structured text (JSON here; same idea for CSV, NDJSON, etc.) — a leaf route
+const file = await p.source('catalog.json');
+const data = JSON.parse(new TextDecoder().decode(file.data));
 
-// media — a directory route: unwrap the outer array to reach the decoded entries
-const [pics] = await p.source('pics');
+// media — a bundle route: its children are the per-file entries
+const pics = (await p.source('pics')).children;
 img.src = pics[i].url; // index i per sort.txt order
 
 // data + companion bundle, referenced by index
-const [[file], [pics]] = await Promise.all([
+const [file, pics] = await Promise.all([
     p.source('catalog.json'),
-    p.source('pics'),
+    p.source('pics').then((b) => b.children),
 ]);
 const records = JSON.parse(new TextDecoder().decode(file.data));
 // record { "image": 2 } → pics[2].url
@@ -211,11 +210,11 @@ func (f *Fx) Slides(dir string) {
 }
 ```
 
-The frame's script reads that route back by the same key, handed in at build time:
+The frame's script reads that route back by the same key, handed in at build time. A directory route resolves to one bundle `Value`; its images are its `.children`:
 
 ```js
 const prefix = '{{.PREFIX}}';           // the route key
-p.source(prefix).then(([entries]) => { /* … */ });
+p.source(prefix).then((bundle) => { const entries = bundle.children; /* … */ });
 ```
 
 `ToValue` → `Route` → embed key → `build`/`Frames` is the whole contract; any builder that needs fetchable data follows it.
@@ -238,7 +237,7 @@ Frames reference bundle entries **by index**, so `sort.txt` is how data and comp
 
 ### Wire format
 
-One binary format, both directions:
+One binary format for a **sequence** of values:
 
 ```
 [1B typeCount]
@@ -249,6 +248,8 @@ repeated entryCount times:
 ```
 
 Distinct types are written once, up front; `entryCount` lets the client preallocate its result instead of growing it entry by entry. Each entry then costs a 4-byte length, plus a 1-byte type id unless every value in the call shares one type (then it's omitted). Names are never encoded.
+
+Every route is served as `Encode(v)` — the value wrapped as a one-entry sequence, so its **type travels in-band** in the table. The HTTP response has no meaningful `Content-Type` (it's opaque `application/octet-stream`); the bytes are the whole contract, and the client decodes them into one `Value` — a leaf (raw bytes) or a bundle (children as a nested sequence, typed `application/x-bundle`). This format is encode-only server-side; the client is the sole decoder.
 
 ### Build-time transforms
 
@@ -328,14 +329,14 @@ p.Frame("./catalog.html")
 p.Serve()
 ```
 
-`p.Serve()` is the last call. At that point every registered route is wire-encoded and gzip-compressed **once**; requests are served from memory. Route map:
+`p.Serve()` is the last call. At that point every route is `Encode`d and gzip-compressed **once**; requests are served from memory. Every route is exactly one `Value`, served as `Encode(v)` with its type carried in-band (the response is opaque `application/octet-stream`). Route map:
 
-| Route    | Content                                                                                                                                                                         |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/`      | the universe HTML, then the frame pool and the panel pool as two nested bundles — `Encode`d together as one three-entry list (see [fx](fx/README.md#fxgo--framepanel-building)) |
-| `/<key>` | one `Value` per registered route (`p.Route`), keyed by `filepath.Base(path)`                                                                                                    |
+| Route    | Content                                                                                                                                                                 |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`      | one bundle `Value` (`application/x-bundle`) whose children are the universe HTML, the frame pool, and the panel pool (see [fx](fx/README.md#fxgo--framepanel-building)) |
+| `/<key>` | one `Value` per registered route (`p.Route`), keyed by `filepath.Base(path)`; a leaf (its real type is in the wire table) or a directory (`application/x-bundle`)       |
 
-Route entries that are themselves directories (e.g. a `Slides` bundle) hold `Children`; `one` encodes those into a nested blob typed `application/x-bundle`, which the client's `decode` recognizes and recurses into automatically — the caller never decodes an entry a second time by hand.
+A route that is itself a directory (e.g. a `Slides` bundle) holds `Children`; `one` encodes those as one nested sequence typed `application/x-bundle`, which the client decodes into the `Value`'s `.children` — the frame never decodes an entry by hand.
 
 ---
 

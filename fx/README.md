@@ -27,7 +27,7 @@ func (v *Value) Save() ([]byte, error)
 
 `Value` is a **tree**: a leaf carries `Data`; a directory carries `Children` and no `Data` of its own. `fx` never encodes — turning this tree into wire bytes (a directory's payload becomes `Encode(Children)`) is [one](../one/README.md#wirego--wire-format)'s job. `Name` is never sent on the wire; it only orders/re-identifies entries for `sort.txt` and `Save`.
 
-`Save` gob-encodes the full tree (`Name`, `Type`, `Data`, `Children`) into bytes and hands them back — no filesystem, no bucket, no assumed destination. It's deliberately separate from the wire format, so changes to `Encode`/`Decode` never invalidate anything already saved. `Fx.Save(key)` (see [fx.go](#fxgo--framepanel-building)) looks up `Routes[key]` and calls this.
+`Save` gob-encodes the full tree (`Name`, `Type`, `Data`, `Children`) into bytes and hands them back — no filesystem, no bucket, no assumed destination. It's deliberately separate from the wire format, so changes to `Encode` never invalidate anything already saved. `Fx.Save(key)` (see [fx.go](#fxgo--framepanel-building)) looks up `Routes[key]` and calls this.
 
 `Routes map[string]*Value` is a plain field on `Fx` (see [fx.go](#fxgo--framepanel-building)).
 

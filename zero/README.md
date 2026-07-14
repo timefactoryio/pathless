@@ -38,43 +38,54 @@ Static page chrome (`<style>` for the universe/panel layout grid, `<body>` with 
 
 ### `Pathless`
 
-| Member              | Signature                           | Behavior                                                                                                                                                                                                                                                                                           |
-| ------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cache`             | `Map<string, Promise>`              | one in-flight/settled fetch per route key                                                                                                                                                                                                                                                          |
-| `decode(bytes)`     | `(Uint8Array) => Value[]`           | parses the wire format (type table + typed/length-prefixed entries) into `Value` instances; an entry typed `application/x-bundle` (a directory's nested children) is recursively decoded in place, so it comes back as an already-decoded array rather than a `Value` the caller must decode again |
-| `source(path = '')` | `(string) => Promise<Value[]>`      | fetches `${window.circuit}/${path}`, decodes, caches by `path`; failed fetches evict the cache entry                                                                                                                                                                                               |
-| `exec(el, data)`    | `(HTMLElement, Uint8Array) => void` | decodes UTF-8 `data` into a document fragment (`Range#createContextualFragment`) and replaces `el`'s children — this is how a frame's `<style>/markup/<script>` gets injected and (re-)executed                                                                                                    |
-| `init()`            | `() => Promise<void>`               | fetches the root route (`''`) — `[universe, frames, panels]`, with the frames/panels bundles already recursively decoded into arrays — execs the universe payload into `#universe` (constructing `Universe` with them as constructor arguments), then calls `universe.init()`                      |
+| Member              | Signature                           | Behavior                                                                                                                                                                                                                                                                                                |
+| ------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cache`             | `Map<string, Promise<Value>>`       | one in-flight/settled fetch per route path; a settled entry is a single `Value`, so every caller of a path shares one fetch, one decode, and one set of blob urls                                                                                                                                       |
+| `source(path = '')` | `(string) => Promise<Value>`        | fetches `${window.circuit}/${path}` and reconstructs the single `Value` it frames inline; caches by `path`; failed fetches evict the cache entry. The response has no meaningful `Content-Type` — the type is in-band. A leaf route is read via `.data`/`.url`; a bundle route via `.children`          |
+| `exec(el, data)`    | `(HTMLElement, Uint8Array) => void` | decodes UTF-8 `data` into a document fragment (`Range#createContextualFragment`) and replaces `el`'s children — this is how a frame's `<style>/markup/<script>` gets injected and (re-)executed                                                                                                         |
+| `init()`            | `() => Promise<void>`               | fetches the root route (`''`), whose `Value` is a bundle of `[universe, frames, panels]`; keeps the universe payload, maps each pool's `.children` to raw bytes on `this.frames`/`this.panels`, execs the universe payload into `#universe` (constructing `Universe` with them), then `universe.init()` |
+
+`source` parses a route's one-value frame inline; a private `Pathless.#decode` reads a bundle's child sequence for the `Value` constructor (`.children`), delegating the shared type table to `Pathless.#typeTable`. Frames never touch the wire — they read `.data`/`.url`/`.children`.
 
 `window.circuit` is set from the templated `{{.CIRCUIT}}`, with `localhost` swapped for the page's actual hostname — so the same compiled shell works when accessed via a LAN IP or a tunnel in dev.
 
-### `decode(bytes)` — wire format
+### wire format — `#decode` and `#typeTable`
+
+A route is served as one value frame (parsed inline by `source`); a bundle's children are a nested sequence:
 
 ```
-[1B tableCount]
-tableCount × [1B typeLen][type]      // string table: MIME types, one byte length + UTF-8
-[1B entryCount]
-repeated entryCount times:
-  [1B tableIndex]?[4B dataLen BE][data]   // tableIndex omitted when tableCount == 1
+route frame:       [1B typeLen][type][payload]           // one Value (a route)
+
+#typeTable(bytes): [1B tableCount]
+                   tableCount × [1B typeLen][type]        // string table: MIME types
+
+#decode(bytes):    <type table, via #typeTable>
+                   [1B entryCount]
+                   entryCount × [1B tableIndex]?[4B dataLen BE][data]   // index omitted when tableCount == 1
 ```
 
-Each entry becomes a `Pathless.#Value` — unless its type is `application/x-bundle`, in which case its data is itself an encoded blob (a directory's children, or the top-level frame/panel pools) and `decode` recurses into it, returning a plain array of `Value`s in its place. `entryCount` lets the result array be allocated at its exact size up front, matching the wire format described in [mechanics.md](../mechanics.md#wire-format).
+`source` reads a route's frame inline — a type, then the payload (the rest of the buffer) — and builds one `Pathless.#Value`. `#decode` reads a bundle's `payload`: it delegates the shared type table to `#typeTable` (which returns the parsed types and the offset where entries begin), then reads one length-prefixed entry per child, each becoming a `#Value`. An entry typed `application/x-bundle` carries a further sequence as its `data`; the `Value` constructor decodes it into `children` (see below). `entryCount` lets the result array be allocated at its exact size up front, matching the wire format described in [mechanics.md](../mechanics.md#wire-format).
 
 ### `Value` (private, `Pathless.#Value`)
 
 ```js
-{ type: string, data: Uint8Array, get url(): string }
+{ type: string, data?: Uint8Array, children?: Value[], get url(): string }
 ```
 
-`url` is a lazily-memoized `blob:` object URL (`URL.createObjectURL`), created on first access and cached in a private field — never computed for entries that are only ever read as bytes (e.g. JSON).
+A faithful mirror of `fx.Value`: a **leaf** holds its raw bytes in `data`; a **bundle** (`application/x-bundle`) holds its decoded child `Value`s in `children`. The constructor decides by `type` — a bundle's payload is one wire level, decoded into `children` right there via `#decode`; a leaf just keeps `data`. The type travels in-band, so a `Value` is self-describing and the transport `Content-Type` is irrelevant.
+
+- `url` — a `blob:` object URL (`URL.createObjectURL`) for a leaf you render (an image, etc.), memoized on first access; never computed for entries only read as bytes (e.g. JSON).
+- `children` — the per-file `Value`s of a bundle; server-side this is `fx.Value.Children`. Because a route's `Value` is cached per path, a bundle reused across spaces yields the same child `Value`s (and thus the same `url`s).
+
+The node's `type` tells you which side applies, exactly as it does server-side (`Data` xor `Children`).
 
 ### Boot sequence
 
 ```
 DOMContentLoaded
   → new Pathless()               // constructs cache, calls init()
-    → source('')                 // fetch + decode the root route
-      → [universe, frames, panels]      // bundles already recursively decoded
+    → source('')                 // fetch the root route → one bundle Value
+      → root.children            // [universe, frames, panels]
     → exec(#universe, universe.data)    // injects & runs universe.html's script
       → new Universe(pathless, pathless.frames, pathless.panels)
     → universe.init()                   // renders layout 0
@@ -103,7 +114,7 @@ Owns the three spaces, the frame pool, per-(frame, space) state, and layout/navi
 | `space`                        | getter → `{ el, frame }`                 | the currently focused space entry                                                                                                                                                                                                    |
 | `frame`                        | getter → `HTMLElement`                   | the focused space's content root — `space.el.querySelector('div')`; always the first (and only) `<div>`, since every frame's markup is `<style>` → one root `<div>` → `<script>`                                                     |
 | `visible(l = state.l)`         | `(number?) => number[]`                  | space indices visible at layout `l` (layout 0 → just the focused index)                                                                                                                                                              |
-| `init(frames, panels)`         | `(Value, Value?) => void`                | unwraps both bundles (decode → map to `.data`), resets every space to frame 0, renders layout 0, and initializes `panel` if a panel bundle was sent                                                                                  |
+| `init()`                       | `() => void`                             | resets every space to frame 0 and renders layout 0 (the frame/panel pools were passed to the constructor)                                                                                                                            |
 | `read(i = focused)`            | `(number?) => Map`                       | per-(frame, space) state map, created on first access; keyed by `` `${frame}:${spaceId}` ``                                                                                                                                          |
 | `write(key, val, i = focused)` | `(string, any, number?) => void`         | `read(i).set(key, val)`                                                                                                                                                                                                              |
 | `pin(i = focused)`             | `(number?) => {i, read, write}`          | snapshots the focused index once; see [State semantics](../mechanics.md#state-semantics)                                                                                                                                             |

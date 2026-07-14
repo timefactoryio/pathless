@@ -32,7 +32,12 @@
 				flex-direction: column;
 				border: var(--b);
 				border-radius: 5px;
+			}
+			body,
+			:is(#zero, #fx, #one),
+			#panel {
 				touch-action: none;
+				overscroll-behavior: none;
 			}
 			#universe {
 				flex: 1;
@@ -42,13 +47,10 @@
 			:is(#zero, #fx, #one) {
 				flex: 1;
 				overflow: hidden;
-				container-type: size;
 				position: relative;
 				isolation: isolate;
 				display: flex;
 				flex-direction: column;
-				touch-action: none;
-				overscroll-behavior: none;
 			}
 			:is(#zero, #fx, #one) > * {
 				width: 100%;
@@ -59,15 +61,15 @@
 			}
 			#zero {
 				grid-area: zero;
-				container-name: zero;
+				container: zero / size;
 			}
 			#fx {
 				grid-area: fx;
-				container-name: fx;
+				container: fx / size;
 			}
 			#one {
 				grid-area: one;
-				container-name: one;
+				container: one / size;
 			}
 			#universe[data-layout='1'][data-variant='1'] {
 				flex-direction: column;
@@ -116,8 +118,6 @@
 			#panel {
 				height: 15vh;
 				border-top: var(--b);
-				touch-action: none;
-				overscroll-behavior: none;
 				display: flex;
 				align-items: center;
 				justify-content: center;
@@ -130,11 +130,16 @@
 				location.hostname,
 			);
 			class Pathless {
+				static #td = new TextDecoder();
+				static #range = document.createRange();
+
 				static #Value = class {
 					#url;
 					constructor(type, data) {
 						this.type = type;
-						this.data = data;
+						if (type === 'application/x-bundle')
+							this.children = Pathless.#decode(data);
+						else this.data = data;
 					}
 					get url() {
 						return (this.#url ??= URL.createObjectURL(
@@ -142,48 +147,60 @@
 						));
 					}
 				};
-				#td = new TextDecoder();
-				#range = document.createRange();
-				constructor() {
-					this.cache = new Map();
-					this.init();
+
+				static #typeTable(bytes) {
+					let pos = 0;
+					const types = new Array(bytes[pos++]);
+					for (let i = 0; i < types.length; i++) {
+						const len = bytes[pos++];
+						types[i] = Pathless.#td.decode(
+							bytes.subarray(pos, pos + len),
+						);
+						pos += len;
+					}
+					return [types, pos];
 				}
-				decode(bytes) {
+
+				static #decode(bytes) {
 					const view = new DataView(
 						bytes.buffer,
 						bytes.byteOffset,
 						bytes.byteLength,
 					);
-					let pos = 0;
-					const types = new Array(bytes[pos++]);
-					for (let i = 0; i < types.length; i++) {
-						const tl = bytes[pos++];
-						types[i] = this.#td.decode(
-							bytes.subarray(pos, pos + tl),
-						);
-						pos += tl;
-					}
-					const n = bytes[pos++];
+					const [types, start] = Pathless.#typeTable(bytes);
+					let pos = start;
 					const single = types.length === 1;
-					const v = new Array(n);
-					for (let i = 0; i < n; i++) {
+					const values = new Array(bytes[pos++]);
+					for (let i = 0; i < values.length; i++) {
 						const type = single ? types[0] : types[bytes[pos++]];
 						const len = view.getUint32(pos);
 						pos += 4;
-						const data = bytes.subarray(pos, pos + len);
-						v[i] =
-							type === 'application/x-bundle'
-								? this.decode(data)
-								: new Pathless.#Value(type, data);
+						values[i] = new Pathless.#Value(
+							type,
+							bytes.subarray(pos, pos + len),
+						);
 						pos += len;
 					}
-					return v;
+					return values;
 				}
+
+				constructor() {
+					this.cache = new Map();
+					this.init();
+				}
+
 				source(path = '') {
 					let p = this.cache.get(path);
 					if (!p) {
 						p = fetch(`${window.circuit}/${path}`)
-							.then(async (r) => this.decode(await r.bytes()))
+							.then(async (r) => {
+								const b = await r.bytes();
+								const n = b[0];
+								return new Pathless.#Value(
+									Pathless.#td.decode(b.subarray(1, 1 + n)),
+									b.subarray(1 + n),
+								);
+							})
 							.catch((err) => {
 								this.cache.delete(path);
 								throw err;
@@ -194,15 +211,16 @@
 				}
 				exec(el, data) {
 					el.replaceChildren(
-						this.#range.createContextualFragment(
-							this.#td.decode(data),
+						Pathless.#range.createContextualFragment(
+							Pathless.#td.decode(data),
 						),
 					);
 				}
 				async init() {
-					const [universe, frames, panels] = await this.source();
-					this.frames = frames.map((f) => f.data);
-					this.panels = panels.map((f) => f.data);
+					const [universe, frames, panels] = (await this.source())
+						.children;
+					this.frames = frames.children.map((f) => f.data);
+					this.panels = panels.children.map((f) => f.data);
 					this.exec(
 						document.getElementById('universe'),
 						universe.data,
