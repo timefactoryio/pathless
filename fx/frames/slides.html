@@ -33,7 +33,7 @@
 					a: { down: () => this.show(this.index - 1) },
 					d: { down: () => this.show(this.index + 1) },
 				});
-				p.source(prefix).then((entries) => {
+				p.source(prefix).then(([entries]) => {
 					this.entries = entries;
 					if (this.entries.length) this.show(this.index);
 				});

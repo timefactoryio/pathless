@@ -155,28 +155,27 @@
 						bytes.byteLength,
 					);
 					let pos = 0;
-					const types = [];
-					for (let i = bytes[pos++]; i > 0; i--) {
-						const tl = bytes[pos];
-						pos += 1;
-						types.push(
-							this.#td.decode(bytes.subarray(pos, pos + tl)),
+					const types = new Array(bytes[pos++]);
+					for (let i = 0; i < types.length; i++) {
+						const tl = bytes[pos++];
+						types[i] = this.#td.decode(
+							bytes.subarray(pos, pos + tl),
 						);
 						pos += tl;
 					}
-					const v = [];
-					while (pos < bytes.length) {
-						const type = types[bytes[pos]];
-						pos += 1;
-						const n = view.getUint32(pos);
+					const n = bytes[pos++];
+					const single = types.length === 1;
+					const v = new Array(n);
+					for (let i = 0; i < n; i++) {
+						const type = single ? types[0] : types[bytes[pos++]];
+						const len = view.getUint32(pos);
 						pos += 4;
-						v.push(
-							new Pathless.#Value(
-								type,
-								bytes.subarray(pos, pos + n),
-							),
-						);
-						pos += n;
+						const data = bytes.subarray(pos, pos + len);
+						v[i] =
+							type === 'application/x-bundle'
+								? this.decode(data)
+								: new Pathless.#Value(type, data);
+						pos += len;
 					}
 					return v;
 				}
@@ -201,15 +200,13 @@
 					);
 				}
 				async init() {
-					const [header, universe, ...rest] = await this.source();
-					const frames = rest.slice(0, header.data[0]);
-					const panels = rest.slice(header.data[0]);
+					const [universe, frames, panels] = await this.source();
+					this.frames = frames.map((f) => f.data);
+					this.panels = panels.map((f) => f.data);
 					this.exec(
 						document.getElementById('universe'),
 						universe.data,
 					);
-					this.universe.frames = frames.map((f) => f.data);
-					this.universe.panels = panels.map((f) => f.data);
 					this.universe.init();
 				}
 			}

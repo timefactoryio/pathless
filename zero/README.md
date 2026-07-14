@@ -38,13 +38,13 @@ Static page chrome (`<style>` for the universe/panel layout grid, `<body>` with 
 
 ### `Pathless`
 
-| Member              | Signature                           | Behavior                                                                                                                                                                                        |
-| ------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cache`             | `Map<string, Promise>`              | one in-flight/settled fetch per route key                                                                                                                                                       |
-| `decode(bytes)`     | `(Uint8Array) => Value[]`           | parses the wire format (type table + typed/length-prefixed entries) into `Value` instances                                                                                                      |
-| `source(path = '')` | `(string) => Promise<Value[]>`      | fetches `${window.circuit}/${path}`, decodes, caches by `path`; failed fetches evict the cache entry                                                                                            |
-| `exec(el, data)`    | `(HTMLElement, Uint8Array) => void` | decodes UTF-8 `data` into a document fragment (`Range#createContextualFragment`) and replaces `el`'s children — this is how a frame's `<style>/markup/<script>` gets injected and (re-)executed |
-| `init()`            | `() => Promise<void>`               | fetches the root route (`''`), executes item 0 (the universe payload) into `#universe`, then calls `universe.init(frames, panels)` with items 1 and 2                                           |
+| Member              | Signature                           | Behavior                                                                                                                                                                                                                                                                                           |
+| ------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cache`             | `Map<string, Promise>`              | one in-flight/settled fetch per route key                                                                                                                                                                                                                                                          |
+| `decode(bytes)`     | `(Uint8Array) => Value[]`           | parses the wire format (type table + typed/length-prefixed entries) into `Value` instances; an entry typed `application/x-bundle` (a directory's nested children) is recursively decoded in place, so it comes back as an already-decoded array rather than a `Value` the caller must decode again |
+| `source(path = '')` | `(string) => Promise<Value[]>`      | fetches `${window.circuit}/${path}`, decodes, caches by `path`; failed fetches evict the cache entry                                                                                                                                                                                               |
+| `exec(el, data)`    | `(HTMLElement, Uint8Array) => void` | decodes UTF-8 `data` into a document fragment (`Range#createContextualFragment`) and replaces `el`'s children — this is how a frame's `<style>/markup/<script>` gets injected and (re-)executed                                                                                                    |
+| `init()`            | `() => Promise<void>`               | fetches the root route (`''`) — `[universe, frames, panels]`, with the frames/panels bundles already recursively decoded into arrays — execs the universe payload into `#universe` (constructing `Universe` with them as constructor arguments), then calls `universe.init()`                      |
 
 `window.circuit` is set from the templated `{{.CIRCUIT}}`, with `localhost` swapped for the page's actual hostname — so the same compiled shell works when accessed via a LAN IP or a tunnel in dev.
 
@@ -53,11 +53,12 @@ Static page chrome (`<style>` for the universe/panel layout grid, `<body>` with 
 ```
 [1B tableCount]
 tableCount × [1B typeLen][type]      // string table: MIME types, one byte length + UTF-8
-repeated until EOF:
-  [1B tableIndex][4B dataLen BE][data]
+[1B entryCount]
+repeated entryCount times:
+  [1B tableIndex]?[4B dataLen BE][data]   // tableIndex omitted when tableCount == 1
 ```
 
-Each entry becomes a `Pathless.#Value`. There's no leaf count — the response's length is the terminator, matching the wire format described in [mechanics.md](../mechanics.md#wire-format).
+Each entry becomes a `Pathless.#Value` — unless its type is `application/x-bundle`, in which case its data is itself an encoded blob (a directory's children, or the top-level frame/panel pools) and `decode` recurses into it, returning a plain array of `Value`s in its place. `entryCount` lets the result array be allocated at its exact size up front, matching the wire format described in [mechanics.md](../mechanics.md#wire-format).
 
 ### `Value` (private, `Pathless.#Value`)
 
@@ -73,9 +74,10 @@ Each entry becomes a `Pathless.#Value`. There's no leaf count — the response's
 DOMContentLoaded
   → new Pathless()               // constructs cache, calls init()
     → source('')                 // fetch + decode the root route
-      → [universe, frames, panels]
-    → exec(#universe, universe.data)   // injects & runs universe.html's script
-    → universe.init(frames, panels)    // hydrates the frame pool, renders layout 0
+      → [universe, frames, panels]      // bundles already recursively decoded
+    → exec(#universe, universe.data)    // injects & runs universe.html's script
+      → new Universe(pathless, pathless.frames, pathless.panels)
+    → universe.init()                   // renders layout 0
 ```
 
 `exec` running `universe.html`'s script is what defines `Universe`/`Input`/`Panel` and attaches `pathless.universe`, `pathless.input`, `pathless.universe.panel` — this only happens after the root fetch resolves, so nothing here exists until the wire round-trip completes once.
@@ -153,7 +155,7 @@ A single hidden strip (`#panel`) below the universe, independent of the three sp
 At the end of the script:
 
 ```js
-pathless.universe = new Universe(pathless);
+pathless.universe = new Universe(pathless, pathless.frames, pathless.panels);
 pathless.input = new Input(pathless);
 pathless.universe.panel = new Panel(pathless);
 ```

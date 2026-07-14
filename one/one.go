@@ -19,8 +19,8 @@ type One struct {
 	circuit  *http.ServeMux
 }
 
-// NewOne assembles the "/" payload — [frame-count header, universe, frames…,
-// panels…] — plus one endpoint per route, encoding and gzipping each once.
+// NewOne assembles the "/" payload — [universe, frames bundle, panels
+// bundle] — plus one endpoint per route, encoding and gzipping each once.
 // origin is the CORS allow-origin; shell and universe are zero's asset bytes;
 // f supplies the frame/panel pools and route map.
 func NewOne(origin string, shell, universe []byte, f *fx.Fx) *One {
@@ -32,9 +32,11 @@ func NewOne(origin string, shell, universe []byte, f *fx.Fx) *One {
 	}
 	o.pathless.HandleFunc("/", o.handlePathless)
 
-	header := &fx.Value{Type: "application/x-count", Data: []byte{byte(len(f.Frames))}}
-	hello := append([]*fx.Value{header, {Type: "text/html", Data: universe}}, f.Frames...)
-	hello = append(hello, f.Panels...)
+	hello := []*fx.Value{
+		{Type: "text/html", Data: universe},
+		{Type: "application/x-bundle", Children: f.Frames},
+		{Type: "application/x-bundle", Children: f.Panels},
+	}
 	o.wire("/", Encode(hello...))
 
 	for key, v := range f.Routes {

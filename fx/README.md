@@ -21,9 +21,13 @@ type Value struct {
     Data     []byte   // leaf bytes
     Children []*Value // directory bundle — its files, in sort.txt order
 }
+
+func (v *Value) Save() ([]byte, error)
 ```
 
-`Value` is a **tree**: a leaf carries `Data`; a directory carries `Children` and no `Data` of its own. `fx` never encodes — turning this tree into wire bytes (a directory's payload becomes `Encode(Children)`) is [one](../one/README.md#wirego--wire-format--persistence)'s job. `Name` is never sent on the wire; it only orders/re-identifies entries for `sort.txt` and `Save`.
+`Value` is a **tree**: a leaf carries `Data`; a directory carries `Children` and no `Data` of its own. `fx` never encodes — turning this tree into wire bytes (a directory's payload becomes `Encode(Children)`) is [one](../one/README.md#wirego--wire-format)'s job. `Name` is never sent on the wire; it only orders/re-identifies entries for `sort.txt` and `Save`.
+
+`Save` gob-encodes the full tree (`Name`, `Type`, `Data`, `Children`) into bytes and hands them back — no filesystem, no bucket, no assumed destination. It's deliberately separate from the wire format, so changes to `Encode`/`Decode` never invalidate anything already saved. `Fx.Save(key)` (see [fx.go](#fxgo--framepanel-building)) looks up `Routes[key]` and calls this.
 
 `Routes map[string]*Value` is a plain field on `Fx` (see [fx.go](#fxgo--framepanel-building)).
 
@@ -58,6 +62,7 @@ func NewFx() *Fx
 | `Frame(path)`   | reads a local/remote `.html` file (`ToValue`) and appends its consolidated (`build`) form to `Frames`. A failed read is fatal — everything served must be available at startup |
 | `Panel(path)`   | same as `Frame`, but appends to `Panels` instead                                                                                                                               |
 | `Route(key, v)` | registers a built `*Value` as a served route under `key` (into `Routes`) and returns `key` — the one operation that makes content fetchable via `p.source(key)`                |
+| `Save(key)`     | looks up `Routes[key]` and returns its gob-encoded bytes (via `Value.Save`), ready for the caller to persist however it likes                                                  |
 | `build(s)`      | consolidates a fragment's `<style>`/`<script>` blocks into one `text/html` `Value` (see below)                                                                                 |
 
 ### `build(s)` — build-time transform

@@ -2,24 +2,26 @@ package one
 
 import (
 	"encoding/binary"
-	"encoding/gob"
-	"os"
-	"path/filepath"
 
 	"github.com/timefactoryio/pathless/fx"
 )
 
 // Encode writes the wire format the client decodes: distinct types are
-// written once, up front, as a small dictionary; each entry then costs just
-// a 1-byte type id and a 4-byte length ahead of its data — no shared table
-// beyond that, no repeated type strings. A directory Value carries no bytes
-// of its own; its wire payload is Encode(Children), so the client decodes it
-// the same way it decodes the top-level response. This is purely the
-// over-the-network format — Save uses gob instead, so changing this format
-// never requires re-saving anything already persisted. Layout:
+// written once, up front, as a small dictionary; each entry then costs a
+// 4-byte length ahead of its data, plus a 1-byte type id — unless every
+// value shares one type, in which case the id is implied by the type table
+// and omitted entirely. A directory Value carries no bytes of its own; its
+// wire payload is Encode(Children), tagged with the "application/x-bundle"
+// type so the client's decode recognizes it and recurses automatically,
+// rather than handing back an entry the caller must decode a second time.
+// This is purely the over-the-network format, deliberately separate from
+// Value.Save's gob persistence (in fx), so changing this format never
+// invalidates anything already persisted. Layout:
 //
 //	[1B typeCount][typeCount x ([1B typeLen][type])]
-//	[1B typeID][4B len(data)][data]...  (repeated, one per value)
+//	[1B entryCount]
+//	[1B typeID]?[4B len(data)][data]...  (repeated entryCount times; typeID
+//	omitted when typeCount == 1)
 //
 // Names are not encoded — order is the contract.
 func Encode(values ...*fx.Value) []byte {
@@ -33,13 +35,17 @@ func Encode(values ...*fx.Value) []byte {
 			types = append(types, v.Type)
 		}
 	}
+	single := len(types) == 1
 
-	size := 1
+	size := 2 // typeCount + entryCount
 	for _, t := range types {
 		size += 1 + len(t)
 	}
 	for _, d := range datas {
-		size += 1 + 4 + len(d)
+		if !single {
+			size++
+		}
+		size += 4 + len(d)
 	}
 
 	out := make([]byte, size)
@@ -51,9 +57,13 @@ func Encode(values ...*fx.Value) []byte {
 		pos++
 		pos += copy(out[pos:], t)
 	}
+	out[pos] = byte(len(values))
+	pos++
 	for i, v := range values {
-		out[pos] = typeID[v.Type]
-		pos++
+		if !single {
+			out[pos] = typeID[v.Type]
+			pos++
+		}
 		binary.BigEndian.PutUint32(out[pos:], uint32(len(datas[i])))
 		pos += 4
 		pos += copy(out[pos:], datas[i])
@@ -72,7 +82,8 @@ func payload(v *fx.Value) []byte {
 
 // Decode is the inverse of Encode for one level (leaves come back with Data;
 // a directory entry's Data is itself an encoded blob, decoded again by the
-// caller).
+// caller). The entry count in the header lets the result be allocated at
+// its exact size up front.
 func Decode(buf []byte) []*fx.Value {
 	if len(buf) == 0 {
 		return nil
@@ -87,30 +98,21 @@ func Decode(buf []byte) []*fx.Value {
 		pos += tl
 	}
 
-	var values []*fx.Value
-	for pos < len(buf) {
-		typ := types[buf[pos]]
-		pos++
-		n := int(binary.BigEndian.Uint32(buf[pos:]))
+	n := int(buf[pos])
+	pos++
+	single := len(types) == 1
+
+	values := make([]*fx.Value, n)
+	for i := 0; i < n; i++ {
+		typ := types[0]
+		if !single {
+			typ = types[buf[pos]]
+			pos++
+		}
+		dl := int(binary.BigEndian.Uint32(buf[pos:]))
 		pos += 4
-		values = append(values, &fx.Value{Type: typ, Data: buf[pos : pos+n]})
-		pos += n
+		values[i] = &fx.Value{Type: typ, Data: buf[pos : pos+dl]}
+		pos += dl
 	}
 	return values
-}
-
-// Save persists v (the full Value tree — Name, Type, Data, Children — not
-// the wire format) to s3/key using gob, so changes to Encode/Decode never
-// require re-saving anything already in S3. Encode is only ever applied
-// fresh, at serve time.
-func Save(key string, v *fx.Value) error {
-	if err := os.MkdirAll("s3", 0755); err != nil {
-		return err
-	}
-	data, err := os.Create(filepath.Join("s3", key))
-	if err != nil {
-		return err
-	}
-	defer data.Close()
-	return gob.NewEncoder(data).Encode(v)
 }

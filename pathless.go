@@ -1,7 +1,6 @@
 package pathless
 
 import (
-	"fmt"
 	"log"
 
 	"github.com/timefactoryio/pathless/fx"
@@ -56,16 +55,6 @@ func NewPathless(args ...string) *Pathless {
 		Fx:     fx.NewFx(),
 		origin: origin,
 	}
-}
-
-// Save gob-persists a registered route's Value to s3/<key> for syncing to
-// object storage.
-func (p *Pathless) Save(key string) error {
-	v, ok := p.Routes[key]
-	if !ok {
-		return fmt.Errorf("save: route %q not found", key)
-	}
-	return one.Save(key, v)
 }
 
 // Serve assembles the wire payload from zero's assets and fx's pools, then

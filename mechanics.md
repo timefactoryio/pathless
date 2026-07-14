@@ -80,21 +80,22 @@ p.source(key) // → Promise<Array<{ type, data, url }>>
   - `url` — lazy getter; creates a `blob:` object URL from `data` on first access
 - There are **no names**. Entries are identified by position (see `sort.txt` under [fx](#fx--authoring-and-registering-a-frame)).
 - The promise is cached per key — repeated calls cause one fetch.
-- A single-file route yields a **one-element array**.
+- A single-file route yields a **one-element array** whose one entry is the file's raw bytes.
+- A **directory route** is, on the wire, one entry wrapping its children — decode recognizes that (`application/x-bundle`) and recurses automatically, so the route still resolves to a one-element array, but that single element is itself the per-file array, not a `Value` to decode again: `const [pics] = await p.source('pics')`.
 
 Decode `data` however the format requires — the bytes are already local, so no second fetch is ever needed:
 
 ```js
-// structured text (JSON here; same idea for CSV, NDJSON, etc.)
+// structured text (JSON here; same idea for CSV, NDJSON, etc.) — a single-file route
 const [entry] = await p.source('catalog.json');
 const data = JSON.parse(new TextDecoder().decode(entry.data));
 
-// media: hand the lazy blob url to the element
-const pics = await p.source('pics');
+// media — a directory route: unwrap the outer array to reach the decoded entries
+const [pics] = await p.source('pics');
 img.src = pics[i].url; // index i per sort.txt order
 
 // data + companion bundle, referenced by index
-const [[file], pics] = await Promise.all([
+const [[file], [pics]] = await Promise.all([
     p.source('catalog.json'),
     p.source('pics'),
 ]);
@@ -192,7 +193,7 @@ Rules an agent must follow when emitting `main.go`:
 - `p.Frame(path)` registers a space frame. The file authors its own root container div, classed by convention after the filename stem (`catalog.html` → `<div class="catalog">…</div>`). Nothing is wrapped for you. The content is trusted as-is — **local, developer-controlled files only.**
 - `p.ToValue(path)` **builds** a `*Value` and nothing more — it never registers. It accepts a file, a directory (one `Value` whose `Children` hold every file, in `sort.txt` order), or an `http(s)://` URL (fetched and treated like a file — it does not decode a `Save`-produced blob back into a bundle). Any file type works — the wire carries typed bytes, and the frame decides how to decode them. MIME type is inferred from extension, with content sniffing as fallback.
 - `p.Route(key, v)` **registers** a built `*Value` as a fetchable route and returns `key`. This is the only thing that makes content reachable via `p.source(key)` — splitting it from `ToValue` means building a `Value` never implies serving it. By convention `key` is `filepath.Base(path)`: `./data/catalog.json` → `catalog.json`, `./pics` → `pics`.
-- `p.Save(key)` gob-encodes an already-registered route's `Value` to `s3/<key>`, ready to sync to object storage (e.g. `rclone sync s3 remote:bucket`). There is currently no counterpart that loads a saved blob back through `ToValue`.
+- `p.Save(key)` gob-encodes an already-registered route's `Value` and returns the bytes — no filesystem, no bucket; persisting them (e.g. writing to `s3/<key>`, syncing to object storage) is entirely up to the caller. There is currently no counterpart that loads a saved blob back through `ToValue`.
 - Every route a frame reads via `p.source(...)` **must** be registered via `p.Route(...)` (directly, or by a template that registers internally).
 
 ### Custom templates: register while building
@@ -214,7 +215,7 @@ The frame's script reads that route back by the same key, handed in at build tim
 
 ```js
 const prefix = '{{.PREFIX}}';           // the route key
-p.source(prefix).then((entries) => { /* … */ });
+p.source(prefix).then(([entries]) => { /* … */ });
 ```
 
 `ToValue` → `Route` → embed key → `build`/`Frames` is the whole contract; any builder that needs fetchable data follows it.
@@ -242,11 +243,12 @@ One binary format, both directions:
 ```
 [1B typeCount]
 typeCount × [1B typeLen][type]        // string table: distinct MIME types
-repeated until EOF:
-  [1B typeID][4B dataLen (big-endian)][data]
+[1B entryCount]
+repeated entryCount times:
+  [1B typeID]?[4B dataLen (big-endian)][data]   // typeID omitted when typeCount == 1
 ```
 
-Distinct types are written once, up front; each entry then costs a 1-byte type id and a 4-byte length. There is no entry count — the response's length is the terminator. Names are never encoded.
+Distinct types are written once, up front; `entryCount` lets the client preallocate its result instead of growing it entry by entry. Each entry then costs a 4-byte length, plus a 1-byte type id unless every value in the call shares one type (then it's omitted). Names are never encoded.
 
 ### Build-time transforms
 
@@ -285,12 +287,12 @@ What goes here, in practice:
   p.Frame("./catalog.html")    // its script reads both back via p.source(...)
   ```
 
-- **Persisting a route for reuse** — `p.Save(key)`, once `key`'s route is registered, gob-encodes its `Value` to `s3/<key>` so it can be synced to object storage, instead of every deploy re-reading local files:
+- **Persisting a route for reuse** — `p.Save(key)`, once `key`'s route is registered, gob-encodes its `Value` and returns the bytes, so a route built from local files doesn't need to be re-read on every deploy:
 
   ```go
   pics, _ := p.ToValue("./pics")
-  p.Route("pics", pics) // registers route "pics" from local files
-  p.Save("pics")        // writes s3/pics — sync this to a bucket separately
+  p.Route("pics", pics)     // registers route "pics" from local files
+  data, _ := p.Save("pics") // gob-encoded bytes — persist these however you like (e.g. write to s3/pics, sync to a bucket)
 
   // later, any deploy (this one, or a different app entirely):
   p.Slides("https://bucket.example.com/pics") // ToValue(url) fetches the bucket URL directly
@@ -328,12 +330,12 @@ p.Serve()
 
 `p.Serve()` is the last call. At that point every registered route is wire-encoded and gzip-compressed **once**; requests are served from memory. Route map:
 
-| Route    | Content                                                                                                                                                                           |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/`      | a 1-byte frame-count header; the universe HTML; every space frame; every panel frame — all `Encode`d together as one flat list (see [fx](fx/README.md#fxgo--framepanel-building)) |
-| `/<key>` | one `Value` per registered route (`p.Route`), keyed by `filepath.Base(path)`                                                                                                      |
+| Route    | Content                                                                                                                                                                         |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`      | the universe HTML, then the frame pool and the panel pool as two nested bundles — `Encode`d together as one three-entry list (see [fx](fx/README.md#fxgo--framepanel-building)) |
+| `/<key>` | one `Value` per registered route (`p.Route`), keyed by `filepath.Base(path)`                                                                                                    |
 
-Route entries that are themselves directories (e.g. a `Slides` bundle) hold `Children`; `one` encodes those into a nested blob — the client decodes an entry's data again to recover the individual files.
+Route entries that are themselves directories (e.g. a `Slides` bundle) hold `Children`; `one` encodes those into a nested blob typed `application/x-bundle`, which the client's `decode` recognizes and recurses into automatically — the caller never decodes an entry a second time by hand.
 
 ---
 

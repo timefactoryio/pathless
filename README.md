@@ -40,11 +40,11 @@ Frames are a finite pool of simultaneously observable content: single `.html` fi
 
 #### wire: order is the contract.
 
-One binary format, both directions. The server encodes; the client decodes. A small type table is written once, up front; each entry then carries a 1-byte type id, a 4-byte length, and its bytes — no names, no paths, no entry count (the response's length is the terminator). Routes are encoded and gzip-compressed once at startup and served from memory. A route can be `Save`d (gob) to `s3/`, synced to object storage, and re-sourced later via `ToValue` of the bucket URL.
+One binary format, both directions. The server encodes; the client decodes. A small type table is written once, up front, followed by an entry count so the client can allocate its result up front instead of growing it; each entry then carries a 4-byte length and its bytes, plus a 1-byte type id unless every entry in the call shares one type — no names, no paths. Routes are encoded and gzip-compressed once at startup and served from memory. A route's `Value` can be `Save`d — gob-encoded to bytes, handed back for the caller to persist however it likes (e.g. object storage) — and re-sourced later via `ToValue` of that URL.
 
 ## client
 
-The shell boots `window.pathless` — a thin wire client (fetch, decode, render). Following a 1-byte frame-count header, the root payload leads with the **universe**: the controller that owns spaces, layout, state, and the modules attached alongside it (`p.universe`, `p.input`, `p.keyboard`).
+The shell boots `window.pathless` — a thin wire client (fetch, decode, render). The root payload is `[universe, frames-bundle, panels-bundle]`: the **universe** — the controller that owns spaces, layout, state, and the modules attached alongside it (`p.universe`, `p.input`, `p.keyboard`) — followed by the frame and panel pools, each a nested bundle decoded the same way as any directory route.
 
 The keyboard is a live reflection of the system: which layout is active, which space holds focus. When a frame is focused, its script executes — it registers its own keys, reads its own state, and runs. When focus moves, those bindings are released. When focus returns, the script re-executes and resumes. Nothing is lost — state is preserved per space, per frame.
 

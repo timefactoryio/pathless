@@ -1,6 +1,8 @@
 package fx
 
 import (
+	"bytes"
+	"encoding/gob"
 	"io"
 	"mime"
 	"net/http"
@@ -21,6 +23,18 @@ type Value struct {
 	Children []*Value
 }
 
+// Save gob-encodes v (Name, Type, Data, Children — the full tree) for the
+// caller to persist wherever it chooses. This is deliberately decoupled from
+// the wire format (one.Encode), so wire format changes never invalidate
+// anything already saved.
+func (v *Value) Save() ([]byte, error) {
+	var buf bytes.Buffer
+	if err := gob.NewEncoder(&buf).Encode(v); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 // ToValue builds the single *Value for input — a local file, a local
 // directory, or an http(s) URL, so custom content can be sourced from S3
 // exactly like a local file. A directory's files are read via walk into
@@ -34,7 +48,7 @@ func (f *Fx) ToValue(input string) (*Value, error) {
 		if info, err := os.Stat(input); err == nil && info.IsDir() {
 			return &Value{
 				Name:     filepath.Base(input),
-				Type:     "application/octet-stream",
+				Type:     "application/x-bundle",
 				Children: f.walk(input),
 			}, nil
 		}

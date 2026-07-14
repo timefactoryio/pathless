@@ -2,10 +2,10 @@
 
 `one` is the HTTP layer. It takes [zero](../zero/README.md)'s compiled assets and [fx](../fx/README.md)'s processed `Value`s, encodes them into the client wire format, gzip-compresses everything once at startup, and serves it from memory: the shell on `:1000`, the wire gateway on `:1001`.
 
-| File      | Role                                                                   |
-| --------- | ---------------------------------------------------------------------- |
-| `one.go`  | `One` — two `http.ServeMux`s, `/` payload assembly, gzip, `Serve()`    |
-| `wire.go` | `Encode`/`Decode` (the wire format) and `Save` (gob route persistence) |
+| File      | Role                                                                |
+| --------- | ------------------------------------------------------------------- |
+| `one.go`  | `One` — two `http.ServeMux`s, `/` payload assembly, gzip, `Serve()` |
+| `wire.go` | `Encode`/`Decode` — the wire format, nothing else                   |
 
 ---
 
@@ -25,11 +25,11 @@ func NewOne(origin string, shell, universe []byte, f *fx.Fx) *One
 `One` embeds no `zero`/`fx` structs — it receives their outputs as plain bytes plus a `*fx.Fx` to read the pools. `NewOne` does all assembly up front:
 
 1. gzips the shell.
-2. assembles the `/` payload — `[1-byte frame-count header, universe, ...Frames, ...Panels]` — `Encode`s it, gzips it, and registers it on `circuit`.
+2. assembles the `/` payload — `[universe, frames-bundle, panels-bundle]` — `Encode`s it, gzips it, and registers it on `circuit`.
 3. `Encode`s + gzips each `Routes` entry and registers it at `/`+key on `circuit`.
 4. registers the shell's catch-all handler on `pathless`.
 
-The 1-byte header lets the client slice `Frames` from `Panels` without either needing its own wire entry; `universe` is `zero`'s payload bytes wrapped as a `text/html` `Value` here.
+`Frames`/`Panels` are each wrapped as one directory-style `Value` (`Children: f.Frames`/`f.Panels`) rather than flattened into the list with a count prefix — the client decodes each bundle the same way it decodes any nested directory entry, no special-cased header required. `universe` is `zero`'s payload bytes wrapped as a `text/html` `Value` here.
 
 | Member                 | Behavior                                                                                                                                                   |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -46,24 +46,21 @@ Gzips `data` at `gzip.BestCompression`. Used for the shell (once) and every wire
 
 ---
 
-## `wire.go` — wire format & persistence
+## `wire.go` — wire format
 
 ### `Encode(values ...*fx.Value) []byte` / `Decode(buf) []*fx.Value`
 
 ```
 [1B typeCount]
 typeCount × [1B typeLen][type]        // string table: distinct MIME types
-repeated until EOF:
-  [1B typeID][4B dataLen BE][data]
+[1B entryCount]
+repeated entryCount times:
+  [1B typeID]?[4B dataLen BE][data]   // typeID omitted when typeCount == 1
 ```
 
-Distinct MIME types are written once, up front, as a table; each entry then costs just a 1-byte type id and a 4-byte length ahead of its data. There is no entry count — the response's length is the terminator. Names are never encoded — order is the contract.
+Distinct MIME types are written once, up front, as a table. `entryCount` lets `Decode` allocate its result at the exact size up front, instead of growing dynamically. Each entry then costs a 4-byte length ahead of its data, plus a 1-byte type id — unless every value in this call shares one type, in which case the id is implied by the table and omitted entirely (the common case: a `Frames`/`Panels` bundle, an image directory). Names are never encoded — order is the contract.
 
-A directory `Value` carries no bytes of its own: its wire payload is `Encode(Children)`, so the client decodes it exactly the way it decodes the top-level response (decode once, then decode a directory entry's data again). `Decode` is the one-level inverse. This is purely the over-the-network format — `Save` uses gob instead, so changing it never invalidates anything already persisted.
-
-### `Save(key, v) error`
-
-Gob-encodes the full `Value` tree (`Name`, `Type`, `Data`, `Children` — not the wire format) to `s3/<key>`, ready to sync to object storage. Because it's gob, `Encode`/`Decode` can change freely without ever requiring a re-save. `pathless.Save(key)` looks up `Routes[key]` and delegates here.
+A directory `Value` carries no bytes of its own: its wire payload is `Encode(Children)`, tagged with the `application/x-bundle` type so the client's `decode` recognizes it and recurses into it automatically — the caller never decodes an entry's data a second time by hand. `Decode` (this Go package's, mirrored by the client's `decode`) is the one-level inverse. This is purely the over-the-network format — gob-based persistence (`Value.Save`, in [fx](../fx/README.md#valuego--content-values)) is deliberately separate, so changing this format never invalidates anything already persisted.
 
 ---
 

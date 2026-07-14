@@ -1,6 +1,7 @@
 package fx
 
 import (
+	"fmt"
 	"log"
 	"regexp"
 	"strings"
@@ -71,6 +72,16 @@ func (f *Fx) Frame(path string) {
 func (f *Fx) Route(key string, v *Value) string {
 	f.Routes[key] = v
 	return key
+}
+
+// Save gob-encodes a registered route's Value for the caller to persist
+// wherever it chooses (e.g. syncing to S3 via an external process).
+func (f *Fx) Save(key string) ([]byte, error) {
+	v, ok := f.Routes[key]
+	if !ok {
+		return nil, fmt.Errorf("fx: Save %q: route not found", key)
+	}
+	return v.Save()
 }
 
 // Panel reads a custom .html file at path (local or S3) and registers it
