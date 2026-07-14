@@ -52,11 +52,10 @@ func (f *Fx) Logo(path string) template.HTML {
 	attr, src := "src", path
 	if !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") {
 		if v, err := f.ToValue(path); err == nil {
-			f.Routes[filepath.Base(path)] = v
+			// data-src is the route key; the client's p.source prepends
+			// window.circuit when it lazily fetches the image.
+			attr, src = "data-src", f.Route(filepath.Base(path), v)
 		}
-		// data-src is the route key; the client's p.source prepends
-		// window.circuit when it lazily fetches the image.
-		attr, src = "data-src", filepath.Base(path)
 	}
 	alt := strings.TrimSuffix(filepath.Base(path), ext)
 	return template.HTML(fmt.Sprintf(`<img %s="%s" alt="%s">`,
@@ -88,10 +87,10 @@ func (f *Fx) Text(path string) {
 }
 
 func (f *Fx) Slides(dir string) {
-	if v, err := f.ToValue(dir); err == nil {
-		f.Routes[filepath.Base(dir)] = v
-	}
 	base := filepath.Base(dir)
+	if v, err := f.ToValue(dir); err == nil {
+		f.Route(base, v)
+	}
 	tmpl, err := template.New("slides").Parse(slidesHtml)
 	if err != nil {
 		return

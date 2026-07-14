@@ -35,7 +35,7 @@ type Value struct {
 | local directory  | one directory `Value` (`walk`) — every file as a child leaf, in `sort.txt` order if present   |
 | `http(s)://` URL | fetched directly and treated like a file — `Type` from extension, content-sniffed as fallback |
 
-`ToValue` only builds the `*Value`; it doesn't register anything. Callers assign the result into `Routes` themselves, keyed by `filepath.Base(input)` (e.g. `f.Routes[filepath.Base(path)] = v`, as `Logo`/`Slides` do in [templates.go](#templatesgo--built-in-frame-templates)). `walk` skips `sort.txt` itself, then, if present, reorders entries to match it: listed stems first in listed order, unlisted files appended after.
+`ToValue` only builds the `*Value`; it doesn't register anything. To make it fetchable, callers hand it to `Route(key, v)` (see [fx.go](#fxgo--framepanel-building)), keyed by `filepath.Base(input)` (as `Logo`/`Slides` do in [templates.go](#templatesgo--built-in-frame-templates)). `walk` skips `sort.txt` itself, then, if present, reorders entries to match it: listed stems first in listed order, unlisted files appended after.
 
 ---
 
@@ -53,18 +53,19 @@ func NewFx() *Fx
 
 `Fx` holds only content — no config, no wire state. Assembling the `/` payload from these pools is done in [one](../one/README.md#onego--server), not here.
 
-| Member        | Behavior                                                                                                                                                                       |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Frame(path)` | reads a local/remote `.html` file (`ToValue`) and appends its consolidated (`build`) form to `Frames`. A failed read is fatal — everything served must be available at startup |
-| `Panel(path)` | same as `Frame`, but appends to `Panels` instead                                                                                                                               |
-| `build(s)`    | consolidates a fragment's `<style>`/`<script>` blocks into one `text/html` `Value` (see below)                                                                                 |
+| Member          | Behavior                                                                                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Frame(path)`   | reads a local/remote `.html` file (`ToValue`) and appends its consolidated (`build`) form to `Frames`. A failed read is fatal — everything served must be available at startup |
+| `Panel(path)`   | same as `Frame`, but appends to `Panels` instead                                                                                                                               |
+| `Route(key, v)` | registers a built `*Value` as a served route under `key` (into `Routes`) and returns `key` — the one operation that makes content fetchable via `p.source(key)`                |
+| `build(s)`      | consolidates a fragment's `<style>`/`<script>` blocks into one `text/html` `Value` (see below)                                                                                 |
 
 ### `build(s)` — build-time transform
 
 Runs once per `Frame`/`Panel`/template-builder call, never per request:
 
 1. More than one `<style>` block → hoisted (concatenated, in order) into a single block at the front; originals removed.
-2. Every `<script>` block's content is rewrapped in `{ }` if it isn't already (the fallback for scripts that weren't authored wrapped, per [mechanics.md](../mechanics.md#hard-rules)).
+2. Every `<script>` block's content is rewrapped in `{ }` if it isn't already (the fallback for scripts that weren't authored wrapped, per [mechanics.md](../mechanics.md#authoring-rules)).
 3. All script content is concatenated into one block, appended at the end.
 
 The result is exactly one `<style>` (if any) → markup → one `<script>{ ... }</script>`, regardless of how many blocks the source had.
@@ -75,13 +76,13 @@ The result is exactly one `<style>` (if any) → markup → one `<script>{ ... }
 
 Four embedded template sources (`frames/home.html`, `frames/slides.html`, `frames/text.html`, `panels/keyboard.html`), parsed and executed on demand by these builders. Each appends directly to `Frames`/`Panels` via `build`, so registration follows the same rules as any hand-authored frame.
 
-| Builder               | Behavior                                                                                                                                                                                                                                                                                                 |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Home(logo, heading)` | renders `frames/home.html` with `{{.LOGO}}` (via `Logo`) and `{{.HEADING}}`, registers it as a space frame                                                                                                                                                                                               |
-| `Logo(path)`          | `.svg` → inlined verbatim (`<svg>` markup, via `ToValue`). Anything else → registered as a route (`ToValue` + `Routes[key] = v`) and referenced by `data-src="{routekey}"` — the client's `p.source` prepends `window.circuit` when it lazily fetches. A remote URL is used as `src` directly, unfetched |
-| `Text(path)`          | fetches `path` (`ToValue`), renders it as Markdown (`markdown.New("")`), injects the HTML into `frames/text.html`, registers it as a space frame                                                                                                                                                         |
-| `Slides(dir)`         | registers `dir` as a route (`ToValue` + `Routes[key] = v`; its images, in `sort.txt` order if present), renders `frames/slides.html` with `{{.PREFIX}}` set to the route's key, registers it as a space frame — the frame's own script then fetches that route client-side                               |
-| `Keyboard()`          | builds `panels/keyboard.html` via `build` and appends it directly to `Panels`. Nothing calls it automatically — a program must call `p.Keyboard()` itself to get the default panel                                                                                                                       |
+| Builder               | Behavior                                                                                                                                                                                                                                                                                       |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Home(logo, heading)` | renders `frames/home.html` with `{{.LOGO}}` (via `Logo`) and `{{.HEADING}}`, registers it as a space frame                                                                                                                                                                                     |
+| `Logo(path)`          | `.svg` → inlined verbatim (`<svg>` markup, via `ToValue`). Anything else → registered as a route (`ToValue` + `Route`) and referenced by `data-src="{routekey}"` — the client's `p.source` prepends `window.circuit` when it lazily fetches. A remote URL is used as `src` directly, unfetched |
+| `Text(path)`          | fetches `path` (`ToValue`), renders it as Markdown (`markdown.New("")`), injects the HTML into `frames/text.html`, registers it as a space frame                                                                                                                                               |
+| `Slides(dir)`         | registers `dir` as a route (`ToValue` + `Route`; its images, in `sort.txt` order if present), renders `frames/slides.html` with `{{.PREFIX}}` set to the route's key, registers it as a space frame — the frame's own script then fetches that route client-side                               |
+| `Keyboard()`          | builds `panels/keyboard.html` via `build` and appends it directly to `Panels`. Nothing calls it automatically — a program must call `p.Keyboard()` itself to get the default panel                                                                                                             |
 
 `Logo`'s two paths mirror the two things a frame can point at: embed small/local assets directly, or register anything larger as its own route and let the client fetch it lazily against `window.circuit`.
 

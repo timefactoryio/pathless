@@ -62,6 +62,17 @@ func (f *Fx) Frame(path string) {
 	f.Frames = append(f.Frames, f.build(string(v.Data)))
 }
 
+// Route registers v as a served route under key and returns key, so a frame
+// can fetch it client-side via p.source(key). This is the one operation that
+// makes content fetchable — ToValue only builds a Value, it never registers.
+// A template that must expose companion data while building its frame (as
+// Slides and a non-svg Logo do) builds the Value with ToValue, then hands it
+// here and bakes the returned key into the frame's markup.
+func (f *Fx) Route(key string, v *Value) string {
+	f.Routes[key] = v
+	return key
+}
+
 // Panel reads a custom .html file at path (local or S3) and registers it
 // into the panel pool. Everything a program serves must be available at
 // startup, so a failed read is fatal: fix the path.
