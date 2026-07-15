@@ -15,19 +15,19 @@
 ### `Value`
 
 ```go
-type Value struct {
+type Output struct {
     Name     string   // server-internal only — sort.txt ordering & Save; never on the wire
     Type     string   // MIME type
     Data     []byte   // leaf bytes
-    Children []*Value // directory bundle — its files, in sort.txt order
+    Inputs   []*Output // directory bundle — its files, in sort.txt order
 }
 
 func (v *Value) Save() ([]byte, error)
 ```
 
-`Value` is a **tree**: a leaf carries `Data`; a directory carries `Children` and no `Data` of its own. `fx` never encodes — turning this tree into wire bytes (a directory's payload becomes `Encode(Children)`) is [one](../one/README.md#wirego--wire-format)'s job. `Name` is never sent on the wire; it only orders/re-identifies entries for `sort.txt` and `Save`.
+`Value` is a **tree**: a leaf carries `Data`; a directory carries `Inputs` and no `Data` of its own. `fx` never encodes — turning this tree into wire bytes (a directory's payload becomes `Encode(Inputs)`) is [one](../one/README.md#wirego--wire-format)'s job. `Name` is never sent on the wire; it only orders/re-identifies entries for `sort.txt` and `Save`.
 
-`Save` gob-encodes the full tree (`Name`, `Type`, `Data`, `Children`) into bytes and hands them back — no filesystem, no bucket, no assumed destination. It's deliberately separate from the wire format, so changes to `Encode` never invalidate anything already saved. `Fx.Save(key)` (see [fx.go](#fxgo--framepanel-building)) looks up `Routes[key]` and calls this.
+`Save` gob-encodes the full tree (`Name`, `Type`, `Data`, `Inputs`) into bytes and hands them back — no filesystem, no bucket, no assumed destination. It's deliberately separate from the wire format, so changes to `Encode` never invalidate anything already saved. `Fx.Save(key)` (see [fx.go](#fxgo--framepanel-building)) looks up `Routes[key]` and calls this.
 
 `Routes map[string]*Value` is a plain field on `Fx` (see [fx.go](#fxgo--framepanel-building)).
 
@@ -47,8 +47,8 @@ func (v *Value) Save() ([]byte, error)
 
 ```go
 type Fx struct {
-    Frames []*Value          // registered space frames, in registration order
-    Panels []*Value          // registered panel frames, in registration order
+    Frames *Value          // registered space frames, in registration order
+    Panels *Value          // registered panel frames, in registration order
     Routes map[string]*Value // custom data routes, keyed by filepath.Base
 }
 

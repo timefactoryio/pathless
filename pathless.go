@@ -15,7 +15,7 @@ import (
 //   - one:  encodes the wire format and serves it (constructed at Serve time)
 //
 // Embedding *zero.Zero and *fx.Fx promotes their methods (Home, Frame, Text,
-// Slides, Logo, Keyboard, ToValue, …) onto Pathless, so a program calls them
+// Slides, Logo, Keyboard, Input, …) onto Pathless, so a program calls them
 // directly on the value returned by NewPathless.
 type Pathless struct {
 	*zero.Zero

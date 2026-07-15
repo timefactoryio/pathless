@@ -10,7 +10,7 @@ import (
 //
 //	[1B typeLen][type][payload]
 //
-// payload is a leaf's Data, or a bundle's children as a nested sequence. The
+// payload is a leaf's Data, or a bundle's outputs as a nested sequence. The
 // payload's length is implicit — it's the rest of the buffer — since a route
 // is exactly one value. The type travels in-band, so the transport needs no
 // Content-Type and the client reconstructs the Output from the bytes alone.
@@ -65,12 +65,12 @@ func typeTable(values []*fx.Output) (table []byte, typeID map[string]byte, singl
 	return table, typeID, len(types) == 1
 }
 
-// sequence packs many Values into one blob the client decodes into an array —
-// a bundle's children. The type table (typeTable) is written once, up front;
+// sequence packs many Outputs into one blob the client decodes into an array —
+// a bundle's outputs. The type table (typeTable) is written once, up front;
 // each entry then costs a 4-byte length ahead of its data, plus a 1-byte type
 // id — unless every value shares one type (a frame pool, an image directory),
 // in which case the id is implied by the table and omitted. A child that is
-// itself a bundle carries its own children under the "application/x-bundle"
+// itself a bundle carries its own payload under the "application/x-bundle"
 // type, decoded on the client through Output.children. Names are not encoded —
 // order is the contract. Layout:
 //

@@ -172,26 +172,27 @@
 					.map(([, v]) => [v.touch, v]),
 			);
 
+			static #tapEvents = ['pointerdown', 'pointerup', 'pointercancel'];
+			static #keyEvents = ['keydown', 'keyup'];
+
 			constructor(pathless) {
 				this.pathless = pathless;
 				this.universe = pathless.universe;
 				const o = { passive: true };
-				for (const t of ['pointerdown', 'pointerup', 'pointercancel'])
+				for (const t of Input.#tapEvents)
 					this.universe.el.addEventListener(t, this, o);
-				window.addEventListener('keydown', this);
-				window.addEventListener('keyup', this);
+				for (const t of Input.#keyEvents)
+					window.addEventListener(t, this);
 
 				let lastTouch = 0;
 				const blockDoubleTap = (e) => {
 					if (Date.now() - lastTouch < 300) e.preventDefault();
 					lastTouch = Date.now();
 				};
-				document.addEventListener('touchstart', blockDoubleTap, {
-					passive: false,
-				});
-				document.addEventListener('touchend', blockDoubleTap, {
-					passive: false,
-				});
+				for (const t of ['touchstart', 'touchend'])
+					document.addEventListener(t, blockDoubleTap, {
+						passive: false,
+					});
 			}
 
 			handleEvent(e) {
