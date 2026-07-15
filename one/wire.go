@@ -6,19 +6,19 @@ import (
 	"github.com/timefactoryio/pathless/fx"
 )
 
-// Encode is a route's over-the-wire form: one Value framed as
+// Encode is a route's over-the-wire form: one Output framed as
 //
 //	[1B typeLen][type][payload]
 //
 // payload is a leaf's Data, or a bundle's children as a nested sequence. The
 // payload's length is implicit — it's the rest of the buffer — since a route
 // is exactly one value. The type travels in-band, so the transport needs no
-// Content-Type and the client reconstructs the Value from the bytes alone.
+// Content-Type and the client reconstructs the Output from the bytes alone.
 // Encode is the sole codec — the client mirrors it in reverse; there is no
-// server-side decode. It is deliberately separate from Value.Save's gob
+// server-side decode. It is deliberately separate from Output.Save's gob
 // persistence (in fx), so changing this format never invalidates anything
 // already saved.
-func Encode(v *fx.Value) []byte {
+func Encode(v *fx.Output) []byte {
 	p := payload(v)
 	out := make([]byte, 1+len(v.Type)+len(p))
 	out[0] = byte(len(v.Type))
@@ -27,11 +27,11 @@ func Encode(v *fx.Value) []byte {
 	return out
 }
 
-// payload is a Value's body: a leaf's Data, or a bundle's Children packed as a
+// payload is a Output's body: a leaf's Data, or a bundle's Inputs packed as a
 // sequence.
-func payload(v *fx.Value) []byte {
-	if len(v.Children) > 0 {
-		return sequence(v.Children)
+func payload(v *fx.Output) []byte {
+	if len(v.Inputs) > 0 {
+		return sequence(v.Inputs)
 	}
 	return v.Data
 }
@@ -41,7 +41,7 @@ func payload(v *fx.Value) []byte {
 // [type])] — the small dictionary each value's type is referenced by. It
 // returns the encoded table, the type->id lookup, and whether every value
 // shares one type (single), in which case callers omit the per-entry id byte.
-func typeTable(values []*fx.Value) (table []byte, typeID map[string]byte, single bool) {
+func typeTable(values []*fx.Output) (table []byte, typeID map[string]byte, single bool) {
 	typeID = make(map[string]byte, 4)
 	var types []string
 	for _, v := range values {
@@ -71,14 +71,14 @@ func typeTable(values []*fx.Value) (table []byte, typeID map[string]byte, single
 // id — unless every value shares one type (a frame pool, an image directory),
 // in which case the id is implied by the table and omitted. A child that is
 // itself a bundle carries its own children under the "application/x-bundle"
-// type, decoded on the client through Value.children. Names are not encoded —
+// type, decoded on the client through Output.children. Names are not encoded —
 // order is the contract. Layout:
 //
 //	[type table]
 //	[1B entryCount]
 //	[1B typeID]?[4B len(data)][data]...  (repeated entryCount times; typeID
 //	omitted when single)
-func sequence(values []*fx.Value) []byte {
+func sequence(values []*fx.Output) []byte {
 	table, typeID, single := typeTable(values)
 
 	datas := make([][]byte, len(values))

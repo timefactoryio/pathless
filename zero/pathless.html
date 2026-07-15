@@ -138,7 +138,7 @@
 					constructor(type, data) {
 						this.type = type;
 						if (type === 'application/x-bundle')
-							this.children = Pathless.#decode(data);
+							this.output = Pathless.#decode(data);
 						else this.data = data;
 					}
 					get url() {
@@ -218,9 +218,9 @@
 				}
 				async init() {
 					const [universe, frames, panels] = (await this.source())
-						.children;
-					this.frames = frames.children.map((f) => f.data);
-					this.panels = panels.children.map((f) => f.data);
+						.output;
+					this.frames = frames.output.map((f) => f.data);
+					this.panels = panels.output.map((f) => f.data);
 					this.exec(
 						document.getElementById('universe'),
 						universe.data,

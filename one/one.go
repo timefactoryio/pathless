@@ -20,7 +20,7 @@ type One struct {
 }
 
 // NewOne registers the wire endpoints served from :1001. Every route — the
-// root and each registered route alike — is exactly one *fx.Value, served by
+// root and each registered route alike — is exactly one *fx.Output, served by
 // serve as Encode(v): the value's type travels in-band in the wire table, so
 // the response needs no meaningful Content-Type. The root is just a bundle
 // whose children are the universe payload and the frame and panel pools, so
@@ -36,10 +36,10 @@ func NewOne(origin string, shell, universe []byte, f *fx.Fx) *One {
 	}
 	o.pathless.HandleFunc("/", o.handlePathless)
 
-	o.serve("/", &fx.Value{Type: "application/x-bundle", Children: []*fx.Value{
+	o.serve("/", &fx.Output{Type: "application/x-bundle", Inputs: []*fx.Output{
 		{Type: "text/html", Data: universe},
-		{Type: "application/x-bundle", Children: f.Frames},
-		{Type: "application/x-bundle", Children: f.Panels},
+		f.Frames,
+		f.Panels,
 	}})
 	for key, v := range f.Routes {
 		o.serve("/"+key, v)
@@ -60,8 +60,8 @@ func (o *One) handlePathless(w http.ResponseWriter, r *http.Request) {
 // serve registers one wire endpoint: Encode(v) — the value and its type,
 // self-describing — gzipped once at startup and written from memory. The
 // response carries no meaningful Content-Type; the bytes are the whole
-// contract, and the client decodes them into a Value.
-func (o *One) serve(path string, v *fx.Value) {
+// contract, and the client decodes them into a Output.
+func (o *One) serve(path string, v *fx.Output) {
 	data := zip(Encode(v))
 	o.circuit.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")

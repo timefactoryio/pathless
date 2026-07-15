@@ -34,7 +34,7 @@
 					d: { down: () => this.show(this.index + 1) },
 				});
 				p.source(prefix).then((bundle) => {
-					this.entries = bundle.children;
+					this.entries = bundle.output;
 					if (this.entries.length) this.show(this.index);
 				});
 			}
