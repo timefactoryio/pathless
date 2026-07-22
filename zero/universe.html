@@ -1,14 +1,13 @@
 <div id="zero"></div>
-<div id="fx" hidden></div>
 <div id="one" hidden></div>
+<div id="two" hidden></div>
 
 <script>
 	{
 		class Universe {
-			static ids = ['zero', 'fx', 'one'];
+			static ids = ['zero', 'one', 'two'];
 			static layouts = [null, [0, 1], [0, 1, 2]];
 			static variants = [1, 2, 4];
-
 			constructor(pathless, frames, panels) {
 				this.pathless = pathless;
 				this.el = document.getElementById('universe');
@@ -16,10 +15,10 @@
 				this.spaces = Universe.ids.map((id) => ({
 					el: document.getElementById(id),
 					frame: 0,
+					state: new Map(),
 				}));
 				this.frames = frames;
 				this.panels = panels;
-				this.store = new Map();
 				this.state = { focused: 0, prev: null, l: 0, v: 0 };
 				this.tap = 0.1;
 				this.swipe = 0.25;
@@ -50,9 +49,8 @@
 			}
 			read(i = this.state.focused) {
 				const s = this.spaces[i];
-				const key = s.frame + ':' + s.el.id;
-				let m = this.store.get(key);
-				if (!m) this.store.set(key, (m = new Map()));
+				let m = s.state.get(s.frame);
+				if (!m) s.state.set(s.frame, (m = new Map()));
 				return m;
 			}
 			write(key, val, i = this.state.focused) {

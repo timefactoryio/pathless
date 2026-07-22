@@ -1,47 +1,33 @@
 # zero
 
-`zero` compiles the two browser-runtime assets every request is built from — the HTML shell and the universe payload — once, at startup, from embedded sources to be served from memory.
+`zero` constructs closed system.
 
-| File            | Role                                                                                  |
-| --------------- | ------------------------------------------------------------------------------------- |
-| `zero.go`       | Go package `zero` — embeds the two HTML files, templates + minifies the shell         |
-| `pathless.html` | the shell: page chrome + `Pathless` client (wire fetch/decode, render, bootstrap)     |
-| `universe.html` | the universe payload: `Universe`, `Input`, `Panel` — layout, state, and input runtime |
 
 ---
 
-## `zero.go` — build-time compilation
-
 ```go
 type Zero struct {
-    Pathless []byte // minified, templated HTML shell
-    Universe []byte // universe payload, embedded bytes untouched
+    Pathless []byte // point of origin
+    Universe []byte // closed system
 }
 
 func NewZero(circuit string) *Zero
 ```
 
-`NewZero` does all the work up front:
-
-1. Executes `pathless.html` as a Go template with `{{.CIRCUIT}}` substituted (baking `circuit` in as `window.circuit`), then minifies the result into `Pathless`.
-2. Carries `universe.html`'s embedded bytes into `Universe` untouched — it needs no consolidation, being a single already-wrapped `<script>` with no `<style>`.
-
-`circuit` is only used during templating; it is **not** stored on `Zero` — nothing reads it after compilation. Wrapping `Universe` in a wire `Value` and encoding both artifacts is [one](../one/README.md)'s job.
-
-`minify` aggressively strips `pathless.html`'s `<style>`/`<script>`/markup down to its minimum byte size. It is hand-tuned for `pathless.html`'s exact content — not a general-purpose minifier — and runs once, inside `NewZero`.
+`NewZero` executes `pathless.html` as a Go template with `{{.CIRCUIT}}` substituted (baking `circuit` in as `window.circuit`).
 
 ---
 
-## `pathless.html` — shell + client bootstrap
+## `pathless.html` 
 
-Static page chrome (`<style>` for the universe/panel layout grid, `<body>` with `#universe` and `#panel` containers) plus one inline script defining `Pathless`, the sole global (`window.pathless`).
 
-### `Pathless`
+`window.pathless` is the point of origin for the universe.
+
 
 | Member              | Signature                           | Behavior                                                                                                                                                                                                                                                                                                |
 | ------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cache`             | `Map<string, Promise<Value>>`       | one in-flight/settled fetch per route path; a settled entry is a single `Value`, so every caller of a path shares one fetch, one decode, and one set of blob urls                                                                                                                                       |
-| `source(path = '')` | `(string) => Promise<Value>`        | fetches `${window.circuit}/${path}` and reconstructs the single `Value` it frames inline; caches by `path`; failed fetches evict the cache entry. The response has no meaningful `Content-Type` — the type is in-band. A leaf route is read via `.data`/`.url`; a bundle route via `.children`          |
+| `source(path = '')` | `(string) => Promise<Value>`        | fetches `${window.circuit}/${path}` and reconstructs the single `Value` it frames inline; caches by `path`; failed fetches evict the cache entry. A leaf route is read via `.data`/`.url`; a bundle route via `.inputs`                                                                                 |
 | `exec(el, data)`    | `(HTMLElement, Uint8Array) => void` | decodes UTF-8 `data` into a document fragment (`Range#createContextualFragment`) and replaces `el`'s children — this is how a frame's `<style>/markup/<script>` gets injected and (re-)executed                                                                                                         |
 | `init()`            | `() => Promise<void>`               | fetches the root route (`''`), whose `Value` is a bundle of `[universe, frames, panels]`; keeps the universe payload, maps each pool's `.children` to raw bytes on `this.frames`/`this.panels`, execs the universe payload into `#universe` (constructing `Universe` with them), then `universe.init()` |
 
