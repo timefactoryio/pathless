@@ -3,6 +3,8 @@ package fx
 import (
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -82,6 +84,19 @@ func (f *Fx) Save(key string) ([]byte, error) {
 		return nil, fmt.Errorf("fx: Save %q: route not found", key)
 	}
 	return v.Save()
+}
+
+// SaveBinary gob-encodes a registered route's Output and writes it to disk
+// under s3/<key>.
+func (f *Fx) SaveBinary(key string) error {
+	data, err := f.Save(key)
+	if err != nil {
+		return fmt.Errorf("fx: SaveBinary %q: %w", key, err)
+	}
+	if err := os.MkdirAll("s3", 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join("s3", key), data, 0644)
 }
 
 // Panel reads a custom .html file at path (local or S3) and registers it

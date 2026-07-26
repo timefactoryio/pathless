@@ -25,7 +25,7 @@ func NewOne(origin string, shell, universe []byte, f *fx.Fx) *One
 `One` embeds no `zero`/`fx` structs — it receives their outputs as plain bytes plus a `*fx.Fx` to read the pools. `NewOne` does all assembly up front:
 
 1. gzips the shell.
-2. `serve`s the root as one bundle `Value` whose children are `[universe, frames-bundle, panels-bundle]`, registered on `circuit`.
+2. `serve`s the root as one bundle `Value` whose children are `[universe, frames, panels]`, registered on `circuit`.
 3. `serve`s each `Routes` entry at `/`+key on `circuit`.
 4. registers the shell's catch-all handler on `pathless`.
 

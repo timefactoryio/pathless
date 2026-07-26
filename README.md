@@ -3,11 +3,12 @@
 ### is a closed system.
 
 ```go
-func main() {
-    p := pathless.NewPathless() // pathless.NewPathless("domain", "api.domain")
-    // <- frames ->
-    p.Serve()
-}
+p := pathless.NewPathless()
+// <- frames ->
+// p.Frame() accepts local path to html file or https
+// Templates via p.Text(), p.Slides()...
+// <- frames ->
+p.Serve()
 ```
 ```go
 p := pathless.NewPathless()
@@ -16,9 +17,7 @@ p := pathless.NewPathless()
 p.Serve() 
 ```
 ```go
-p := pathless.NewPathless()
-// p.Frame() accepts path to html file, local or https
-// Templates via p.Home(), p.Text(), p.Slides()...
+p := pathless.NewPathless() // pathless.NewPathless("domain", "api.domain")
 p.Serve() 
 ```
 ```go
@@ -28,7 +27,6 @@ import "github.com/timefactoryio/pathless"
 
 func main() {
     p := pathless.NewPathless()
-    p.Home("./logo.svg", "the point of origin")
     p.Text("./readme.md")
     p.Slides("./pics")
     p.Frame("./custom.html")

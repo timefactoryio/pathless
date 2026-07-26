@@ -55,17 +55,17 @@ Two further rules are runtime concerns, covered where they apply: input goes thr
 
 `zero` is the browser runtime a frame executes inside. `window.pathless` (passed as `p`) is the only global; `p.universe` (including `p.universe.panel`), `p.input`, and `p.keyboard` (the default keyboard panel, always registered) are the modules attached to it.
 
-| Member                       | Signature                                      | Behavior                                                                                  |
-| ---------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `p.source(key)`              | `(string) => Promise<{type,data,url,outputs}>` | fetch one route as a single `Output`; cached per key                                      |
-| `p.universe.frame`           | `HTMLElement`                                  | the focused frame's root container — the base for querying your own markup                |
-| `p.universe.space.el`        | `HTMLElement`                                  | the space element hosting the frame (shell layer); sizing context, not your query root    |
-| `p.universe.read(i?)`        | `(number?) => Map`                             | per-(frame, space) state map; survives re-render; defaults to the currently focused space |
-| `p.universe.write(k, v, i?)` | `(string, any, number?) => void`               | persist `k → v` into the state map; same default caveat as `read`                         |
-| `p.universe.pin(i?)`         | `(number?) => {i, read, write}`                | captures the focused index once and returns read/write bound to it                        |
-| `p.universe.sync(...i)`      | `(...number) => void`                          | re-render the given spaces, or all visible spaces if none given                           |
-| `p.input.bind(binds)`        | `(object) => void`                             | register gesture and key handlers for the focused space                                   |
-| `p.universe.panel.toggle()`  | `() => void`                                   | show/hide the panel strip (also bound to reserved key `z`)                                |
+| Member | Behavior |
+| ------ | -------- ||
+| `p.source(key)`              | fetch one route as a single `Output`; cached per key                                      |
+| `p.universe.frame`           | the focused frame's root container — the base for querying your own markup                |
+| `p.universe.space.el`        | the space element hosting the frame (shell layer); sizing context, not your query root    |
+| `p.universe.read(i?)`        | per-(frame, space) state map; survives re-render; defaults to the currently focused space |
+| `p.universe.write(k, v, i?)` | persist `k → v` into the state map; same default caveat as `read`                         |
+| `p.universe.pin(i?)`         | captures the focused index once and returns read/write bound to it                        |
+| `p.universe.sync(...i)`      | re-render the given spaces, or all visible spaces if none given                           |
+| `p.input.bind(binds)`        | register gesture and key handlers for the focused space                                   |
+| `p.universe.panel.toggle()`  | show/hide the panel strip (also bound to reserved key `z`)                                |
 
 ### `p.source(key)` — data access
 
