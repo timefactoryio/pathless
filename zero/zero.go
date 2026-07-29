@@ -11,7 +11,7 @@ import (
 var pathlessHtml string
 
 //go:embed universe.html
-var universeHtml string
+var universeHtml []byte
 
 // Zero compiles the two browser-runtime assets every request is built from:
 // Pathless, the HTML shell, and Universe, the client controller payload. The
@@ -37,7 +37,7 @@ func NewZero(circuit string) *Zero {
 
 	return &Zero{
 		Pathless: minify(b.String()),
-		Universe: []byte(universeHtml),
+		Universe: universeHtml,
 	}
 }
 
