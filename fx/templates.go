@@ -2,9 +2,6 @@ package fx
 
 import (
 	"bytes"
-	"embed"
-
-	_ "embed"
 	"fmt"
 	"html"
 	"html/template"
@@ -14,20 +11,16 @@ import (
 	"github.com/timefactoryio/markdown"
 )
 
-//go:embed frames panels
-var templatesFS embed.FS
-
-var templates = template.Must(template.ParseFS(templatesFS, "frames/*.html", "panels/*.html"))
-
 func (f *Fx) Home(logo, heading string) {
+	tmpl := template.Must(template.New("home").Parse(f.Zero.Frames.Home))
 	var buf bytes.Buffer
-	if err := templates.ExecuteTemplate(&buf, "home.html", map[string]any{
+	if err := tmpl.Execute(&buf, map[string]any{
 		"LOGO":    f.Logo(logo),
 		"HEADING": heading,
 	}); err != nil {
 		return
 	}
-	f.Frames.Inputs = append(f.Frames.Inputs, f.build(buf.String()))
+	f.Frames = append(f.Frames, f.build(buf.String()))
 }
 
 func (f *Fx) Logo(path string) template.HTML {
@@ -48,7 +41,6 @@ func (f *Fx) Logo(path string) template.HTML {
 		html.EscapeString(path), html.EscapeString(alt)))
 }
 
-// Markdown returns the configured goldmark instance for rendering markdown to HTML.
 func (f *Fx) Text(path string) {
 	v, err := f.Input(path)
 	if err != nil {
@@ -58,34 +50,28 @@ func (f *Fx) Text(path string) {
 	if err := markdown.New("").Convert(v.Data, &md); err != nil {
 		return
 	}
+	tmpl := template.Must(template.New("text").Parse(f.Zero.Frames.Text))
 	var buf bytes.Buffer
-	if err := templates.ExecuteTemplate(&buf, "text.html", map[string]any{
+	if err := tmpl.Execute(&buf, map[string]any{
 		"MARKDOWN": template.HTML(md.String()),
 	}); err != nil {
 		return
 	}
-	f.Frames.Inputs = append(f.Frames.Inputs, f.build(buf.String()))
+	f.Frames = append(f.Frames, f.build(buf.String()))
 }
 
 func (f *Fx) Slides(dir string) {
 	base := filepath.Base(dir)
-	if v, err := f.Input(dir); err == nil {
-		f.Route(base, v)
-	}
+	f.Route(base, f.list(dir)...)
+	tmpl := template.Must(template.New("slides").Parse(f.Zero.Frames.Slides))
 	var buf bytes.Buffer
-	if err := templates.ExecuteTemplate(&buf, "slides.html", map[string]string{"PREFIX": base}); err != nil {
+	if err := tmpl.Execute(&buf, map[string]string{"PREFIX": base}); err != nil {
 		return
 	}
-	f.Frames.Inputs = append(f.Frames.Inputs, f.build(buf.String()))
+	f.Frames = append(f.Frames, f.build(buf.String()))
 }
 
-// Keyboard builds the default keyboard panel frame — an example of a
-// self-contained panel frame template, same shape as Home/Text/Slides.
-// Pass the result to Panels(...) to register it.
+// Keyboard builds the default keyboard panel frame from Zero's embedded panel HTML.
 func (f *Fx) Keyboard() {
-	kb, err := templatesFS.ReadFile("panels/keyboard.html")
-	if err != nil {
-		return
-	}
-	f.Panels.Inputs = append(f.Panels.Inputs, f.build(string(kb)))
+	f.Panels = append(f.Panels, f.build(f.Zero.Panels.Keyboard))
 }

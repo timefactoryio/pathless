@@ -7,28 +7,42 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/timefactoryio/pathless/zero"
 )
 
-// Fx sources and processes content into Values: it builds the frame and
-// panel pools and the route map. It knows nothing of the wire format, HTTP,
-// or where content is served from — one encodes and serves what fx produces,
-// and route URLs are resolved client-side against window.circuit.
 type Fx struct {
-	Frames *Output
-	Panels *Output
-	Routes map[string]*Output
+	*zero.Zero
+	Frames []*Output
+	Panels []*Output
+	Routes map[string][]*Output
 }
 
-func NewFx() *Fx {
+func NewFx(zero *zero.Zero) *Fx {
 	return &Fx{
-		Frames: &Output{Type: "application/x-bundle"},
-		Panels: &Output{Type: "application/x-bundle"},
-		Routes: make(map[string]*Output),
+		Zero:   zero,
+		Frames: []*Output{},
+		Panels: []*Output{},
+		Routes: make(map[string][]*Output),
 	}
 }
 
+// Root builds the wire blob served at "/" once — universe.html, then the
+// frame pool and panel pool each nested as their own manifest — and
+// replaces Universe with it. Like Pathless, it's built once and never
+// changes, so it's a static blob by the time it's served. Its entries carry
+// no Type; root's shape is hardcoded on both sides.
+func (f *Fx) Root() []byte {
+	f.Universe = f.Marshal(
+		&Output{Data: f.Universe},
+		f.Marshal(f.Frames...),
+		f.Marshal(f.Panels...),
+	).Data
+	return f.Universe
+}
+
 // build consolidates a fragment's <style>/<script> assets into a single
-// text/html leaf Output.
+// leaf Output.
 func (f *Fx) build(s string) *Output {
 	if styles := style.FindAllStringSubmatch(s, -1); len(styles) > 1 {
 		var merged strings.Builder
@@ -51,7 +65,7 @@ func (f *Fx) build(s string) *Output {
 		s = script.ReplaceAllString(s, "") + "<script>{" + merged.String() + "}</script>"
 	}
 
-	return &Output{Type: "text/html", Data: []byte(s)}
+	return &Output{Data: []byte(s)}
 }
 
 // Frame reads a custom .html file at path (local or S3) and registers it
@@ -62,28 +76,29 @@ func (f *Fx) Frame(path string) {
 	if err != nil {
 		log.Fatalf("fx: Frame %q: %v", path, err)
 	}
-	f.Frames.Inputs = append(f.Frames.Inputs, f.build(string(v.Data)))
+	f.Frames = append(f.Frames, f.build(string(v.Data)))
 }
 
-// Route registers v as a served route under key and returns key, so a frame
-// can fetch it client-side via p.source(key). This is the one operation that
-// makes content fetchable — Input only builds a Output, it never registers.
-// A template that must expose companion data while building its frame (as
-// Slides and a non-svg Logo do) builds the Output with Input, then hands it
-// here and bakes the returned key into the frame's markup.
-func (f *Fx) Route(key string, v *Output) string {
-	f.Routes[key] = v
+// Route registers values as a served route under key and returns key, so a
+// frame can fetch it client-side via p.source(key). This is the one
+// operation that makes content fetchable — Input only builds a Output, it
+// never registers. A template that must expose companion data while
+// building its frame (as Slides and a non-svg Logo do) builds the Output(s)
+// with Input, then hands them here and bakes the returned key into the
+// frame's markup.
+func (f *Fx) Route(key string, values ...*Output) string {
+	f.Routes[key] = values
 	return key
 }
 
-// Save gob-encodes a registered route's Output for the caller to persist
-// wherever it chooses (e.g. syncing to S3 via an external process).
+// Save gob-encodes a registered route's wire Output for the caller to
+// persist wherever it chooses (e.g. syncing to S3 via an external process).
 func (f *Fx) Save(key string) ([]byte, error) {
-	v, ok := f.Routes[key]
+	values, ok := f.Routes[key]
 	if !ok {
 		return nil, fmt.Errorf("fx: Save %q: route not found", key)
 	}
-	return v.Save()
+	return f.Marshal(values...).Save()
 }
 
 // SaveBinary gob-encodes a registered route's Output and writes it to disk
@@ -107,7 +122,7 @@ func (f *Fx) Panel(path string) {
 	if err != nil {
 		log.Fatalf("fx: Panel %q: %v", path, err)
 	}
-	f.Panels.Inputs = append(f.Panels.Inputs, f.build(string(v.Data)))
+	f.Panels = append(f.Panels, f.build(string(v.Data)))
 }
 
 var (

@@ -1,7 +1,6 @@
 <!doctype html>
 <html lang="en">
 	<head>
-		<meta charset="UTF-8" />
 		<meta
 			name="viewport"
 			content="width=device-width,initial-scale=1.0,viewport-fit=cover,user-scalable=no" />
@@ -133,74 +132,48 @@
 				static #td = new TextDecoder();
 				static #range = document.createRange();
 
-				static #Value = class {
-					#url;
-					constructor(type, data) {
-						this.type = type;
-						if (type === 'application/x-bundle')
-							this.output = Pathless.#decode(data);
-						else this.data = data;
-					}
-					get url() {
-						return (this.#url ??= URL.createObjectURL(
-							new Blob([this.data], { type: this.type }),
-						));
-					}
-				};
-
-				static #typeTable(bytes) {
-					let pos = 0;
-					const types = new Array(bytes[pos++]);
-					for (let i = 0; i < types.length; i++) {
-						const len = bytes[pos++];
-						types[i] = Pathless.#td.decode(
-							bytes.subarray(pos, pos + len),
-						);
-						pos += len;
-					}
-					return [types, pos];
-				}
-
-				static #decode(bytes) {
+				static split(bytes) {
 					const view = new DataView(
 						bytes.buffer,
 						bytes.byteOffset,
 						bytes.byteLength,
 					);
-					const [types, start] = Pathless.#typeTable(bytes);
-					let pos = start;
-					const single = types.length === 1;
-					const values = new Array(bytes[pos++]);
-					for (let i = 0; i < values.length; i++) {
-						const type = single ? types[0] : types[bytes[pos++]];
-						const len = view.getUint32(pos);
-						pos += 4;
-						values[i] = new Pathless.#Value(
-							type,
-							bytes.subarray(pos, pos + len),
+					const count = view.getUint32(0);
+					const entries = new Array(count);
+					let head = 4,
+						body = 4 + 4 * count;
+					for (let i = 0; i < count; i++) {
+						const blob = bytes.subarray(
+							body,
+							(body += view.getUint32(head)),
 						);
-						pos += len;
+						head += 4;
+						const n = blob[0];
+						entries[i] = {
+							type: Pathless.#td.decode(blob.subarray(1, 1 + n)),
+							data: blob.subarray(1 + n),
+						};
 					}
-					return values;
+					return entries;
 				}
 
 				constructor() {
 					this.cache = new Map();
+					this.urls = new WeakMap();
 					this.init();
 				}
 
-				source(path = '') {
+				// Fetched and split exactly once per path; callers share entry objects,
+				// so url() can never mint a duplicate for the same one.
+				source(path) {
 					let p = this.cache.get(path);
 					if (!p) {
 						p = fetch(`${window.circuit}/${path}`)
-							.then(async (r) => {
-								const b = await r.bytes();
-								const n = b[0];
-								return new Pathless.#Value(
-									Pathless.#td.decode(b.subarray(1, 1 + n)),
-									b.subarray(1 + n),
-								);
-							})
+							.then(async (r) =>
+								Pathless.split(
+									new Uint8Array(await r.arrayBuffer()),
+								),
+							)
 							.catch((err) => {
 								this.cache.delete(path);
 								throw err;
@@ -209,6 +182,18 @@
 					}
 					return p;
 				}
+
+				url(entry) {
+					let u = this.urls.get(entry);
+					if (!u) {
+						u = URL.createObjectURL(
+							new Blob([entry.data], { type: entry.type }),
+						);
+						this.urls.set(entry, u);
+					}
+					return u;
+				}
+
 				exec(el, data) {
 					el.replaceChildren(
 						Pathless.#range.createContextualFragment(
@@ -216,11 +201,15 @@
 						),
 					);
 				}
+
 				async init() {
-					const [universe, frames, panels] = (await this.source())
-						.output;
-					this.frames = frames.output.map((f) => f.data);
-					this.panels = panels.output.map((f) => f.data);
+					const [universe, frames, panels] = await this.source('');
+					this.frames = Pathless.split(frames.data).map(
+						(e) => e.data,
+					);
+					this.panels = Pathless.split(panels.data).map(
+						(e) => e.data,
+					);
 					this.exec(
 						document.getElementById('universe'),
 						universe.data,
