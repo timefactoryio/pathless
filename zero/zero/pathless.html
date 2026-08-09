@@ -159,39 +159,38 @@
 
 				constructor() {
 					this.cache = new Map();
-					this.urls = new WeakMap();
 					this.init();
 				}
 
-				// Fetched and split exactly once per path; callers share entry objects,
-				// so url() can never mint a duplicate for the same one.
 				source(path) {
-					let p = this.cache.get(path);
-					if (!p) {
-						p = fetch(`${window.circuit}/${path}`)
-							.then(async (r) =>
+					let value = this.cache.get(path);
+					if (!value) {
+						value = fetch(`${window.circuit}/${path}`)
+							.then(async (response) =>
 								Pathless.split(
-									new Uint8Array(await r.arrayBuffer()),
+									new Uint8Array(
+										await response.arrayBuffer(),
+									),
 								),
 							)
-							.catch((err) => {
+							.catch((error) => {
 								this.cache.delete(path);
-								throw err;
+								throw error;
 							});
-						this.cache.set(path, p);
+						this.cache.set(path, value);
 					}
-					return p;
+					return value;
 				}
 
 				url(entry) {
-					let u = this.urls.get(entry);
-					if (!u) {
-						u = URL.createObjectURL(
+					let value = this.cache.get(entry);
+					if (!value) {
+						value = URL.createObjectURL(
 							new Blob([entry.data], { type: entry.type }),
 						);
-						this.urls.set(entry, u);
+						this.cache.set(entry, value);
 					}
-					return u;
+					return value;
 				}
 
 				exec(el, data) {

@@ -72,8 +72,11 @@ func (o *One) cors(next http.Handler) http.Handler {
 }
 
 func (o *One) Serve() {
-	o.Root()
-	o.Universe = zip(o.Universe)
+	o.Universe = append(
+		o.Universe,
+		o.Frames,
+		o.Panels,
+	)
 	o.circuit.HandleFunc("/", o.handleRoot)
 	for key, values := range o.Fx.Routes {
 		o.serve("/"+key, values)
