@@ -1,4 +1,4 @@
-package v2
+package fx
 
 import (
 	"fmt"
@@ -8,21 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/timefactoryio/pathless/zero"
 )
-
-type Fx struct {
-	*zero.Zero
-	Input Input
-}
-
-func NewFx(z *zero.Zero) *Fx {
-	return &Fx{
-		Zero:  z,
-		Input: &input{},
-	}
-}
 
 type Input interface {
 	File(string) (*Result, error)
@@ -109,6 +95,17 @@ func (i *input) sequence(path string, results []*Result) ([]*Result, error) {
 		}
 	}
 	return ordered, nil
+}
+
+func NewDir(path string) *Result {
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		return &Result{
+			Name: filepath.Base(path),
+			Type: "directory",
+			Data: nil,
+		}
+	}
+	return nil
 }
 
 func (i *input) Directory(root string) (map[string][]*Result, error) {
