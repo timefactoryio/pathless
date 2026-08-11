@@ -1,6 +1,7 @@
 package fx
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
 	"mime"
@@ -11,20 +12,32 @@ import (
 )
 
 type Input interface {
-	Url(string) (*Result, error)
-	Path(string) ([]*Result, error)
+	String(string) (*Output, error)
 }
-type Result struct {
+type Output struct {
 	Name string
 	Type string
-	Data []byte
+	Zero []byte
+	One  []*Output
 }
-
-type Dir *Result
 
 type input struct{}
 
-func (i *input) Url(source string) (*Result, error) {
+func (i *input) String(path string) (*Output, error) {
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return i.url(path)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat %q: %w", path, err)
+	}
+	if info.IsDir() {
+		return i.dir(path)
+	}
+	return readFile(path, baseName(path))
+}
+
+func (i *input) url(source string) (*Output, error) {
 	resp, err := http.Get(source)
 	if err != nil {
 		return nil, fmt.Errorf("get %q: %w", source, err)
@@ -39,29 +52,36 @@ func (i *input) Url(source string) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %q: %w", source, err)
 	}
-	return &Result{
+	return &Output{
 		Name: baseName(resp.Request.URL.Path),
 		Type: http.DetectContentType(data),
-		Data: data}, nil
+		Zero: data}, nil
 }
 
-func (i *input) Path(path string) ([]*Result, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, fmt.Errorf("stat %q: %w", path, err)
-	}
-	if info.IsDir() {
-		return readDir(path)
-	}
-	result, err := readFile(path, baseName(path))
+// dir reads path as a directory directly, without stat-checking it like String does.
+func (i *input) dir(path string) (*Output, error) {
+	files, err := readDir(path)
 	if err != nil {
 		return nil, err
 	}
-	return []*Result{result}, nil
+	return &Output{Name: baseName(path), Zero: sizes(files), One: files}, nil
+}
+
+// sizes encodes each file's byte size as a big-endian uint64, preceded by their combined total.
+func sizes(files []*Output) []byte {
+	data := make([]byte, 8*(1+len(files)))
+	var total uint64
+	for i, file := range files {
+		size := uint64(len(file.Zero))
+		total += size
+		binary.BigEndian.PutUint64(data[8*(i+1):], size)
+	}
+	binary.BigEndian.PutUint64(data[:8], total)
+	return data
 }
 
 // readDir reads path's directory listing, normalizes it into Results, and applies sequencing.
-func readDir(path string) ([]*Result, error) {
+func readDir(path string) ([]*Output, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return nil, fmt.Errorf("read dir %q: %w", path, err)
@@ -74,10 +94,10 @@ func readDir(path string) ([]*Result, error) {
 	return sequence(results), nil
 }
 
-// processFiles reads each non-dir entry into a Result using its full filesystem name (nested
+// processFiles reads each non-dir entry into a Output using its full filesystem name (nested
 // directories are ignored), then strips extensions from names that don't collide once shortened.
-func processFiles(path string, entries []os.DirEntry) ([]*Result, error) {
-	results := make([]*Result, 0, len(entries))
+func processFiles(path string, entries []os.DirEntry) ([]*Output, error) {
+	results := make([]*Output, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -92,17 +112,17 @@ func processFiles(path string, entries []os.DirEntry) ([]*Result, error) {
 	return stripExtensions(results), nil
 }
 
-func readFile(path, name string) (*Result, error) {
+func readFile(path, name string) (*Output, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read file %q: %w", path, err)
 	}
-	return &Result{Name: name, Type: mime.TypeByExtension(filepath.Ext(path)), Data: data}, nil
+	return &Output{Name: name, Type: mime.TypeByExtension(filepath.Ext(path)), Zero: data}, nil
 }
 
 // stripExtensions shortens each entry's Name to its baseName, except where that would
 // collide with another entry's shortened name — those entries keep their full name.
-func stripExtensions(entries []*Result) []*Result {
+func stripExtensions(entries []*Output) []*Output {
 	counts := make(map[string]int, len(entries))
 	for _, entry := range entries {
 		counts[baseName(entry.Name)]++
@@ -118,12 +138,12 @@ func stripExtensions(entries []*Result) []*Result {
 // sequence orders entries by the newline-separated names in a "sequence" entry's Data,
 // dropping that entry from the result; unlisted entries keep their relative order after.
 // If no "sequence" entry exists, entries is returned unchanged.
-func sequence(entries []*Result) []*Result {
+func sequence(entries []*Output) []*Output {
 	var data []byte
 	rest := entries[:0:0]
 	for _, entry := range entries {
 		if entry.Name == "sequence" {
-			data = entry.Data
+			data = entry.Zero
 			continue
 		}
 		rest = append(rest, entry)
@@ -132,13 +152,13 @@ func sequence(entries []*Result) []*Result {
 		return entries
 	}
 
-	byName := make(map[string]*Result, len(rest))
+	byName := make(map[string]*Output, len(rest))
 	for _, entry := range rest {
 		byName[entry.Name] = entry
 	}
 
-	ordered := make([]*Result, 0, len(rest))
-	used := make(map[*Result]bool, len(rest))
+	ordered := make([]*Output, 0, len(rest))
+	used := make(map[*Output]bool, len(rest))
 	for name := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 		name = strings.TrimSpace(name)
 		entry, ok := byName[name]
