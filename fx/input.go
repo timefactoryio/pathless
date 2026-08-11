@@ -3,6 +3,7 @@ package fx
 import (
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,30 +12,17 @@ import (
 
 type Input interface {
 	Url(string) (*Result, error)
-	Path(string) (*Result, error)
+	Path(string) ([]*Result, error)
 }
 type Result struct {
-	Name    string
-	Path    string
-	Type    string
-	Data    []byte
-	Entries []*Result
+	Name string
+	Type string
+	Data []byte
 }
+
+type Dir *Result
 
 type input struct{}
-
-// baseName drops the extension, except on dot-prefixed bases (.env.local, .gitignore).
-func baseName(path string) string {
-	base := filepath.Base(path)
-	if strings.HasPrefix(base, ".") {
-		return base
-	}
-	return strings.TrimSuffix(base, filepath.Ext(base))
-}
-
-func newResult(name, parent string, data []byte) *Result {
-	return &Result{Name: name, Path: parent, Type: http.DetectContentType(data), Data: data}
-}
 
 func (i *input) Url(source string) (*Result, error) {
 	resp, err := http.Get(source)
@@ -51,107 +39,128 @@ func (i *input) Url(source string) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %q: %w", source, err)
 	}
-	return newResult(baseName(resp.Request.URL.Path), "", data), nil
+	return &Result{
+		Name: baseName(resp.Request.URL.Path),
+		Type: http.DetectContentType(data),
+		Data: data}, nil
 }
 
-func (i *input) Path(path string) (*Result, error) {
+func (i *input) Path(path string) ([]*Result, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("stat %q: %w", path, err)
 	}
 	if info.IsDir() {
-		return readDir(path, "")
+		return readDir(path)
 	}
-	return readFile(path, baseName(path), "")
-}
-
-// parent is the containing directory's slash-suffixed name, "" at the walk root.
-func readFile(path, name, parent string) (*Result, error) {
-	data, err := os.ReadFile(path)
+	result, err := readFile(path, baseName(path))
 	if err != nil {
-		return nil, fmt.Errorf("read file %q: %w", path, err)
+		return nil, err
 	}
-	return newResult(name, parent, data), nil
+	return []*Result{result}, nil
 }
 
-func readDir(path, parent string) (*Result, error) {
+// readDir reads path's directory listing, normalizes it into Results, and applies sequencing.
+func readDir(path string) ([]*Result, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return nil, fmt.Errorf("read dir %q: %w", path, err)
 	}
 
-	// real excludes sequence.txt, so neither pass below needs to special-case it.
-	var order []byte
-	real := entries[:0:0]
+	results, err := processFiles(path, entries)
+	if err != nil {
+		return nil, err
+	}
+	return sequence(results), nil
+}
+
+// processFiles reads each non-dir entry into a Result using its full filesystem name (nested
+// directories are ignored), then strips extensions from names that don't collide once shortened.
+func processFiles(path string, entries []os.DirEntry) ([]*Result, error) {
+	results := make([]*Result, 0, len(entries))
 	for _, entry := range entries {
-		if entry.Name() == "sequence.txt" {
-			if order, err = os.ReadFile(filepath.Join(path, entry.Name())); err != nil {
-				return nil, fmt.Errorf("read sequence %q: %w", path, err)
-			}
+		if entry.IsDir() {
 			continue
 		}
-		real = append(real, entry)
-	}
-
-	name := filepath.Base(path) + "/"
-	result := &Result{Name: name, Path: parent, Entries: make([]*Result, 0, len(real))}
-
-	names := make(map[string]int, len(real))
-	for _, entry := range real {
-		if !entry.IsDir() {
-			names[baseName(entry.Name())]++
-		}
-	}
-
-	for _, entry := range real {
-		child := filepath.Join(path, entry.Name())
-		var nested *Result
-		if entry.IsDir() {
-			nested, err = readDir(child, name)
-		} else {
-			fileName := baseName(entry.Name())
-			if names[fileName] > 1 {
-				fileName = entry.Name()
-			}
-			nested, err = readFile(child, fileName, name)
-		}
+		name := entry.Name()
+		file, err := readFile(filepath.Join(path, name), name)
 		if err != nil {
 			return nil, err
 		}
-		result.Entries = append(result.Entries, nested)
+		results = append(results, file)
 	}
-
-	if order != nil {
-		result.Entries = sortBySequence(order, result.Entries)
-	}
-	return result, nil
+	return stripExtensions(results), nil
 }
 
-// sortBySequence reorders entries per the newline-separated names in data;
-// named entries come first in listed order, unlisted entries keep their relative order after.
-func sortBySequence(data []byte, entries []*Result) []*Result {
-	byName := make(map[string][]*Result, len(entries))
-	for _, entry := range entries {
-		byName[entry.Name] = append(byName[entry.Name], entry)
+func readFile(path, name string) (*Result, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file %q: %w", path, err)
 	}
+	return &Result{Name: name, Type: mime.TypeByExtension(filepath.Ext(path)), Data: data}, nil
+}
 
-	ordered := make([]*Result, 0, len(entries))
-	used := make(map[*Result]bool, len(entries))
-	for name := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
-		name = strings.TrimSpace(name)
-		matches := byName[name]
-		if len(matches) == 0 {
+// stripExtensions shortens each entry's Name to its baseName, except where that would
+// collide with another entry's shortened name — those entries keep their full name.
+func stripExtensions(entries []*Result) []*Result {
+	counts := make(map[string]int, len(entries))
+	for _, entry := range entries {
+		counts[baseName(entry.Name)]++
+	}
+	for _, entry := range entries {
+		if candidate := baseName(entry.Name); counts[candidate] == 1 {
+			entry.Name = candidate
+		}
+	}
+	return entries
+}
+
+// sequence orders entries by the newline-separated names in a "sequence" entry's Data,
+// dropping that entry from the result; unlisted entries keep their relative order after.
+// If no "sequence" entry exists, entries is returned unchanged.
+func sequence(entries []*Result) []*Result {
+	var data []byte
+	rest := entries[:0:0]
+	for _, entry := range entries {
+		if entry.Name == "sequence" {
+			data = entry.Data
 			continue
 		}
-		next := matches[0]
-		byName[name] = matches[1:]
-		ordered = append(ordered, next)
-		used[next] = true
+		rest = append(rest, entry)
 	}
-	for _, entry := range entries {
+	if data == nil {
+		return entries
+	}
+
+	byName := make(map[string]*Result, len(rest))
+	for _, entry := range rest {
+		byName[entry.Name] = entry
+	}
+
+	ordered := make([]*Result, 0, len(rest))
+	used := make(map[*Result]bool, len(rest))
+	for name := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
+		name = strings.TrimSpace(name)
+		entry, ok := byName[name]
+		if !ok || used[entry] {
+			continue
+		}
+		ordered = append(ordered, entry)
+		used[entry] = true
+	}
+	for _, entry := range rest {
 		if !used[entry] {
 			ordered = append(ordered, entry)
 		}
 	}
 	return ordered
+}
+
+// baseName drops the extension, except on dot-prefixed bases (.env.local, .gitignore).
+func baseName(path string) string {
+	base := filepath.Base(path)
+	if strings.HasPrefix(base, ".") {
+		return base
+	}
+	return strings.TrimSuffix(base, filepath.Ext(base))
 }
