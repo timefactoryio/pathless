@@ -1,7 +1,6 @@
 package fx
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"mime"
@@ -13,12 +12,6 @@ import (
 
 type Input interface {
 	String(string) (*Output, error)
-}
-type Output struct {
-	Name string
-	Type string
-	Zero []byte
-	One  []*Output
 }
 
 type input struct{}
@@ -68,20 +61,7 @@ func (i *input) dir(path string) (*Output, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Output{Name: baseName(path), Zero: sizes(files), One: files}, nil
-}
-
-// sizes encodes each file's byte size as a big-endian uint64, preceded by their combined total.
-func sizes(files []*Output) []byte {
-	data := make([]byte, 8*(1+len(files)))
-	var total uint64
-	for i, file := range files {
-		size := uint64(len(file.Zero))
-		total += size
-		binary.BigEndian.PutUint64(data[8*(i+1):], size)
-	}
-	binary.BigEndian.PutUint64(data[:8], total)
-	return data
+	return &Output{Name: baseName(path), One: files}, nil
 }
 
 // readDir reads path's directory listing, normalizes it into Results, and applies sequencing.

@@ -7,6 +7,9 @@ import (
 	"html/template"
 	"regexp"
 	"strings"
+
+	"github.com/timefactoryio/pathless/zero/frames"
+	"github.com/timefactoryio/pathless/zero/panels"
 )
 
 //go:embed zero/pathless.html
@@ -15,38 +18,18 @@ var pathlessHTML string
 //go:embed zero/universe.html
 var universeHTML []byte
 
-//go:embed frames/home.html
-var homeHTML string
-
-//go:embed frames/slides.html
-var slidesHTML string
-
-//go:embed frames/text.html
-var textHTML string
-
-//go:embed panels/keyboard.html
-var keyboardHTML string
-
 type Zero struct {
-	Pathless    []byte
-	PathlessURL string
-	CircuitURL  string
-	Universe    *Universe
-	Templates   *Templates
-}
-
-type Universe struct {
-	HTML   []byte
-	Frames [][]byte
-	Panels [][]byte
+	PathlessHTML []byte
+	UniverseHTML []byte
+	PathlessURL  string
+	CircuitURL   string
+	Templates    *Templates
 }
 
 func NewZero(args ...string) *Zero {
 	z := &Zero{
-		Universe: &Universe{
-			HTML: universeHTML,
-		},
-		Templates: NewTemplates(),
+		UniverseHTML: universeHTML,
+		Templates:    NewTemplates(),
 	}
 	switch len(args) {
 	case 0:
@@ -65,15 +48,7 @@ func NewZero(args ...string) *Zero {
 	return z
 }
 
-func (z *Zero) Frame(html string) {
-	z.Universe.Frames = append(z.Universe.Frames, build(html))
-}
-
-func (z *Zero) Panel(html string) {
-	z.Universe.Panels = append(z.Universe.Panels, build(html))
-}
-
-func build(html string) []byte {
+func (z *Zero) Build(html string) []byte {
 	if styles := styleTag.FindAllStringSubmatch(html, -1); len(styles) > 1 {
 		var merged strings.Builder
 		for _, match := range styles {
@@ -114,33 +89,17 @@ func (z *Zero) pathless() {
 		panic(err)
 	}
 
-	z.Pathless = buf.Bytes()
+	z.PathlessHTML = buf.Bytes()
 }
 
 type Templates struct {
-	Frames *Frames
-	Panels *Panels
-}
-
-type Frames struct {
-	Home   string
-	Slides string
-	Text   string
-}
-
-type Panels struct {
-	Keyboard string
+	Frames *frames.Frames
+	Panels *panels.Panels
 }
 
 func NewTemplates() *Templates {
 	return &Templates{
-		Frames: &Frames{
-			Home:   homeHTML,
-			Slides: slidesHTML,
-			Text:   textHTML,
-		},
-		Panels: &Panels{
-			Keyboard: keyboardHTML,
-		},
+		Frames: frames.NewFrames(),
+		Panels: panels.NewPanels(),
 	}
 }

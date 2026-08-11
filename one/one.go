@@ -18,6 +18,11 @@ type One struct {
 	circuit  *http.ServeMux
 }
 
+type HTTP struct {
+	pathless *http.ServeMux
+	circuit  *http.ServeMux
+}
+
 // NewOne registers the wire endpoints served from :1001. Root is built once
 // in Serve (after all content is registered) and served as a static blob,
 // exactly like Pathless; every other registered route is served by serve.
@@ -27,7 +32,7 @@ func NewOne(fx *fx.Fx) *One {
 		pathless: http.NewServeMux(),
 		circuit:  http.NewServeMux(),
 	}
-	o.Pathless = zip(o.Pathless)
+	o.PathlessHTML = zip(o.PathlessHTML)
 	o.pathless.HandleFunc("/", o.handlePathless)
 	return o
 }
@@ -37,17 +42,17 @@ func (o *One) handlePathless(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	writeGzip(w, "text/html; charset=utf-8", o.Pathless)
+	writeGzip(w, "text/html; charset=utf-8", o.PathlessHTML)
 }
 
 func (o *One) handleRoot(w http.ResponseWriter, r *http.Request) {
-	writeGzip(w, "application/octet-stream", o.Universe)
+	writeGzip(w, "application/octet-stream", o.UniverseHTML)
 }
 
-// serve registers one wire endpoint: values marshaled into a single
-// manifest, gzipped once at startup and written from memory.
-func (o *One) serve(path string, values []*fx.Output) {
-	data := zip(o.Marshal(values...).Data)
+// Handle registers path as a wire endpoint for output: encoded (gzipped) once at
+// registration time, then written from memory on every request.
+func (o *One) Handle(path string, output *fx.Output) {
+	data := output.Encode()
 	o.circuit.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		writeGzip(w, "application/octet-stream", data)
 	})
@@ -72,8 +77,8 @@ func (o *One) Serve() {
 		o.Panels,
 	)
 	o.circuit.HandleFunc("/", o.handleRoot)
-	for key, values := range o.Fx.Routes {
-		o.serve("/"+key, values)
+	for key, output := range o.Fx.Routes {
+		o.Handle("/"+key, output)
 	}
 	go http.ListenAndServe(":1001", o.cors(o.circuit))
 	http.ListenAndServe(":1000", o.pathless)
