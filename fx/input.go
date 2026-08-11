@@ -3,7 +3,6 @@ package fx
 import (
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,33 +10,33 @@ import (
 )
 
 type Input interface {
-	File(string) (*Result, error)
-	HTTP(string) (*Result, error)
-	Directory(string) (map[string][]*Result, error)
+	Url(string) (*Result, error)
+	Path(string) (*Result, error)
 }
-
 type Result struct {
-	Name string
-	Type string
-	Data []byte
+	Name    string
+	Path    string
+	Type    string
+	Data    []byte
+	Entries []*Result
 }
 
 type input struct{}
 
-func (i *input) File(path string) (*Result, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read file %q: %w", path, err)
+// baseName drops the extension, except on dot-prefixed bases (.env.local, .gitignore).
+func baseName(path string) string {
+	base := filepath.Base(path)
+	if strings.HasPrefix(base, ".") {
+		return base
 	}
-
-	return &Result{
-		Name: resultName(path),
-		Type: mime.TypeByExtension(filepath.Ext(path)),
-		Data: data,
-	}, nil
+	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
-func (i *input) HTTP(source string) (*Result, error) {
+func newResult(name, parent string, data []byte) *Result {
+	return &Result{Name: name, Path: parent, Type: http.DetectContentType(data), Data: data}
+}
+
+func (i *input) Url(source string) (*Result, error) {
 	resp, err := http.Get(source)
 	if err != nil {
 		return nil, fmt.Errorf("get %q: %w", source, err)
@@ -52,105 +51,107 @@ func (i *input) HTTP(source string) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %q: %w", source, err)
 	}
-
-	return &Result{
-		Name: resultName(resp.Request.URL.Path),
-		Type: http.DetectContentType(data),
-		Data: data,
-	}, nil
+	return newResult(baseName(resp.Request.URL.Path), "", data), nil
 }
 
-func resultName(path string) string {
-	base := filepath.Base(path)
-	return strings.TrimSuffix(base, filepath.Ext(base))
+func (i *input) Path(path string) (*Result, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat %q: %w", path, err)
+	}
+	if info.IsDir() {
+		return readDir(path, "")
+	}
+	return readFile(path, baseName(path), "")
 }
 
-func (i *input) sequence(path string, results []*Result) ([]*Result, error) {
+// parent is the containing directory's slash-suffixed name, "" at the walk root.
+func readFile(path, name, parent string) (*Result, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read sequence %q: %w", path, err)
+		return nil, fmt.Errorf("read file %q: %w", path, err)
+	}
+	return newResult(name, parent, data), nil
+}
+
+func readDir(path, parent string) (*Result, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, fmt.Errorf("read dir %q: %w", path, err)
 	}
 
-	byName := make(map[string][]*Result, len(results))
-	for _, result := range results {
-		byName[result.Name] = append(byName[result.Name], result)
+	// real excludes sequence.txt, so neither pass below needs to special-case it.
+	var order []byte
+	real := entries[:0:0]
+	for _, entry := range entries {
+		if entry.Name() == "sequence.txt" {
+			if order, err = os.ReadFile(filepath.Join(path, entry.Name())); err != nil {
+				return nil, fmt.Errorf("read sequence %q: %w", path, err)
+			}
+			continue
+		}
+		real = append(real, entry)
 	}
 
-	ordered := make([]*Result, 0, len(results))
-	used := make(map[*Result]bool, len(results))
+	name := filepath.Base(path) + "/"
+	result := &Result{Name: name, Path: parent, Entries: make([]*Result, 0, len(real))}
+
+	names := make(map[string]int, len(real))
+	for _, entry := range real {
+		if !entry.IsDir() {
+			names[baseName(entry.Name())]++
+		}
+	}
+
+	for _, entry := range real {
+		child := filepath.Join(path, entry.Name())
+		var nested *Result
+		if entry.IsDir() {
+			nested, err = readDir(child, name)
+		} else {
+			fileName := baseName(entry.Name())
+			if names[fileName] > 1 {
+				fileName = entry.Name()
+			}
+			nested, err = readFile(child, fileName, name)
+		}
+		if err != nil {
+			return nil, err
+		}
+		result.Entries = append(result.Entries, nested)
+	}
+
+	if order != nil {
+		result.Entries = sortBySequence(order, result.Entries)
+	}
+	return result, nil
+}
+
+// sortBySequence reorders entries per the newline-separated names in data;
+// named entries come first in listed order, unlisted entries keep their relative order after.
+func sortBySequence(data []byte, entries []*Result) []*Result {
+	byName := make(map[string][]*Result, len(entries))
+	for _, entry := range entries {
+		byName[entry.Name] = append(byName[entry.Name], entry)
+	}
+
+	ordered := make([]*Result, 0, len(entries))
+	used := make(map[*Result]bool, len(entries))
 	for name := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 		name = strings.TrimSpace(name)
 		matches := byName[name]
 		if len(matches) == 0 {
 			continue
 		}
-		result := matches[0]
+		next := matches[0]
 		byName[name] = matches[1:]
-		ordered = append(ordered, result)
-		used[result] = true
+		ordered = append(ordered, next)
+		used[next] = true
 	}
-	for _, result := range results {
-		if !used[result] {
-			ordered = append(ordered, result)
-		}
-	}
-	return ordered, nil
-}
-
-func NewDir(path string) *Result {
-	if info, err := os.Stat(path); err == nil && info.IsDir() {
-		return &Result{
-			Name: filepath.Base(path),
-			Type: "directory",
-			Data: nil,
+	for _, entry := range entries {
+		if !used[entry] {
+			ordered = append(ordered, entry)
 		}
 	}
-	return nil
-}
-
-func (i *input) Directory(root string) (map[string][]*Result, error) {
-	results := make(map[string][]*Result)
-	sequences := make(map[string]string)
-	parent := filepath.Dir(filepath.Clean(root))
-
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		relative, err := filepath.Rel(parent, path)
-		if err != nil {
-			return err
-		}
-
-		if entry.IsDir() {
-			results[filepath.ToSlash(relative)] = []*Result{}
-			return nil
-		}
-
-		key := filepath.ToSlash(filepath.Dir(relative))
-		if entry.Name() == "sequence" {
-			sequences[key] = path
-			return nil
-		}
-
-		result, err := i.File(path)
-		if err != nil {
-			return err
-		}
-		results[key] = append(results[key], result)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	for key, path := range sequences {
-		ordered, err := i.sequence(path, results[key])
-		if err != nil {
-			return nil, err
-		}
-		results[key] = ordered
-	}
-	return results, nil
+	return ordered
 }
