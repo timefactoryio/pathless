@@ -10,6 +10,6 @@ type Fx struct {
 func NewFx(z *zero.Zero) *Fx {
 	return &Fx{
 		Zero:  z,
-		Input: &input{},
+		Input: NewInput(),
 	}
 }

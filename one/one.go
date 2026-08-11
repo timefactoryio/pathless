@@ -37,15 +37,11 @@ func (o *One) handlePathless(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Content-Encoding", "gzip")
-	w.Write(o.Pathless)
+	writeGzip(w, "text/html; charset=utf-8", o.Pathless)
 }
 
 func (o *One) handleRoot(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Encoding", "gzip")
-	w.Write(o.Universe)
+	writeGzip(w, "application/octet-stream", o.Universe)
 }
 
 // serve registers one wire endpoint: values marshaled into a single
@@ -53,9 +49,7 @@ func (o *One) handleRoot(w http.ResponseWriter, r *http.Request) {
 func (o *One) serve(path string, values []*fx.Output) {
 	data := zip(o.Marshal(values...).Data)
 	o.circuit.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Encoding", "gzip")
-		w.Write(data)
+		writeGzip(w, "application/octet-stream", data)
 	})
 }
 
@@ -93,4 +87,11 @@ func zip(data []byte) []byte {
 	w.Write(data)
 	w.Close()
 	return buf.Bytes()
+}
+
+// writeGzip writes already-gzip-compressed data with the matching headers.
+func writeGzip(w http.ResponseWriter, contentType string, data []byte) {
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Encoding", "gzip")
+	w.Write(data)
 }

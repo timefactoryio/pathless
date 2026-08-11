@@ -23,6 +23,10 @@ type Output struct {
 
 type input struct{}
 
+func NewInput() Input {
+	return &input{}
+}
+
 func (i *input) String(path string) (*Output, error) {
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
 		return i.url(path)
