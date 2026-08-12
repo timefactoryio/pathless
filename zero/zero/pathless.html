@@ -131,30 +131,42 @@
 			class Pathless {
 				static #td = new TextDecoder();
 				static #range = document.createRange();
+				// decode walks bytes once, sequentially; a node's own name/type are resolved by
+				// its parent's dictionaries, so the root's are read once up front instead.
+				static decode(bytes) {
+					let p = 0;
+					const uv = () => {
+						let r = 0,
+							s = 0,
+							b;
+						do {
+							b = bytes[p++];
+							r |= (b & 0x7f) << s;
+							s += 7;
+						} while (b & 0x80);
+						return r >>> 0;
+					};
+					const fld = () => bytes.slice(p, (p += uv())); // copy out — don't pin the whole payload in memory
+					const str = () => Pathless.#td.decode(fld());
+					const dict = () => Array.from({ length: uv() }, str);
 
-				static split(bytes) {
-					const view = new DataView(
-						bytes.buffer,
-						bytes.byteOffset,
-						bytes.byteLength,
-					);
-					const count = view.getUint32(0);
-					const entries = new Array(count);
-					let head = 4,
-						body = 4 + 4 * count;
-					for (let i = 0; i < count; i++) {
-						const blob = bytes.subarray(
-							body,
-							(body += view.getUint32(head)),
+					const node = (name, type) => {
+						if (type !== '') {
+							const zero = fld();
+							uv(); // leaf's trailing child count is always 0, still consumed
+							return [name, type, zero];
+						}
+						const names = dict();
+						const types = dict();
+						const children = Array.from({ length: uv() }, () =>
+							node(
+								names.length > 1 ? names[uv()] : names[0],
+								types.length > 1 ? types[uv()] : types[0],
+							),
 						);
-						head += 4;
-						const n = blob[0];
-						entries[i] = {
-							type: Pathless.#td.decode(blob.subarray(1, 1 + n)),
-							data: blob.subarray(1 + n),
-						};
-					}
-					return entries;
+						return [name, type, children];
+					};
+					return node(str(), str());
 				}
 
 				constructor() {

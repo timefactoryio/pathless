@@ -18,11 +18,6 @@ type One struct {
 	circuit  *http.ServeMux
 }
 
-type HTTP struct {
-	pathless *http.ServeMux
-	circuit  *http.ServeMux
-}
-
 // NewOne registers the wire endpoints served from :1001. Root is built once
 // in Serve (after all content is registered) and served as a static blob,
 // exactly like Pathless; every other registered route is served by serve.
@@ -45,10 +40,6 @@ func (o *One) handlePathless(w http.ResponseWriter, r *http.Request) {
 	writeGzip(w, "text/html; charset=utf-8", o.PathlessHTML)
 }
 
-func (o *One) handleRoot(w http.ResponseWriter, r *http.Request) {
-	writeGzip(w, "application/octet-stream", o.UniverseHTML)
-}
-
 // Handle registers path as a wire endpoint for output: encoded (gzipped) once at
 // registration time, then written from memory on every request.
 func (o *One) Handle(path string, output *fx.Output) {
@@ -69,14 +60,8 @@ func (o *One) cors(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-
 func (o *One) Serve() {
-	o.Universe = append(
-		o.Universe,
-		o.Frames,
-		o.Panels,
-	)
-	o.circuit.HandleFunc("/", o.handleRoot)
+	o.Handle("/", o.Root())
 	for key, output := range o.Fx.Routes {
 		o.Handle("/"+key, output)
 	}

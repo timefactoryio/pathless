@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
+	"io"
 )
 
 type Output struct {
@@ -15,66 +16,81 @@ type Output struct {
 
 // Encode serializes the Output tree (Name, Type, Zero, and all descendants) into a single
 // binary blob for the client to decode; the server only ever writes this, so fields are
-// varint length-prefixed to keep the payload as small as possible. If compress is true,
-// the result is gzip-compressed.
-func (o *Output) Encode(compress bool) []byte {
+// varint length-prefixed to keep the payload as small as possible. The result is
+// gzip-compressed unless compress is explicitly false.
+func (o *Output) Encode(compress ...bool) []byte {
 	var buf bytes.Buffer
-	writeField(&buf, []byte(o.Type)) // root has no siblings to dictionary-reference against
-	o.encode(&buf)
-	data := buf.Bytes()
-	if compress {
-		return zip(data)
+	w := io.Writer(&buf)
+	var gz *gzip.Writer
+	if len(compress) == 0 || compress[0] {
+		gz, _ = gzip.NewWriterLevel(&buf, gzip.BestCompression)
+		w = gz
 	}
-	return data
-}
-
-func zip(data []byte) []byte {
-	var buf bytes.Buffer
-	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
-	w.Write(data)
-	w.Close()
+	writeField(w, []byte(o.Name)) // root has no parent dictionary to resolve it from
+	writeField(w, []byte(o.Type))
+	o.encode(w)
+	if gz != nil {
+		gz.Close()
+	}
 	return buf.Bytes()
 }
 
-// encode writes o's Name, then either its Zero content (leaf) or a dictionary of its
-// children's distinct Type values (parent), then each child referencing that dictionary
-// by index instead of repeating its Type string.
-func (o *Output) encode(buf *bytes.Buffer) {
-	writeField(buf, []byte(o.Name))
-
-	var index map[string]int
+// encode writes either o's Zero content (leaf) or dictionaries of o.One's distinct
+// Name and Type values, then each child — prefixed by a dictionary index only when
+// that dictionary holds more than one entry.
+func (o *Output) encode(w io.Writer) {
 	if len(o.One) == 0 {
-		writeField(buf, o.Zero)
-	} else {
-		var types []string
-		index = make(map[string]int, len(o.One))
-		for _, child := range o.One {
-			if _, ok := index[child.Type]; !ok {
-				index[child.Type] = len(types)
-				types = append(types, child.Type)
-			}
-		}
-		writeUvarint(buf, uint64(len(types)))
-		for _, t := range types {
-			writeField(buf, []byte(t))
-		}
+		writeField(w, o.Zero)
+		writeUvarint(w, 0)
+		return
 	}
 
-	writeUvarint(buf, uint64(len(o.One)))
-	for _, child := range o.One {
-		writeUvarint(buf, uint64(index[child.Type]))
-		child.encode(buf)
+	names, nameIndex := dictionary(o.One, func(c *Output) string { return c.Name })
+	types, typeIndex := dictionary(o.One, func(c *Output) string { return c.Type })
+	writeDictionary(w, names)
+	writeDictionary(w, types)
+
+	writeUvarint(w, uint64(len(o.One)))
+	for _, one := range o.One {
+		if len(names) > 1 {
+			writeUvarint(w, uint64(nameIndex[one.Name]))
+		}
+		if len(types) > 1 {
+			writeUvarint(w, uint64(typeIndex[one.Type]))
+		}
+		one.encode(w)
+	}
+}
+
+// dictionary collects o.One's distinct values of key, in first-seen order.
+func dictionary(one []*Output, key func(*Output) string) ([]string, map[string]int) {
+	var values []string
+	index := make(map[string]int, len(one))
+	for _, o := range one {
+		v := key(o)
+		if _, ok := index[v]; !ok {
+			index[v] = len(values)
+			values = append(values, v)
+		}
+	}
+	return values, index
+}
+
+func writeDictionary(w io.Writer, values []string) {
+	writeUvarint(w, uint64(len(values)))
+	for _, v := range values {
+		writeField(w, []byte(v))
 	}
 }
 
 // writeField writes data preceded by its length as a varint.
-func writeField(buf *bytes.Buffer, data []byte) {
-	writeUvarint(buf, uint64(len(data)))
-	buf.Write(data)
+func writeField(w io.Writer, data []byte) {
+	writeUvarint(w, uint64(len(data)))
+	w.Write(data)
 }
 
-func writeUvarint(buf *bytes.Buffer, v uint64) {
+func writeUvarint(w io.Writer, v uint64) {
 	var tmp [binary.MaxVarintLen64]byte
 	n := binary.PutUvarint(tmp[:], v)
-	buf.Write(tmp[:n])
+	w.Write(tmp[:n])
 }

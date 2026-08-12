@@ -8,16 +8,21 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type Input interface {
 	String(string) (*Output, error)
 }
 
-type input struct{}
+type input struct {
+	client *http.Client
+}
 
 func NewInput() Input {
-	return &input{}
+	return &input{
+		client: &http.Client{Timeout: 10 * time.Second},
+	}
 }
 
 func (i *input) String(path string) (*Output, error) {
@@ -34,8 +39,18 @@ func (i *input) String(path string) (*Output, error) {
 	return readFile(path, baseName(path))
 }
 
+// detectType resolves an extension-based MIME type first, falling back to content
+// sniffing (which itself defaults to application/octet-stream) when the extension
+// is unknown or missing.
+func detectType(path string, data []byte) string {
+	if typ := mime.TypeByExtension(filepath.Ext(path)); typ != "" {
+		return typ
+	}
+	return http.DetectContentType(data)
+}
+
 func (i *input) url(source string) (*Output, error) {
-	resp, err := http.Get(source)
+	resp, err := i.client.Get(source)
 	if err != nil {
 		return nil, fmt.Errorf("get %q: %w", source, err)
 	}
@@ -51,7 +66,7 @@ func (i *input) url(source string) (*Output, error) {
 	}
 	return &Output{
 		Name: baseName(resp.Request.URL.Path),
-		Type: http.DetectContentType(data),
+		Type: detectType(resp.Request.URL.Path, data),
 		Zero: data}, nil
 }
 
@@ -101,7 +116,7 @@ func readFile(path, name string) (*Output, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read file %q: %w", path, err)
 	}
-	return &Output{Name: name, Type: mime.TypeByExtension(filepath.Ext(path)), Zero: data}, nil
+	return &Output{Name: name, Type: detectType(path, data), Zero: data}, nil
 }
 
 // stripExtensions shortens each entry's Name to its baseName, except where that would
