@@ -17,8 +17,6 @@
 					frame: 0,
 					state: new Map(),
 				}));
-				this.frames = frames;
-				this.panels = panels;
 				this.state = { focused: 0, prev: null, l: 0, v: 0 };
 				this.tap = 0.1;
 				this.swipe = 0.25;
@@ -44,7 +42,7 @@
 			showPanel(i) {
 				this.pathless.exec(
 					this.panel,
-					this.panels[i % this.panels.length],
+					this.pathless.panels[i % this.pathless.panels.length],
 				);
 			}
 			read(i = this.state.focused) {
@@ -69,7 +67,7 @@
 					this.state.focused = i;
 					this.pathless.exec(
 						this.spaces[i].el,
-						this.frames[this.spaces[i].frame],
+						this.pathless.frames[this.spaces[i].frame],
 					);
 				});
 				this.state.focused = focused;
@@ -97,7 +95,8 @@
 			nav(dir, i = this.state.focused) {
 				const s = this.spaces[i];
 				s.frame =
-					(s.frame + dir + this.frames.length) % this.frames.length;
+					(s.frame + dir + this.pathless.frames.length) %
+					this.pathless.frames.length;
 				this.sync(i);
 			}
 
@@ -252,11 +251,7 @@
 				return this;
 			}
 		}
-		pathless.universe = new Universe(
-			pathless,
-			pathless.frames,
-			pathless.panels,
-		);
+		pathless.universe = new Universe(pathless);
 		pathless.input = new Input(pathless);
 	}
 </script>

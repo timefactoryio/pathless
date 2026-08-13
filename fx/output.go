@@ -7,36 +7,28 @@ import (
 	"io"
 )
 
-type Output struct {
-	Name string
-	Type string
-	Zero []byte
-	One  []*Output
+type Value interface {
+	encode(io.Writer)
 }
 
-type Payload struct {
-	*Manifest
-	*Entries
-}
+type Payload []Value
 
-type Manifest struct {
-	Name       string
-	Dictionary map[string]string
-}
+type Data []byte
 
 type Entries []*Entry
 
 type Entry struct {
 	Name string
 	Type string
-	Data []byte
+	Data Data
 }
 
-// Encode serializes the Output tree (Name, Type, Zero, and all descendants) into a single
-// binary blob for the client to decode; the server only ever writes this, so fields are
-// varint length-prefixed to keep the payload as small as possible. The result is
-// gzip-compressed unless compress is explicitly false.
-func (o *Output) Encode(compress ...bool) []byte {
+const (
+	dataValue byte = iota
+	entriesValue
+)
+
+func (p Payload) Encode(compress ...bool) []byte {
 	var buf bytes.Buffer
 	w := io.Writer(&buf)
 	var gz *gzip.Writer
@@ -44,60 +36,28 @@ func (o *Output) Encode(compress ...bool) []byte {
 		gz, _ = gzip.NewWriterLevel(&buf, gzip.BestCompression)
 		w = gz
 	}
-	writeField(w, []byte(o.Name)) // root has no parent dictionary to resolve it from
-	writeField(w, []byte(o.Type))
-	o.encode(w)
+	writeUvarint(w, uint64(len(p)))
+	for _, value := range p {
+		value.encode(w)
+	}
 	if gz != nil {
 		gz.Close()
 	}
 	return buf.Bytes()
 }
 
-// encode writes either o's Zero content (leaf) or dictionaries of o.One's distinct
-// Name and Type values, then each child — prefixed by a dictionary index only when
-// that dictionary holds more than one entry.
-func (o *Output) encode(w io.Writer) {
-	if o.Type != "" {
-		writeField(w, o.Zero)
-		writeUvarint(w, 0)
-		return
-	}
-
-	names, nameIndex := dictionary(o.One, func(c *Output) string { return c.Name })
-	types, typeIndex := dictionary(o.One, func(c *Output) string { return c.Type })
-	writeDictionary(w, names)
-	writeDictionary(w, types)
-
-	writeUvarint(w, uint64(len(o.One)))
-	for _, one := range o.One {
-		if len(names) > 1 {
-			writeUvarint(w, uint64(nameIndex[one.Name]))
-		}
-		if len(types) > 1 {
-			writeUvarint(w, uint64(typeIndex[one.Type]))
-		}
-		one.encode(w)
-	}
+func (d Data) encode(w io.Writer) {
+	w.Write([]byte{dataValue})
+	writeField(w, d)
 }
 
-// dictionary collects o.One's distinct values of key, in first-seen order.
-func dictionary(one []*Output, key func(*Output) string) ([]string, map[string]int) {
-	var values []string
-	index := make(map[string]int, len(one))
-	for _, o := range one {
-		v := key(o)
-		if _, ok := index[v]; !ok {
-			index[v] = len(values)
-			values = append(values, v)
-		}
-	}
-	return values, index
-}
-
-func writeDictionary(w io.Writer, values []string) {
-	writeUvarint(w, uint64(len(values)))
-	for _, v := range values {
-		writeField(w, []byte(v))
+func (e Entries) encode(w io.Writer) {
+	w.Write([]byte{entriesValue})
+	writeUvarint(w, uint64(len(e)))
+	for _, entry := range e {
+		writeField(w, []byte(entry.Name))
+		writeField(w, []byte(entry.Type))
+		writeField(w, entry.Data)
 	}
 }
 

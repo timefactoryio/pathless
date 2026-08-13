@@ -12,7 +12,7 @@ import (
 )
 
 func (f *Fx) Home(logo, heading string) error {
-	tmpl := template.Must(template.New("home").Parse(f.Templates.Frames.Home))
+	tmpl := template.Must(template.New("home").Parse(f.z.Templates.Frames.Home))
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, map[string]any{
 		"LOGO":    f.Logo(logo),
@@ -20,7 +20,7 @@ func (f *Fx) Home(logo, heading string) error {
 	}); err != nil {
 		return err
 	}
-	f.Frames.One = append(f.Frames.One, f.Build(buf.String()))
+	f.Frames = append(f.Frames, f.build(buf.String()))
 	return nil
 }
 
@@ -30,12 +30,13 @@ func (f *Fx) Logo(path string) template.HTML {
 	alt := strings.TrimSuffix(filepath.Base(path), ext)
 
 	if !remote || strings.ToLower(ext) == ".svg" {
-		if v, err := f.Input.String(path); err == nil {
-			if v.Type == "image/svg+xml" {
-				return template.HTML(string(v.Zero))
+		if entries, err := f.Input.String(path); err == nil && len(entries) == 1 {
+			entry := entries[0]
+			if entry.Type == "image/svg+xml" {
+				return template.HTML(string(entry.Data))
 			}
 			name := filepath.Base(path)
-			f.Route(name, v)
+			f.Route(name, Payload{entries})
 			return template.HTML(fmt.Sprintf(`<img data-src="%s" alt="%s">`,
 				html.EscapeString(name), html.EscapeString(alt)))
 		}
@@ -45,42 +46,45 @@ func (f *Fx) Logo(path string) template.HTML {
 }
 
 func (f *Fx) Text(path string) error {
-	v, err := f.Input.String(path)
+	entries, err := f.Input.String(path)
 	if err != nil {
 		return err
 	}
+	if len(entries) != 1 {
+		return fmt.Errorf("text %q: expected one entry, got %d", path, len(entries))
+	}
 	var md bytes.Buffer
-	if err := markdown.New("").Convert(v.Zero, &md); err != nil {
+	if err := markdown.New("").Convert(entries[0].Data, &md); err != nil {
 		return err
 	}
-	tmpl := template.Must(template.New("text").Parse(f.Templates.Frames.Text))
+	tmpl := template.Must(template.New("text").Parse(f.z.Templates.Frames.Text))
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, map[string]any{
 		"MARKDOWN": template.HTML(md.String()),
 	}); err != nil {
 		return err
 	}
-	f.Frames.One = append(f.Frames.One, f.Build(buf.String()))
+	f.Frames = append(f.Frames, f.build(buf.String()))
 	return nil
 }
 
 func (f *Fx) Slides(dir string) error {
-	output, err := f.Input.String(dir)
+	entries, err := f.Input.String(dir)
 	if err != nil {
 		return err
 	}
 	base := filepath.Base(dir)
-	f.Route(base, output)
-	tmpl := template.Must(template.New("slides").Parse(f.Templates.Frames.Slides))
+	f.Route(base, Payload{entries})
+	tmpl := template.Must(template.New("slides").Parse(f.z.Templates.Frames.Slides))
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, map[string]string{"PREFIX": base}); err != nil {
 		return err
 	}
-	f.Frames.One = append(f.Frames.One, f.Build(buf.String()))
+	f.Frames = append(f.Frames, f.build(buf.String()))
 	return nil
 }
 
 // Keyboard builds the default keyboard panel frame from Zero's embedded panel HTML.
 func (f *Fx) Keyboard() {
-	f.Panels.One = append(f.Panels.One, f.Build(f.Templates.Panels.Keyboard))
+	f.Panels = append(f.Panels, f.build(f.z.Templates.Panels.Keyboard))
 }

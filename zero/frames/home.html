@@ -46,7 +46,7 @@
 					'.logo img[data-src]',
 				);
 				if (logoImg) {
-					p.source(logoImg.dataset.src).then(([entry]) => {
+					p.source(logoImg.dataset.src).then(([[entry]]) => {
 						logoImg.src = p.url(entry);
 					});
 				}

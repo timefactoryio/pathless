@@ -12,7 +12,7 @@ import (
 )
 
 type Input interface {
-	String(string) (*Output, error)
+	String(string) (Entries, error)
 }
 
 type input struct {
@@ -25,18 +25,29 @@ func NewInput() Input {
 	}
 }
 
-func (i *input) String(path string) (*Output, error) {
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return i.url(path)
+func (i *input) String(path string) (Entries, error) {
+	if strings.HasPrefix(path, "http://") ||
+		strings.HasPrefix(path, "https://") {
+		entry, err := i.url(path)
+		if err != nil {
+			return nil, err
+		}
+		return Entries{entry}, nil
 	}
+
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("stat %q: %w", path, err)
 	}
 	if info.IsDir() {
-		return i.dir(path)
+		return readDir(path)
 	}
-	return readFile(path, baseName(path))
+
+	entry, err := readFile(path, baseName(path))
+	if err != nil {
+		return nil, err
+	}
+	return Entries{entry}, nil
 }
 
 // detectType resolves an extension-based MIME type first, falling back to content
@@ -49,7 +60,7 @@ func detectType(path string, data []byte) string {
 	return http.DetectContentType(data)
 }
 
-func (i *input) url(source string) (*Output, error) {
+func (i *input) url(source string) (*Entry, error) {
 	resp, err := i.client.Get(source)
 	if err != nil {
 		return nil, fmt.Errorf("get %q: %w", source, err)
@@ -64,23 +75,14 @@ func (i *input) url(source string) (*Output, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %q: %w", source, err)
 	}
-	return &Output{
+	return &Entry{
 		Name: baseName(resp.Request.URL.Path),
 		Type: detectType(resp.Request.URL.Path, data),
-		Zero: data}, nil
-}
-
-// dir reads path as a directory directly, without stat-checking it like String does.
-func (i *input) dir(path string) (*Output, error) {
-	files, err := readDir(path)
-	if err != nil {
-		return nil, err
-	}
-	return &Output{Name: baseName(path), One: files}, nil
+		Data: data}, nil
 }
 
 // readDir reads path's directory listing, normalizes it into Results, and applies sequencing.
-func readDir(path string) ([]*Output, error) {
+func readDir(path string) (Entries, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return nil, fmt.Errorf("read dir %q: %w", path, err)
@@ -93,10 +95,10 @@ func readDir(path string) ([]*Output, error) {
 	return sequence(results), nil
 }
 
-// processFiles reads each non-dir entry into a Output using its full filesystem name (nested
+// processFiles reads each non-dir entry using its full filesystem name (nested
 // directories are ignored), then strips extensions from names that don't collide once shortened.
-func processFiles(path string, entries []os.DirEntry) ([]*Output, error) {
-	results := make([]*Output, 0, len(entries))
+func processFiles(path string, entries []os.DirEntry) (Entries, error) {
+	results := make(Entries, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -111,17 +113,17 @@ func processFiles(path string, entries []os.DirEntry) ([]*Output, error) {
 	return stripExtensions(results), nil
 }
 
-func readFile(path, name string) (*Output, error) {
+func readFile(path, name string) (*Entry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read file %q: %w", path, err)
 	}
-	return &Output{Name: name, Type: detectType(path, data), Zero: data}, nil
+	return &Entry{Name: name, Type: detectType(path, data), Data: data}, nil
 }
 
 // stripExtensions shortens each entry's Name to its baseName, except where that would
 // collide with another entry's shortened name — those entries keep their full name.
-func stripExtensions(entries []*Output) []*Output {
+func stripExtensions(entries Entries) Entries {
 	counts := make(map[string]int, len(entries))
 	for _, entry := range entries {
 		counts[baseName(entry.Name)]++
@@ -137,12 +139,12 @@ func stripExtensions(entries []*Output) []*Output {
 // sequence orders entries by the newline-separated names in a "sequence" entry's Data,
 // dropping that entry from the result; unlisted entries keep their relative order after.
 // If no "sequence" entry exists, entries is returned unchanged.
-func sequence(entries []*Output) []*Output {
+func sequence(entries Entries) Entries {
 	var data []byte
 	rest := entries[:0:0]
 	for _, entry := range entries {
 		if entry.Name == "sequence" {
-			data = entry.Zero
+			data = entry.Data
 			continue
 		}
 		rest = append(rest, entry)
@@ -151,13 +153,13 @@ func sequence(entries []*Output) []*Output {
 		return entries
 	}
 
-	byName := make(map[string]*Output, len(rest))
+	byName := make(map[string]*Entry, len(rest))
 	for _, entry := range rest {
 		byName[entry.Name] = entry
 	}
 
-	ordered := make([]*Output, 0, len(rest))
-	used := make(map[*Output]bool, len(rest))
+	ordered := make(Entries, 0, len(rest))
+	used := make(map[*Entry]bool, len(rest))
 	for name := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 		name = strings.TrimSpace(name)
 		entry, ok := byName[name]

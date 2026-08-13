@@ -14,8 +14,3 @@ func NewPathless(args ...string) *Pathless {
 	f := fx.NewFx(z)
 	return &Pathless{Fx: f}
 }
-
-func (p *Pathless) Start() {
-	go p.Zero.Serve()
-	p.Fx.Serve()
-}
