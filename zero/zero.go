@@ -2,11 +2,11 @@ package zero
 
 import (
 	"bytes"
+	"compress/gzip"
 	_ "embed"
 	"fmt"
 	"html/template"
-	"regexp"
-	"strings"
+	"net/http"
 
 	"github.com/timefactoryio/pathless/zero/frames"
 	"github.com/timefactoryio/pathless/zero/panels"
@@ -24,12 +24,14 @@ type Zero struct {
 	PathlessURL  string
 	CircuitURL   string
 	Templates    *Templates
+	mux          *http.ServeMux
 }
 
 func NewZero(args ...string) *Zero {
 	z := &Zero{
 		UniverseHTML: universeHTML,
 		Templates:    NewTemplates(),
+		mux:          http.NewServeMux(),
 	}
 	switch len(args) {
 	case 0:
@@ -45,39 +47,24 @@ func NewZero(args ...string) *Zero {
 		))
 	}
 	z.pathless()
+	z.mux.HandleFunc("/", z.handlePathless)
 	return z
 }
 
-func (z *Zero) Build(html string) []byte {
-	if styles := styleTag.FindAllStringSubmatch(html, -1); len(styles) > 1 {
-		var merged strings.Builder
-		for _, match := range styles {
-			merged.WriteString(match[1])
-			merged.WriteByte('\n')
-		}
-		html = "<style>" + merged.String() + "</style>" +
-			styleTag.ReplaceAllString(html, "")
-	}
-	if scripts := scriptTag.FindAllStringSubmatch(html, -1); len(scripts) > 0 {
-		var merged strings.Builder
-		for _, match := range scripts {
-			source := match[1]
-			if !strings.HasPrefix(strings.TrimSpace(source), "{") {
-				source = "{" + source + "}"
-			}
-			merged.WriteString(source)
-			merged.WriteByte('\n')
-		}
-		html = scriptTag.ReplaceAllString(html, "") +
-			"<script>{" + merged.String() + "}</script>"
-	}
-	return []byte(html)
+// Serve starts the pathless shell server (the pre-rendered client page) on :1000.
+func (z *Zero) Serve() {
+	http.ListenAndServe(":1000", z.mux)
 }
 
-var (
-	styleTag  = regexp.MustCompile(`(?s)<style>(.*?)</style>`)
-	scriptTag = regexp.MustCompile(`(?s)<script>(.*?)</script>`)
-)
+func (z *Zero) handlePathless(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" || r.URL.RawQuery != "" {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Encoding", "gzip")
+	w.Write(z.PathlessHTML)
+}
 
 func (z *Zero) pathless() {
 	tmpl := template.Must(template.New("pathless").Parse(pathlessHTML))
@@ -89,7 +76,7 @@ func (z *Zero) pathless() {
 		panic(err)
 	}
 
-	z.PathlessHTML = buf.Bytes()
+	z.PathlessHTML = zip(buf.Bytes())
 }
 
 type Templates struct {
@@ -102,4 +89,13 @@ func NewTemplates() *Templates {
 		Frames: frames.NewFrames(),
 		Panels: panels.NewPanels(),
 	}
+}
+
+// zip gzip-compresses data once at build time so it can be written as-is on every request.
+func zip(data []byte) []byte {
+	var gzBuf bytes.Buffer
+	w, _ := gzip.NewWriterLevel(&gzBuf, gzip.BestCompression)
+	w.Write(data)
+	w.Close()
+	return gzBuf.Bytes()
 }

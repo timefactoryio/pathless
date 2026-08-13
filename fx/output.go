@@ -14,6 +14,24 @@ type Output struct {
 	One  []*Output
 }
 
+type Payload struct {
+	*Manifest
+	*Entries
+}
+
+type Manifest struct {
+	Name       string
+	Dictionary map[string]string
+}
+
+type Entries []*Entry
+
+type Entry struct {
+	Name string
+	Type string
+	Data []byte
+}
+
 // Encode serializes the Output tree (Name, Type, Zero, and all descendants) into a single
 // binary blob for the client to decode; the server only ever writes this, so fields are
 // varint length-prefixed to keep the payload as small as possible. The result is
@@ -39,7 +57,7 @@ func (o *Output) Encode(compress ...bool) []byte {
 // Name and Type values, then each child — prefixed by a dictionary index only when
 // that dictionary holds more than one entry.
 func (o *Output) encode(w io.Writer) {
-	if len(o.One) == 0 {
+	if o.Type != "" {
 		writeField(w, o.Zero)
 		writeUvarint(w, 0)
 		return

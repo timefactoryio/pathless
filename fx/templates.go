@@ -1,4 +1,3 @@
-// templates.go, moved into package fx
 package fx
 
 import (
@@ -21,7 +20,7 @@ func (f *Fx) Home(logo, heading string) error {
 	}); err != nil {
 		return err
 	}
-	f.Frame(buf.String())
+	f.Frames.One = append(f.Frames.One, f.Build(buf.String()))
 	return nil
 }
 
@@ -61,7 +60,7 @@ func (f *Fx) Text(path string) error {
 	}); err != nil {
 		return err
 	}
-	f.Frame(buf.String())
+	f.Frames.One = append(f.Frames.One, f.Build(buf.String()))
 	return nil
 }
 
@@ -77,11 +76,11 @@ func (f *Fx) Slides(dir string) error {
 	if err := tmpl.Execute(&buf, map[string]string{"PREFIX": base}); err != nil {
 		return err
 	}
-	f.Frame(buf.String())
+	f.Frames.One = append(f.Frames.One, f.Build(buf.String()))
 	return nil
 }
 
 // Keyboard builds the default keyboard panel frame from Zero's embedded panel HTML.
 func (f *Fx) Keyboard() {
-	f.Panel(f.Templates.Panels.Keyboard)
+	f.Panels.One = append(f.Panels.One, f.Build(f.Templates.Panels.Keyboard))
 }

@@ -2,19 +2,20 @@ package pathless
 
 import (
 	"github.com/timefactoryio/pathless/fx"
-	"github.com/timefactoryio/pathless/one"
 	"github.com/timefactoryio/pathless/zero"
 )
 
 type Pathless struct {
-	*one.One
+	*fx.Fx
 }
 
 func NewPathless(args ...string) *Pathless {
-	zero := zero.NewZero(args...)
-	fx := fx.NewFx(zero)
-	one := one.NewOne(fx)
-	return &Pathless{
-		One: one,
-	}
+	z := zero.NewZero(args...)
+	f := fx.NewFx(z)
+	return &Pathless{Fx: f}
+}
+
+func (p *Pathless) Start() {
+	go p.Zero.Serve()
+	p.Fx.Serve()
 }

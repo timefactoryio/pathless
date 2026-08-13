@@ -131,6 +131,7 @@
 			class Pathless {
 				static #td = new TextDecoder();
 				static #range = document.createRange();
+
 				// decode walks bytes once, sequentially; a node's own name/type are resolved by
 				// its parent's dictionaries, so the root's are read once up front instead.
 				static decode(bytes) {
@@ -153,19 +154,22 @@
 					const node = (name, type) => {
 						if (type !== '') {
 							const zero = fld();
-							uv(); // leaf's trailing child count is always 0, still consumed
-							return [name, type, zero];
+							uv();
+							return { name, type, zero };
 						}
+
 						const names = dict();
 						const types = dict();
-						const children = Array.from({ length: uv() }, () =>
+						const one = Array.from({ length: uv() }, () =>
 							node(
 								names.length > 1 ? names[uv()] : names[0],
 								types.length > 1 ? types[uv()] : types[0],
 							),
 						);
-						return [name, type, children];
+
+						return name ? { name, one } : { one };
 					};
+
 					return node(str(), str());
 				}
 
@@ -179,7 +183,7 @@
 					if (!value) {
 						value = fetch(`${window.circuit}/${path}`)
 							.then(async (response) =>
-								Pathless.split(
+								Pathless.decode(
 									new Uint8Array(
 										await response.arrayBuffer(),
 									),
@@ -198,7 +202,7 @@
 					let value = this.cache.get(entry);
 					if (!value) {
 						value = URL.createObjectURL(
-							new Blob([entry.data], { type: entry.type }),
+							new Blob([entry[2]], { type: entry[1] }),
 						);
 						this.cache.set(entry, value);
 					}
@@ -214,16 +218,15 @@
 				}
 
 				async init() {
-					const [universe, frames, panels] = await this.source('');
-					this.frames = Pathless.split(frames.data).map(
-						(e) => e.data,
-					);
-					this.panels = Pathless.split(panels.data).map(
-						(e) => e.data,
-					);
+					const {
+						one: [universe, frames, panels],
+					} = await this.source('');
+
+					this.frames = frames.one.map(({ zero }) => zero);
+					this.panels = panels.one.map(({ zero }) => zero);
 					this.exec(
 						document.getElementById('universe'),
-						universe.data,
+						universe.zero,
 					);
 					this.universe.init();
 				}
