@@ -12,7 +12,7 @@ import (
 	"github.com/timefactoryio/pathless/zero/panels"
 )
 
-//go:embed pathless.html
+//go:embed zero.html
 var pathlessHTML string
 
 //go:embed universe.html

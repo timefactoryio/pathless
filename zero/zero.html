@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta
+			name="viewport"
+			content="width=device-width,initial-scale=1.0,viewport-fit=cover,user-scalable=no" />
+		<title>hello.universe</title>
+		<style>
+			:root {
+				--b: 1px solid blue;
+			}
+			*,
+			*::before,
+			*::after {
+				box-sizing: border-box;
+				margin: 0;
+				padding: 0;
+				user-select: none;
+				-webkit-user-select: none;
+			}
+			[hidden] {
+				display: none !important;
+			}
+			html,
+			body {
+				overflow: hidden;
+			}
+
+			body {
+				position: relative;
+				height: 100dvh;
+				background: #000;
+				color: #fff;
+				border: var(--b);
+				border-radius: 5px;
+			}
+
+			#universe {
+				position: absolute;
+				inset: 0;
+				overflow: hidden;
+				container: universe / size;
+				touch-action: none;
+				overscroll-behavior: none;
+			}
+			.space {
+				position: absolute;
+				display: flex;
+				overflow: hidden;
+				container-type: size;
+			}
+			.space > :first-child {
+				flex: 1 1 auto;
+				min-width: 0;
+				min-height: 0;
+			}
+		</style>
+		<script>
+			window.circuit = '{{.CIRCUIT}}'.replace(
+				'localhost',
+				location.hostname,
+			);
+			class Universe {
+				static quadrants = [
+					[1, 1],
+					[-1, 1],
+					[-1, -1],
+					[1, -1],
+				];
+
+				static layouts = [
+					[[0, 0, 0, 0]],
+					[
+						[1, 0, 0, 1],
+						[0, 0, 1, 1],
+					],
+					[
+						[1, 0, 0, 2],
+						[0, 0, 2, 1],
+						[0, 2, 1, 0],
+						[2, 1, 0, 0],
+					],
+				];
+
+				constructor() {
+					this.element = document.getElementById('universe');
+					this.spaces = Array.from({ length: 3 }, () => {
+						const element = document.createElement('div');
+						element.className = 'space';
+						this.element.append(element);
+						return element;
+					});
+					this.layout(0);
+					new ResizeObserver(() =>
+						this.layout(this.current.layout, this.current.variant),
+					).observe(this.element);
+				}
+
+				layout(layout, variant = 0) {
+					const allocation = Universe.layouts[layout]?.[variant];
+					if (!allocation) return false;
+
+					const bounds = this.spaces.map(() => [1, 1, -1, -1]);
+					allocation.forEach((owner, quadrant) => {
+						const [x, y] = Universe.quadrants[quadrant];
+						const bound = bounds[owner];
+						bound[0] = Math.min(bound[0], x, 0);
+						bound[1] = Math.min(bound[1], y, 0);
+						bound[2] = Math.max(bound[2], x, 0);
+						bound[3] = Math.max(bound[3], y, 0);
+					});
+					const { width, height } =
+						this.element.getBoundingClientRect();
+
+					this.spaces.forEach((space, index) => {
+						const [left, bottom, right, top] = bounds[index];
+						space.hidden = right < 0;
+						if (space.hidden) return;
+
+						Object.assign(space.style, {
+							left: `${((left + 1) * width) / 2}px`,
+							top: `${((1 - top) * height) / 2}px`,
+							width: `${((right - left) * width) / 2}px`,
+							height: `${((top - bottom) * height) / 2}px`,
+						});
+					});
+
+					this.current = { layout, variant };
+					return true;
+				}
+
+				quadrant(x, y) {
+					if (x === 0 || y === 0) return null;
+					return Universe.quadrants.findIndex(
+						([qx, qy]) =>
+							qx === Math.sign(x) && qy === Math.sign(y),
+					);
+				}
+
+				point(
+					clientX,
+					clientY,
+					rect = this.element.getBoundingClientRect(),
+				) {
+					const x =
+						(2 * (clientX - rect.left)) / (rect.width || 1) - 1;
+					const y =
+						1 - (2 * (clientY - rect.top)) / (rect.height || 1);
+
+					return {
+						x,
+						y,
+						quadrant: this.quadrant(x, y),
+					};
+				}
+
+				points(...coordinates) {
+					const rect = this.element.getBoundingClientRect();
+
+					return coordinates.map(([x, y]) => this.point(x, y, rect));
+				}
+			}
+
+			class Pathless {
+				static #td = new TextDecoder();
+				static #range = document.createRange();
+
+				static decode(bytes) {
+					let offset = 0;
+
+					const uvarint = () => {
+						let value = 0;
+						let shift = 0;
+						let byte;
+						do {
+							byte = bytes[offset++];
+							value |= (byte & 0x7f) << shift;
+							shift += 7;
+						} while (byte & 0x80);
+
+						return value >>> 0;
+					};
+
+					const field = () => {
+						const length = uvarint();
+						const start = offset;
+						offset += length;
+						return bytes.subarray(start, offset);
+					};
+
+					const text = () => Pathless.#td.decode(field());
+					const readers = [
+						field,
+						() =>
+							Array.from({ length: uvarint() }, () => ({
+								name: text(),
+								type: text(),
+								data: field(),
+							})),
+					];
+
+					return Array.from({ length: uvarint() }, () =>
+						readers[bytes[offset++]](),
+					);
+				}
+
+				constructor() {
+					this.cache = new Map();
+					this.universe = new Universe();
+					this.init();
+				}
+
+				source(path) {
+					let request = this.cache.get(path);
+					if (request) return request;
+					request = fetch(`${window.circuit}/${path}`)
+						.then(async (response) => {
+							const buffer = await response.arrayBuffer();
+							return Pathless.decode(new Uint8Array(buffer));
+						})
+						.catch((error) => {
+							this.cache.delete(path);
+							throw error;
+						});
+					this.cache.set(path, request);
+					return request;
+				}
+
+				exec(el, data) {
+					el.replaceChildren(
+						Pathless.#range.createContextualFragment(
+							Pathless.#td.decode(data),
+						),
+					);
+				}
+
+				async init() {}
+			}
+			document.addEventListener('DOMContentLoaded', () => {
+				window.pathless = new Pathless();
+			});
+		</script>
+	</head>
+	<body>
+		<div id="universe"></div>
+	</body>
+</html>

@@ -131,42 +131,43 @@
 			class Pathless {
 				static #td = new TextDecoder();
 				static #range = document.createRange();
-
 				static decode(bytes) {
-					let p = 0;
+					let offset = 0;
 
-					const uv = () => {
-						let n = 0,
-							shift = 0,
-							byte;
+					const uvarint = () => {
+						let value = 0;
+						let shift = 0;
+						let byte;
+
 						do {
-							byte = bytes[p++];
-							n |= (byte & 0x7f) << shift;
+							byte = bytes[offset++];
+							value |= (byte & 0x7f) << shift;
 							shift += 7;
 						} while (byte & 0x80);
-						return n >>> 0;
+
+						return value >>> 0;
 					};
 
 					const field = () => {
-						const length = uv();
-						const start = p;
-						p += length;
-						return bytes.subarray(start, p);
+						const length = uvarint();
+						const start = offset;
+						offset += length;
+						return bytes.subarray(start, offset);
 					};
 
 					const text = () => Pathless.#td.decode(field());
 					const readers = [
 						field,
 						() =>
-							Array.from({ length: uv() }, () => ({
+							Array.from({ length: uvarint() }, () => ({
 								name: text(),
 								type: text(),
 								data: field(),
 							})),
 					];
 
-					return Array.from({ length: uv() }, () =>
-						readers[bytes[p++]](),
+					return Array.from({ length: uvarint() }, () =>
+						readers[bytes[offset++]](),
 					);
 				}
 
@@ -176,20 +177,21 @@
 				}
 
 				source(path) {
-					let value = this.cache.get(path);
-					if (!value) {
-						value = fetch(`${window.circuit}/${path}`)
-							.then((response) => response.arrayBuffer())
-							.then((buffer) =>
-								Pathless.decode(new Uint8Array(buffer)),
-							)
-							.catch((error) => {
-								this.cache.delete(path);
-								throw error;
-							});
-						this.cache.set(path, value);
-					}
-					return value;
+					let request = this.cache.get(path);
+					if (request) return request;
+
+					request = fetch(`${window.circuit}/${path}`)
+						.then(async (response) => {
+							const buffer = await response.arrayBuffer();
+							return Pathless.decode(new Uint8Array(buffer));
+						})
+						.catch((error) => {
+							this.cache.delete(path);
+							throw error;
+						});
+
+					this.cache.set(path, request);
+					return request;
 				}
 
 				url(entry) {
