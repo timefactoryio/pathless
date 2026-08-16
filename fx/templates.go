@@ -20,7 +20,7 @@ func (f *Fx) Home(logo, heading string) error {
 	}); err != nil {
 		return err
 	}
-	f.Frames = append(f.Frames, f.build(buf.String()))
+	f.frames = append(f.frames, f.build(buf.String()))
 	return nil
 }
 
@@ -36,7 +36,7 @@ func (f *Fx) Logo(path string) template.HTML {
 				return template.HTML(string(entry.Data))
 			}
 			name := filepath.Base(path)
-			f.Route(name, Payload{entries})
+			f.Route(name, Output{entries})
 			return template.HTML(fmt.Sprintf(`<img data-src="%s" alt="%s">`,
 				html.EscapeString(name), html.EscapeString(alt)))
 		}
@@ -64,7 +64,7 @@ func (f *Fx) Text(path string) error {
 	}); err != nil {
 		return err
 	}
-	f.Frames = append(f.Frames, f.build(buf.String()))
+	f.frames = append(f.frames, f.build(buf.String()))
 	return nil
 }
 
@@ -74,13 +74,13 @@ func (f *Fx) Slides(dir string) error {
 		return err
 	}
 	base := filepath.Base(dir)
-	f.Route(base, Payload{entries})
+	f.Route(base, Output{entries})
 	tmpl := template.Must(template.New("slides").Parse(f.z.Templates.Frames.Slides))
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, map[string]string{"PREFIX": base}); err != nil {
 		return err
 	}
-	f.Frames = append(f.Frames, f.build(buf.String()))
+	f.frames = append(f.frames, f.build(buf.String()))
 	return nil
 }
 

@@ -11,9 +11,9 @@ import (
 type Fx struct {
 	z      *zero.Zero
 	Input  Input
-	Frames Entries
-	Panels Entries
-	Routes map[string]Payload
+	frames []*input
+	Panels []*input
+	Routes map[string]Output
 	mux    *http.ServeMux
 }
 
@@ -22,13 +22,13 @@ func NewFx(z *zero.Zero) *Fx {
 		z:      z,
 		mux:    http.NewServeMux(),
 		Input:  NewInput(),
-		Routes: make(map[string]Payload),
+		Routes: make(map[string]Output),
 	}
 }
 
 // Frame registers html as a frame, merging any inline style/script blocks first.
 func (f *Fx) Frame(html string) {
-	f.Frames = append(f.Frames, f.build(html))
+	f.frames = append(f.frames, f.build(html))
 }
 
 // Panel registers html as a panel, merging any inline style/script blocks first.
@@ -37,7 +37,7 @@ func (f *Fx) Panel(html string) {
 }
 
 // build merges any inline style/script blocks in html into a single entry.
-func (f *Fx) build(html string) *Entry {
+func (f *Fx) build(html string) *input {
 	if styles := styleTag.FindAllStringSubmatch(html, -1); len(styles) > 1 {
 		var merged strings.Builder
 		for _, match := range styles {
@@ -60,7 +60,7 @@ func (f *Fx) build(html string) *Entry {
 		html = scriptTag.ReplaceAllString(html, "") +
 			"<script>{" + merged.String() + "}</script>"
 	}
-	return &Entry{Type: "text/html", Data: []byte(html)}
+	return &input{Type: "text/html", Data: []byte(html)}
 }
 
 var (
@@ -69,13 +69,13 @@ var (
 )
 
 // Route registers a payload to be served at key once Start wires up handlers.
-func (f *Fx) Route(key string, payload Payload) {
+func (f *Fx) Route(key string, payload Output) {
 	f.Routes[key] = payload
 }
 
 // handle registers path on f's mux as a wire endpoint for output: encoded
 // (gzipped) once here, then written from memory on every request.
-func (f *Fx) handle(path string, payload Payload) {
+func (f *Fx) handle(path string, payload Output) {
 	data := payload.Encode()
 	f.mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -85,9 +85,9 @@ func (f *Fx) handle(path string, payload Payload) {
 }
 
 func (f *Fx) Start() {
-	f.handle("/", Payload{
-		Data(f.z.UniverseHTML),
-		f.Frames,
+	f.handle("/", Output{
+		{&input{Name: "universe", Type: "text/html", Data: f.z.UniverseHTML}},
+		f.frames,
 		f.Panels,
 	})
 

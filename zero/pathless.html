@@ -156,18 +156,12 @@
 					};
 
 					const text = () => Pathless.#td.decode(field());
-					const readers = [
-						field,
-						() =>
-							Array.from({ length: uvarint() }, () => ({
-								name: text(),
-								type: text(),
-								data: field(),
-							})),
-					];
-
 					return Array.from({ length: uvarint() }, () =>
-						readers[bytes[offset++]](),
+						Array.from({ length: uvarint() }, () => ({
+							name: text(),
+							type: text(),
+							data: field(),
+						})),
 					);
 				}
 
@@ -217,7 +211,10 @@
 					const [universe, frames, panels] = await this.source('');
 					this.frames = frames.map(({ data }) => data);
 					this.panels = panels.map(({ data }) => data);
-					this.exec(document.getElementById('universe'), universe);
+					this.exec(
+						document.getElementById('universe'),
+						universe[0].data,
+					);
 					this.universe.init();
 				}
 			}

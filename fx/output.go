@@ -7,28 +7,15 @@ import (
 	"io"
 )
 
-type Value interface {
-	encode(io.Writer)
-}
+type Output [][]*input
 
-type Payload []Value
-
-type Data []byte
-
-type Entries []*Entry
-
-type Entry struct {
+type input struct {
 	Name string
 	Type string
-	Data Data
+	Data []byte
 }
 
-const (
-	dataValue byte = iota
-	entriesValue
-)
-
-func (p Payload) Encode(compress ...bool) []byte {
+func (o Output) Encode(compress ...bool) []byte {
 	var buf bytes.Buffer
 	w := io.Writer(&buf)
 	var gz *gzip.Writer
@@ -36,9 +23,9 @@ func (p Payload) Encode(compress ...bool) []byte {
 		gz, _ = gzip.NewWriterLevel(&buf, gzip.BestCompression)
 		w = gz
 	}
-	writeUvarint(w, uint64(len(p)))
-	for _, value := range p {
-		value.encode(w)
+	writeUvarint(w, uint64(len(o)))
+	for _, entries := range o {
+		encodeEntries(w, entries)
 	}
 	if gz != nil {
 		gz.Close()
@@ -46,15 +33,9 @@ func (p Payload) Encode(compress ...bool) []byte {
 	return buf.Bytes()
 }
 
-func (d Data) encode(w io.Writer) {
-	w.Write([]byte{dataValue})
-	writeField(w, d)
-}
-
-func (e Entries) encode(w io.Writer) {
-	w.Write([]byte{entriesValue})
-	writeUvarint(w, uint64(len(e)))
-	for _, entry := range e {
+func encodeEntries(w io.Writer, entries []*input) {
+	writeUvarint(w, uint64(len(entries)))
+	for _, entry := range entries {
 		writeField(w, []byte(entry.Name))
 		writeField(w, []byte(entry.Type))
 		writeField(w, entry.Data)
