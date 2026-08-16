@@ -15,7 +15,7 @@ import (
 //go:embed zero.html
 var pathlessHTML string
 
-//go:embed universe.html
+//go:embed one.html
 var universeHTML []byte
 
 type Zero struct {

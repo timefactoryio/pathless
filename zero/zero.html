@@ -33,6 +33,7 @@
 				color: #fff;
 				border: var(--b);
 				border-radius: 5px;
+				font-family: sans-serif;
 			}
 
 			#universe {
@@ -45,6 +46,10 @@
 			}
 			.space {
 				position: absolute;
+				left: calc((var(--left) + 1) * 50cqw);
+				top: calc((1 - var(--top)) * 50cqh);
+				width: calc((var(--right) - var(--left)) * 50cqw);
+				height: calc((var(--top) - var(--bottom)) * 50cqh);
 				display: flex;
 				overflow: hidden;
 				container-type: size;
@@ -60,107 +65,6 @@
 				'localhost',
 				location.hostname,
 			);
-			class Universe {
-				static quadrants = [
-					[1, 1],
-					[-1, 1],
-					[-1, -1],
-					[1, -1],
-				];
-
-				static layouts = [
-					[[0, 0, 0, 0]],
-					[
-						[1, 0, 0, 1],
-						[0, 0, 1, 1],
-					],
-					[
-						[1, 0, 0, 2],
-						[0, 0, 2, 1],
-						[0, 2, 1, 0],
-						[2, 1, 0, 0],
-					],
-				];
-
-				constructor() {
-					this.element = document.getElementById('universe');
-					this.spaces = Array.from({ length: 3 }, () => {
-						const element = document.createElement('div');
-						element.className = 'space';
-						this.element.append(element);
-						return element;
-					});
-					this.layout(0);
-					new ResizeObserver(() =>
-						this.layout(this.current.layout, this.current.variant),
-					).observe(this.element);
-				}
-
-				layout(layout, variant = 0) {
-					const allocation = Universe.layouts[layout]?.[variant];
-					if (!allocation) return false;
-
-					const bounds = this.spaces.map(() => [1, 1, -1, -1]);
-					allocation.forEach((owner, quadrant) => {
-						const [x, y] = Universe.quadrants[quadrant];
-						const bound = bounds[owner];
-						bound[0] = Math.min(bound[0], x, 0);
-						bound[1] = Math.min(bound[1], y, 0);
-						bound[2] = Math.max(bound[2], x, 0);
-						bound[3] = Math.max(bound[3], y, 0);
-					});
-					const { width, height } =
-						this.element.getBoundingClientRect();
-
-					this.spaces.forEach((space, index) => {
-						const [left, bottom, right, top] = bounds[index];
-						space.hidden = right < 0;
-						if (space.hidden) return;
-
-						Object.assign(space.style, {
-							left: `${((left + 1) * width) / 2}px`,
-							top: `${((1 - top) * height) / 2}px`,
-							width: `${((right - left) * width) / 2}px`,
-							height: `${((top - bottom) * height) / 2}px`,
-						});
-					});
-
-					this.current = { layout, variant };
-					return true;
-				}
-
-				quadrant(x, y) {
-					if (x === 0 || y === 0) return null;
-					return Universe.quadrants.findIndex(
-						([qx, qy]) =>
-							qx === Math.sign(x) && qy === Math.sign(y),
-					);
-				}
-
-				point(
-					clientX,
-					clientY,
-					rect = this.element.getBoundingClientRect(),
-				) {
-					const x =
-						(2 * (clientX - rect.left)) / (rect.width || 1) - 1;
-					const y =
-						1 - (2 * (clientY - rect.top)) / (rect.height || 1);
-
-					return {
-						x,
-						y,
-						quadrant: this.quadrant(x, y),
-					};
-				}
-
-				points(...coordinates) {
-					const rect = this.element.getBoundingClientRect();
-
-					return coordinates.map(([x, y]) => this.point(x, y, rect));
-				}
-			}
-
 			class Pathless {
 				static #td = new TextDecoder();
 				static #range = document.createRange();
@@ -206,7 +110,6 @@
 
 				constructor() {
 					this.cache = new Map();
-					this.universe = new Universe();
 					this.init();
 				}
 
@@ -234,7 +137,12 @@
 					);
 				}
 
-				async init() {}
+				async init() {
+					const [one, frames, panels] = await this.source('');
+					this.frames = frames.map(({ data }) => data);
+					this.panels = panels.map(({ data }) => data);
+					this.exec(document.getElementById('universe'), one);
+				}
 			}
 			document.addEventListener('DOMContentLoaded', () => {
 				window.pathless = new Pathless();

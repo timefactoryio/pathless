@@ -1,0 +1,250 @@
+<div id="zero" class="space"></div>
+<div id="one" class="space"></div>
+<div id="two" class="space"></div>
+
+<script>
+	class Universe {
+		static quadrants = [
+			[1, 1],
+			[-1, 1],
+			[-1, -1],
+			[1, -1],
+		];
+		static layouts = [
+			[[0, 0, 0, 0]],
+			[
+				[1, 0, 0, 1],
+				[0, 0, 1, 1],
+			],
+			[
+				[1, 0, 0, 2],
+				[0, 0, 2, 1],
+				[0, 2, 1, 0],
+				[2, 1, 0, 0],
+			],
+		];
+
+		constructor(pathless) {
+			this.pathless = pathless;
+			this.element = document.getElementById('universe');
+			this.spaces = ['zero', 'one', 'two'].map((id) => ({
+				element: document.getElementById(id),
+				frame: 0,
+				state: new Map(),
+			}));
+			this.focused = 0;
+			const measure = () =>
+				(this.rect = this.element.getBoundingClientRect());
+			measure();
+			this.layout(0);
+			new ResizeObserver(measure).observe(this.element);
+		}
+
+		get space() {
+			return this.spaces[this.focused];
+		}
+		get frame() {
+			return this.space.element.firstElementChild;
+		}
+
+		visible() {
+			return this.spaces
+				.map(({ element }, index) => (element.hidden ? -1 : index))
+				.filter((index) => index >= 0);
+		}
+
+		read(index = this.focused) {
+			const space = this.spaces[index];
+			let state = space.state.get(space.frame);
+			if (!state) space.state.set(space.frame, (state = new Map()));
+			return state;
+		}
+
+		write(key, value, index = this.focused) {
+			this.read(index).set(key, value);
+		}
+
+		pin(index = this.focused) {
+			return {
+				index,
+				read: () => this.read(index),
+				write: (key, value) => this.write(key, value, index),
+			};
+		}
+
+		sync(...indices) {
+			if (!this.pathless.frames?.length) return;
+			const focused = this.focused;
+			for (const index of indices.length ? indices : this.visible()) {
+				this.focused = index;
+				const space = this.spaces[index];
+				this.pathless.exec(
+					space.element,
+					this.pathless.frames[space.frame],
+				);
+			}
+			this.focused = focused;
+		}
+
+		nav(step, index = this.focused) {
+			const frames = this.pathless.frames;
+			if (!frames?.length) return;
+			const space = this.spaces[index];
+			space.frame = (space.frame + step + frames.length) % frames.length;
+			this.sync(index);
+			return space.frame;
+		}
+
+		layout(layout, variant = 0) {
+			const allocation = Universe.layouts[layout]?.[variant];
+			if (!allocation) return false;
+
+			const bounds = this.spaces.map(() => null);
+			allocation.forEach((owner, quadrant) => {
+				const [x, y] = Universe.quadrants[quadrant];
+				const bound = (bounds[owner] ??= [0, 0, 0, 0]);
+				bound[0] = Math.min(bound[0], x);
+				bound[1] = Math.min(bound[1], y);
+				bound[2] = Math.max(bound[2], x);
+				bound[3] = Math.max(bound[3], y);
+			});
+
+			this.spaces.forEach(({ element }, index) => {
+				const bound = bounds[index];
+				element.hidden = !bound;
+				if (!bound) return;
+				const [left, bottom, right, top] = bound;
+				element.style.setProperty('--left', left);
+				element.style.setProperty('--bottom', bottom);
+				element.style.setProperty('--right', right);
+				element.style.setProperty('--top', top);
+			});
+
+			if (this.space.element.hidden)
+				this.focused = bounds.findIndex(Boolean);
+			this.current = { layout, variant };
+			return true;
+		}
+
+		cycle(layout) {
+			const { layout: current, variant } = this.current;
+			return this.layout(
+				layout,
+				current === layout
+					? (variant + 1) % Universe.layouts[layout].length
+					: 0,
+			);
+		}
+
+		focus(step = 1) {
+			const visible = this.visible();
+			const index = visible.indexOf(this.focused);
+			this.focused =
+				visible[(index + step + visible.length) % visible.length];
+			return this.focused;
+		}
+
+		quadrant(x, y) {
+			if (x === 0 || y === 0) return null;
+			return Universe.quadrants.findIndex(
+				([qx, qy]) => qx === Math.sign(x) && qy === Math.sign(y),
+			);
+		}
+
+		point(clientX, clientY) {
+			const { left, top, width, height } = this.rect;
+			const x = (2 * (clientX - left)) / (width || 1) - 1;
+			const y = 1 - (2 * (clientY - top)) / (height || 1);
+			return { x, y, quadrant: this.quadrant(x, y) };
+		}
+	}
+
+	class Input {
+		#active = new Set();
+		#bindings = new Map();
+
+		constructor(element) {
+			this.element = element;
+
+			for (const type of [
+				'pointerdown',
+				'pointermove',
+				'pointerup',
+				'pointercancel',
+			])
+				element.addEventListener(type, this);
+
+			for (const type of ['keydown', 'keyup'])
+				window.addEventListener(type, this);
+		}
+
+		handleEvent(event) {
+			this[event.type](event);
+		}
+
+		bind(bindings) {
+			for (const [name, binding] of Object.entries(bindings))
+				this.#bindings.set(name, binding);
+			return this;
+		}
+
+		dispatch(name, phase, value) {
+			const binding = this.#bindings.get(name);
+			if (!binding) return false;
+			if (typeof binding === 'function') {
+				if (phase === 'start') binding(value);
+			} else {
+				binding[phase]?.(value);
+			}
+			return true;
+		}
+
+		keydown(event) {
+			const handled = this.dispatch(
+				event.key.toLowerCase(),
+				event.repeat ? 'hold' : 'start',
+			);
+			if (handled) event.preventDefault();
+		}
+
+		keyup(event) {
+			if (this.dispatch(event.key.toLowerCase(), 'end'))
+				event.preventDefault();
+		}
+
+		pointerdown(event) {
+			this.#active.add(event.pointerId);
+			this.element.setPointerCapture(event.pointerId);
+			this.point(event, 'start');
+		}
+
+		pointermove(event) {
+			if (this.#active.has(event.pointerId)) this.point(event, 'hold');
+		}
+
+		pointerup(event) {
+			if (!this.#active.delete(event.pointerId)) return;
+			this.point(event, 'end');
+		}
+
+		pointercancel(event) {
+			if (!this.#active.delete(event.pointerId)) return;
+			this.point(event, 'cancel');
+		}
+
+		point(event, phase) {
+			this.dispatch('point', phase, [event.clientX, event.clientY]);
+		}
+	}
+
+	pathless.universe = new Universe(pathless);
+	pathless.input = new Input(pathless.universe.element).bind({
+		1: () => pathless.universe.cycle(0),
+		2: () => pathless.universe.cycle(1),
+		3: () => pathless.universe.cycle(2),
+		tab: () => pathless.universe.focus(),
+		q: () => pathless.universe.nav(-1),
+		e: () => pathless.universe.nav(1),
+	});
+	pathless.universe.sync();
+</script>
