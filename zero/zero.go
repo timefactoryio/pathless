@@ -7,9 +7,6 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
-
-	"github.com/timefactoryio/pathless/zero/frames"
-	"github.com/timefactoryio/pathless/zero/panels"
 )
 
 //go:embed pathless.html
@@ -22,23 +19,13 @@ type Zero struct {
 	UniverseHTML []byte
 	PathlessURL  string
 	circuitURL   string
-	Templates    *Templates
 	mux          *http.ServeMux
-}
-
-type Templates struct {
-	Frames *frames.Frames
-	Panels *panels.Panels
 }
 
 func NewZero(args ...string) *Zero {
 	z := &Zero{
 		UniverseHTML: universeHTML,
-		Templates: &Templates{
-			Frames: frames.NewFrames(),
-			Panels: panels.NewPanels(),
-		},
-		mux: http.NewServeMux(),
+		mux:          http.NewServeMux(),
 	}
 
 	switch len(args) {

@@ -5,30 +5,40 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/timefactoryio/pathless/zero"
 )
 
-type Fx struct {
-	z      *zero.Zero
-	Input  Input
-	frames []*output
-	panels []*output
-	Routes map[string]Output
-	mux    *http.ServeMux
+type Fx interface {
+	Input(string, ...bool) ([]*output, error)
+	Frame(string) error
+	Panel(string) error
+	Start()
 }
 
-func NewFx(z *zero.Zero) *Fx {
-	return &Fx{
+type fx struct {
+	z      *zero.Zero
+	frames []*output
+	panels []*output
+	routes map[string]Output
+	mux    *http.ServeMux
+	client *http.Client
+}
+
+func NewFx(z *zero.Zero) Fx {
+	return &fx{
 		z:      z,
+		frames: []*output{},
+		panels: []*output{},
+		routes: make(map[string]Output),
 		mux:    http.NewServeMux(),
-		Input:  NewInput(),
-		Routes: make(map[string]Output),
+		client: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
-func (f *Fx) Frame(path string) error {
-	entries, err := f.Input.String(path)
+func (f *fx) Frame(path string) error {
+	entries, err := f.Input(path)
 	if err != nil {
 		return err
 	}
@@ -39,8 +49,8 @@ func (f *Fx) Frame(path string) error {
 	return nil
 }
 
-func (f *Fx) Panel(path string) error {
-	entries, err := f.Input.String(path)
+func (f *fx) Panel(path string) error {
+	entries, err := f.Input(path)
 	if err != nil {
 		return err
 	}
@@ -52,7 +62,7 @@ func (f *Fx) Panel(path string) error {
 }
 
 // build merges any inline style/script blocks in html into a single entry.
-func (f *Fx) build(entry *output) *output {
+func (f *fx) build(entry *output) *output {
 	html := string(entry.Data)
 	if styles := styleTag.FindAllStringSubmatch(html, -1); len(styles) > 1 {
 		var merged strings.Builder
@@ -87,14 +97,9 @@ var (
 	scriptTag = regexp.MustCompile(`(?s)<script>(.*?)</script>`)
 )
 
-// Route registers a payload to be served at key once Start wires up handlers.
-func (f *Fx) Route(key string, payload Output) {
-	f.Routes[key] = payload
-}
-
 // handle registers path on f's mux as a wire endpoint for output: encoded
 // (gzipped) once here, then written from memory on every request.
-func (f *Fx) handle(path string, payload Output) {
+func (f *fx) handle(path string, payload Output) {
 	data := payload.Encode()
 	f.mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -103,14 +108,14 @@ func (f *Fx) handle(path string, payload Output) {
 	})
 }
 
-func (f *Fx) Start() {
+func (f *fx) Start() {
 	f.handle("/", Output{
 		{&output{Name: "universe", Type: "text/html", Data: f.z.UniverseHTML}},
 		f.frames,
 		f.panels,
 	})
 
-	for key, payload := range f.Routes {
+	for key, payload := range f.routes {
 		f.handle("/"+key, payload)
 	}
 
@@ -119,7 +124,7 @@ func (f *Fx) Start() {
 	}
 }
 
-func (f *Fx) cors(next http.Handler) http.Handler {
+func (f *fx) cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", f.z.PathlessURL)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")

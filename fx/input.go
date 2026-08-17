@@ -8,46 +8,38 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
-type Input interface {
-	String(string) ([]*output, error)
-}
-
-type fx struct {
-	client *http.Client
-}
-
-func NewInput() Input {
-	return &fx{
-		client: &http.Client{Timeout: 10 * time.Second},
-	}
-}
-
-func (i *fx) String(path string) ([]*output, error) {
+func (f *fx) Input(path string, public ...bool) ([]*output, error) {
+	var entries []*output
 	if strings.HasPrefix(path, "http://") ||
 		strings.HasPrefix(path, "https://") {
-		entry, err := i.url(path)
+		entry, err := f.url(path)
 		if err != nil {
 			return nil, err
 		}
-		return []*output{entry}, nil
+		entries = []*output{entry}
+	} else {
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("stat %q: %w", path, err)
+		}
+		if info.IsDir() {
+			entries, err = readDir(path)
+		} else {
+			var entry *output
+			entry, err = readFile(path, baseName(path))
+			entries = []*output{entry}
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, fmt.Errorf("stat %q: %w", path, err)
+	if len(public) > 0 && public[0] {
+		f.routes[filepath.Base(path)] = Output{entries}
 	}
-	if info.IsDir() {
-		return readDir(path)
-	}
-
-	entry, err := readFile(path, baseName(path))
-	if err != nil {
-		return nil, err
-	}
-	return []*output{entry}, nil
+	return entries, nil
 }
 
 // detectType resolves an extension-based MIME type first, falling back to content

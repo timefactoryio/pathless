@@ -8,17 +8,17 @@ p := pathless.NewPathless()
 // p.Frame() accepts local path to html file or https
 // Templates via p.Text(), p.Slides()...
 // <- frames ->
-p.Serve()
+p.Start()
 ```
 ```go
 p := pathless.NewPathless()
 // source bytes using p.Input() 
 // serve bytes using p.Input() -> p.Route()
-p.Serve() 
+p.Start() 
 ```
 ```go
 p := pathless.NewPathless() // pathless.NewPathless("domain", "api.domain")
-p.Serve() 
+p.Start() 
 ```
 ```go
 package main
@@ -30,7 +30,7 @@ func main() {
     p.Text("./readme.md")
     p.Slides("./pics")
     p.Frame("./custom.html")
-    p.Serve() // execute everything after p := pathless.NewPathless()
+    p.Start() // execute everything after p := pathless.NewPathless()
 }
 ```
 
