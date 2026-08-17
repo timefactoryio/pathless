@@ -20,7 +20,7 @@ func (f *Fx) Home(logo, heading string) error {
 	}); err != nil {
 		return err
 	}
-	f.frames = append(f.frames, f.build(buf.String()))
+	f.frames = append(f.frames, f.build(&output{Data: buf.Bytes()}))
 	return nil
 }
 
@@ -64,7 +64,7 @@ func (f *Fx) Text(path string) error {
 	}); err != nil {
 		return err
 	}
-	f.frames = append(f.frames, f.build(buf.String()))
+	f.frames = append(f.frames, f.build(&output{Data: buf.Bytes()}))
 	return nil
 }
 
@@ -80,11 +80,13 @@ func (f *Fx) Slides(dir string) error {
 	if err := tmpl.Execute(&buf, map[string]string{"PREFIX": base}); err != nil {
 		return err
 	}
-	f.frames = append(f.frames, f.build(buf.String()))
+	f.frames = append(f.frames, f.build(&output{Data: buf.Bytes()}))
 	return nil
 }
 
 // Keyboard builds the default keyboard panel frame from Zero's embedded panel HTML.
 func (f *Fx) Keyboard() {
-	f.Panels = append(f.Panels, f.build(f.z.Templates.Panels.Keyboard))
+	f.panels = append(f.panels, f.build(&output{
+		Data: []byte(f.z.Templates.Panels.Keyboard),
+	}))
 }

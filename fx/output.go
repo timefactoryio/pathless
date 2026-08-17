@@ -7,9 +7,9 @@ import (
 	"io"
 )
 
-type Output [][]*input
+type Output [][]*output
 
-type input struct {
+type output struct {
 	Name string
 	Type string
 	Data []byte
@@ -33,7 +33,7 @@ func (o Output) Encode(compress ...bool) []byte {
 	return buf.Bytes()
 }
 
-func encodeEntries(w io.Writer, entries []*input) {
+func encodeEntries(w io.Writer, entries []*output) {
 	writeUvarint(w, uint64(len(entries)))
 	for _, entry := range entries {
 		writeField(w, []byte(entry.Name))

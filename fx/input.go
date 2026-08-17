@@ -12,7 +12,7 @@ import (
 )
 
 type Input interface {
-	String(string) ([]*input, error)
+	String(string) ([]*output, error)
 }
 
 type fx struct {
@@ -25,14 +25,14 @@ func NewInput() Input {
 	}
 }
 
-func (i *fx) String(path string) ([]*input, error) {
+func (i *fx) String(path string) ([]*output, error) {
 	if strings.HasPrefix(path, "http://") ||
 		strings.HasPrefix(path, "https://") {
 		entry, err := i.url(path)
 		if err != nil {
 			return nil, err
 		}
-		return []*input{entry}, nil
+		return []*output{entry}, nil
 	}
 
 	info, err := os.Stat(path)
@@ -47,7 +47,7 @@ func (i *fx) String(path string) ([]*input, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []*input{entry}, nil
+	return []*output{entry}, nil
 }
 
 // detectType resolves an extension-based MIME type first, falling back to content
@@ -60,7 +60,7 @@ func detectType(path string, data []byte) string {
 	return http.DetectContentType(data)
 }
 
-func (i *fx) url(source string) (*input, error) {
+func (i *fx) url(source string) (*output, error) {
 	resp, err := i.client.Get(source)
 	if err != nil {
 		return nil, fmt.Errorf("get %q: %w", source, err)
@@ -75,14 +75,14 @@ func (i *fx) url(source string) (*input, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %q: %w", source, err)
 	}
-	return &input{
+	return &output{
 		Name: baseName(resp.Request.URL.Path),
 		Type: detectType(resp.Request.URL.Path, data),
 		Data: data}, nil
 }
 
 // readDir reads path's directory listing, normalizes it into Results, and applies sequencing.
-func readDir(path string) ([]*input, error) {
+func readDir(path string) ([]*output, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return nil, fmt.Errorf("read dir %q: %w", path, err)
@@ -97,8 +97,8 @@ func readDir(path string) ([]*input, error) {
 
 // processFiles reads each non-dir entry using its full filesystem name (nested
 // directories are ignored), then strips extensions from names that don't collide once shortened.
-func processFiles(path string, entries []os.DirEntry) ([]*input, error) {
-	results := make([]*input, 0, len(entries))
+func processFiles(path string, entries []os.DirEntry) ([]*output, error) {
+	results := make([]*output, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -113,17 +113,17 @@ func processFiles(path string, entries []os.DirEntry) ([]*input, error) {
 	return stripExtensions(results), nil
 }
 
-func readFile(path, name string) (*input, error) {
+func readFile(path, name string) (*output, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read file %q: %w", path, err)
 	}
-	return &input{Name: name, Type: detectType(path, data), Data: data}, nil
+	return &output{Name: name, Type: detectType(path, data), Data: data}, nil
 }
 
 // stripExtensions shortens each entry's Name to its baseName, except where that would
 // collide with another entry's shortened name — those entries keep their full name.
-func stripExtensions(entries []*input) []*input {
+func stripExtensions(entries []*output) []*output {
 	counts := make(map[string]int, len(entries))
 	for _, entry := range entries {
 		counts[baseName(entry.Name)]++
@@ -139,7 +139,7 @@ func stripExtensions(entries []*input) []*input {
 // sequence orders entries by the newline-separated names in a "sequence" entry's Data,
 // dropping that entry from the result; unlisted entries keep their relative order after.
 // If no "sequence" entry exists, entries is returned unchanged.
-func sequence(entries []*input) []*input {
+func sequence(entries []*output) []*output {
 	var data []byte
 	rest := entries[:0:0]
 	for _, entry := range entries {
@@ -153,13 +153,13 @@ func sequence(entries []*input) []*input {
 		return entries
 	}
 
-	byName := make(map[string]*input, len(rest))
+	byName := make(map[string]*output, len(rest))
 	for _, entry := range rest {
 		byName[entry.Name] = entry
 	}
 
-	ordered := make([]*input, 0, len(rest))
-	used := make(map[*input]bool, len(rest))
+	ordered := make([]*output, 0, len(rest))
+	used := make(map[*output]bool, len(rest))
 	for name := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 		name = strings.TrimSpace(name)
 		entry, ok := byName[name]

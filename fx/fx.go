@@ -1,6 +1,7 @@
 package fx
 
 import (
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -11,8 +12,8 @@ import (
 type Fx struct {
 	z      *zero.Zero
 	Input  Input
-	frames []*input
-	Panels []*input
+	frames []*output
+	panels []*output
 	Routes map[string]Output
 	mux    *http.ServeMux
 }
@@ -26,18 +27,33 @@ func NewFx(z *zero.Zero) *Fx {
 	}
 }
 
-// Frame registers html as a frame, merging any inline style/script blocks first.
-func (f *Fx) Frame(html string) {
-	f.frames = append(f.frames, f.build(html))
+func (f *Fx) Frame(path string) error {
+	entries, err := f.Input.String(path)
+	if err != nil {
+		return err
+	}
+	if len(entries) != 1 {
+		return fmt.Errorf("frame %q: expected one entry, got %d", path, len(entries))
+	}
+	f.frames = append(f.frames, f.build(entries[0]))
+	return nil
 }
 
-// Panel registers html as a panel, merging any inline style/script blocks first.
-func (f *Fx) Panel(html string) {
-	f.Panels = append(f.Panels, f.build(html))
+func (f *Fx) Panel(path string) error {
+	entries, err := f.Input.String(path)
+	if err != nil {
+		return err
+	}
+	if len(entries) != 1 {
+		return fmt.Errorf("panel %q: expected one entry, got %d", path, len(entries))
+	}
+	f.panels = append(f.panels, f.build(entries[0]))
+	return nil
 }
 
 // build merges any inline style/script blocks in html into a single entry.
-func (f *Fx) build(html string) *input {
+func (f *Fx) build(entry *output) *output {
+	html := string(entry.Data)
 	if styles := styleTag.FindAllStringSubmatch(html, -1); len(styles) > 1 {
 		var merged strings.Builder
 		for _, match := range styles {
@@ -60,7 +76,10 @@ func (f *Fx) build(html string) *input {
 		html = scriptTag.ReplaceAllString(html, "") +
 			"<script>{" + merged.String() + "}</script>"
 	}
-	return &input{Type: "text/html", Data: []byte(html)}
+	result := *entry
+	result.Type = "text/html"
+	result.Data = []byte(html)
+	return &result
 }
 
 var (
@@ -86,9 +105,9 @@ func (f *Fx) handle(path string, payload Output) {
 
 func (f *Fx) Start() {
 	f.handle("/", Output{
-		{&input{Name: "universe", Type: "text/html", Data: f.z.UniverseHTML}},
+		{&output{Name: "universe", Type: "text/html", Data: f.z.UniverseHTML}},
 		f.frames,
-		f.Panels,
+		f.panels,
 	})
 
 	for key, payload := range f.Routes {
