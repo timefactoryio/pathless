@@ -7,49 +7,42 @@ import (
 	"io"
 )
 
-type Output [][]*output
-
-type output struct {
+type One struct {
 	Name string
 	Type string
 	Data []byte
+	Ones []*One
 }
 
-func (o Output) Encode(compress ...bool) []byte {
+type encoder struct {
+	io.Writer
+}
+
+func encode(ones []*One) []byte {
 	var buf bytes.Buffer
-	w := io.Writer(&buf)
-	var gz *gzip.Writer
-	if len(compress) == 0 || compress[0] {
-		gz, _ = gzip.NewWriterLevel(&buf, gzip.BestCompression)
-		w = gz
-	}
-	writeUvarint(w, uint64(len(o)))
-	for _, entries := range o {
-		encodeEntries(w, entries)
-	}
-	if gz != nil {
-		gz.Close()
-	}
+	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	encoder{w}.writeOnes(ones)
+	w.Close()
 	return buf.Bytes()
 }
 
-func encodeEntries(w io.Writer, entries []*output) {
-	writeUvarint(w, uint64(len(entries)))
-	for _, entry := range entries {
-		writeField(w, []byte(entry.Name))
-		writeField(w, []byte(entry.Type))
-		writeField(w, entry.Data)
+func (e encoder) writeOnes(ones []*One) {
+	e.writeUvarint(uint64(len(ones)))
+	for _, one := range ones {
+		e.writeField([]byte(one.Name))
+		e.writeField([]byte(one.Type))
+		e.writeField(one.Data)
+		e.writeOnes(one.Ones)
 	}
 }
 
-// writeField writes data preceded by its length as a varint.
-func writeField(w io.Writer, data []byte) {
-	writeUvarint(w, uint64(len(data)))
-	w.Write(data)
+func (e encoder) writeField(data []byte) {
+	e.writeUvarint(uint64(len(data)))
+	e.Write(data)
 }
 
-func writeUvarint(w io.Writer, v uint64) {
+func (e encoder) writeUvarint(v uint64) {
 	var tmp [binary.MaxVarintLen64]byte
 	n := binary.PutUvarint(tmp[:], v)
-	w.Write(tmp[:n])
+	e.Write(tmp[:n])
 }

@@ -141,7 +141,7 @@
 
 						do {
 							byte = bytes[offset++];
-							value |= (byte & 0x7f) << shift;
+							value += (byte & 0x7f) * 2 ** shift;
 							shift += 7;
 						} while (byte & 0x80);
 
@@ -156,13 +156,14 @@
 					};
 
 					const text = () => Pathless.#td.decode(field());
-					return Array.from({ length: uvarint() }, () =>
+					const ones = () =>
 						Array.from({ length: uvarint() }, () => ({
 							name: text(),
 							type: text(),
 							data: field(),
-						})),
-					);
+							ones: ones(),
+						}));
+					return ones();
 				}
 
 				constructor() {
@@ -208,13 +209,10 @@
 				}
 
 				async init() {
-					const [universe, frames, panels] = await this.source('');
-					this.frames = frames.map(({ data }) => data);
-					this.panels = panels.map(({ data }) => data);
-					this.exec(
-						document.getElementById('universe'),
-						universe[0].data,
-					);
+					const [root, frames, panels] = await this.source('');
+					this.frames = frames.ones.map(({ data }) => data);
+					this.panels = panels.ones.map(({ data }) => data);
+					this.exec(document.getElementById('universe'), root.data);
 					this.universe.init();
 				}
 			}

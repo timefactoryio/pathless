@@ -3,6 +3,7 @@ package fx
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -11,17 +12,17 @@ import (
 )
 
 type Fx interface {
-	Input(string, ...bool) ([]*output, error)
-	Frame(string) error
-	Panel(string) error
+	Input(string, ...bool) ([]*One, error)
+	Frame(string, ...bool) error
+	Save(string, ...bool) ([]byte, error)
 	Start()
 }
 
 type fx struct {
 	z      *zero.Zero
-	frames []*output
-	panels []*output
-	routes map[string]Output
+	frames []*One
+	panels []*One
+	routes map[string][]*One
 	mux    *http.ServeMux
 	client *http.Client
 }
@@ -29,40 +30,70 @@ type fx struct {
 func NewFx(z *zero.Zero) Fx {
 	return &fx{
 		z:      z,
-		frames: []*output{},
-		panels: []*output{},
-		routes: make(map[string]Output),
+		routes: make(map[string][]*One),
 		mux:    http.NewServeMux(),
 		client: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
-func (f *fx) Frame(path string) error {
+func (f *fx) Frame(path string, panel ...bool) error {
 	entries, err := f.Input(path)
 	if err != nil {
 		return err
 	}
 	if len(entries) != 1 {
-		return fmt.Errorf("frame %q: expected one entry, got %d", path, len(entries))
+		return fmt.Errorf("%q: expected one entry, got %d", path, len(entries))
 	}
-	f.frames = append(f.frames, f.build(entries[0]))
+
+	target := &f.frames
+	if len(panel) > 0 && panel[0] {
+		target = &f.panels
+	}
+	*target = append(*target, f.build(entries[0]))
 	return nil
 }
 
-func (f *fx) Panel(path string) error {
-	entries, err := f.Input(path)
-	if err != nil {
-		return err
+func (f *fx) Save(key string, binary ...bool) ([]byte, error) {
+	route, ok := f.routes[key]
+	if !ok {
+		return nil, fmt.Errorf("route %q not found", key)
 	}
-	if len(entries) != 1 {
-		return fmt.Errorf("panel %q: expected one entry, got %d", path, len(entries))
+
+	data := encode(route)
+	if len(binary) > 0 && binary[0] {
+		if err := os.WriteFile(key+".bin", data, 0o644); err != nil {
+			return nil, fmt.Errorf("save route %q: %w", key, err)
+		}
 	}
-	f.panels = append(f.panels, f.build(entries[0]))
-	return nil
+	return data, nil
+}
+
+func (f *fx) Start() {
+	f.handle("/", encode(f.universe()))
+
+	for key, payload := range f.routes {
+		f.handle("/"+key, encode(payload))
+	}
+
+	if err := http.ListenAndServe(":1001", f.cors(f.mux)); err != nil {
+		panic(err)
+	}
+}
+
+func (f *fx) universe() []*One {
+	return []*One{
+		{
+			Name: "universe",
+			Type: "text/html",
+			Data: f.z.UniverseHTML,
+		},
+		{Ones: f.frames},
+		{Ones: f.panels},
+	}
 }
 
 // build merges any inline style/script blocks in html into a single entry.
-func (f *fx) build(entry *output) *output {
+func (f *fx) build(entry *One) *One {
 	html := string(entry.Data)
 	if styles := styleTag.FindAllStringSubmatch(html, -1); len(styles) > 1 {
 		var merged strings.Builder
@@ -97,31 +128,13 @@ var (
 	scriptTag = regexp.MustCompile(`(?s)<script>(.*?)</script>`)
 )
 
-// handle registers path on f's mux as a wire endpoint for output: encoded
-// (gzipped) once here, then written from memory on every request.
-func (f *fx) handle(path string, payload Output) {
-	data := payload.Encode()
+// handle registers an encoded wire payload and writes it from memory on every request.
+func (f *fx) handle(path string, data []byte) {
 	f.mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Write(data)
 	})
-}
-
-func (f *fx) Start() {
-	f.handle("/", Output{
-		{&output{Name: "universe", Type: "text/html", Data: f.z.UniverseHTML}},
-		f.frames,
-		f.panels,
-	})
-
-	for key, payload := range f.routes {
-		f.handle("/"+key, payload)
-	}
-
-	if err := http.ListenAndServe(":1001", f.cors(f.mux)); err != nil {
-		panic(err)
-	}
 }
 
 func (f *fx) cors(next http.Handler) http.Handler {

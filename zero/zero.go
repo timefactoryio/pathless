@@ -60,7 +60,7 @@ func (z *Zero) pathless() {
 	}); err != nil {
 		panic(err)
 	}
-	payload := z.Zip(buf.Bytes())
+	payload := z.zip(buf.Bytes())
 	z.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" || r.URL.RawQuery != "" {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -72,7 +72,7 @@ func (z *Zero) pathless() {
 	})
 }
 
-func (z *Zero) Zip(data []byte) []byte {
+func (z *Zero) zip(data []byte) []byte {
 	var buf bytes.Buffer
 	w, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
 	w.Write(data)

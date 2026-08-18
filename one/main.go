@@ -10,5 +10,4 @@ func main() {
 	// p.Slides("../../origin/slides")
 	// p.Keyboard()
 	p.Start()
-	// p.
 }
