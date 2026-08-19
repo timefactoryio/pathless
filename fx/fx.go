@@ -36,20 +36,31 @@ func NewFx(z *zero.Zero) Fx {
 	}
 }
 
-func (f *fx) Frame(path string, panel ...bool) error {
-	entries, err := f.Input(path)
-	if err != nil {
-		return err
-	}
-	if len(entries) != 1 {
-		return fmt.Errorf("%q: expected one entry, got %d", path, len(entries))
+func (f *fx) Frame(source string, panel ...bool) error {
+	var entry *One
+
+	if strings.HasPrefix(strings.TrimSpace(source), "<") {
+		entry = &One{
+			Name: "frame",
+			Type: "text/html; charset=utf-8",
+			Data: []byte(source),
+		}
+	} else {
+		entries, err := f.Input(source)
+		if err != nil {
+			return err
+		}
+		if len(entries) != 1 {
+			return fmt.Errorf("%q: expected one entry, got %d", source, len(entries))
+		}
+		entry = entries[0]
 	}
 
 	target := &f.frames
 	if len(panel) > 0 && panel[0] {
 		target = &f.panels
 	}
-	*target = append(*target, f.build(entries[0]))
+	*target = append(*target, f.build(entry))
 	return nil
 }
 
