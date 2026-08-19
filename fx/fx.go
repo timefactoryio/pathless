@@ -72,7 +72,7 @@ func (f *fx) Save(key string, binary ...bool) ([]byte, error) {
 
 	data := encode(route)
 	if len(binary) > 0 && binary[0] {
-		if err := os.WriteFile(key+".bin", data, 0o644); err != nil {
+		if err := os.WriteFile(key, data, 0o644); err != nil {
 			return nil, fmt.Errorf("save route %q: %w", key, err)
 		}
 	}
@@ -81,8 +81,8 @@ func (f *fx) Save(key string, binary ...bool) ([]byte, error) {
 
 func (f *fx) Start() {
 	f.handle("/", encode(f.universe()))
-
 	for key, payload := range f.routes {
+		// log.Printf("route: %s", key)
 		f.handle("/"+key, encode(payload))
 	}
 

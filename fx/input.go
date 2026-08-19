@@ -5,6 +5,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,12 +19,15 @@ func (f *fx) Input(path string, public ...bool) ([]*One, error) {
 
 	if strings.HasPrefix(path, "http://") ||
 		strings.HasPrefix(path, "https://") {
-		entry, err := f.url(path)
+		var err error
+		entries, err = f.url(path)
 		if err != nil {
 			return nil, err
 		}
-		entries = []*One{entry}
-		name = entry.Name
+		name = baseName(path)
+		if name == "" {
+			return nil, fmt.Errorf("URL %q has no route name", path)
+		}
 	} else {
 		info, err := os.Stat(path)
 		if err != nil {
@@ -60,14 +64,15 @@ func detectType(path string, data []byte) string {
 	return http.DetectContentType(data)
 }
 
-func (i *fx) url(source string) (*One, error) {
-	resp, err := i.client.Get(source)
+func (f *fx) url(source string) ([]*One, error) {
+	resp, err := f.client.Get(source)
 	if err != nil {
 		return nil, fmt.Errorf("get %q: %w", source, err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+	if resp.StatusCode < http.StatusOK ||
+		resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, fmt.Errorf("get %q: %s", source, resp.Status)
 	}
 
@@ -75,10 +80,16 @@ func (i *fx) url(source string) (*One, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %q: %w", source, err)
 	}
-	return &One{
+
+	if entries, err := decode(data); err == nil {
+		return entries, nil
+	}
+
+	return []*One{{
 		Name: baseName(resp.Request.URL.Path),
 		Type: detectType(resp.Request.URL.Path, data),
-		Data: data}, nil
+		Data: data,
+	}}, nil
 }
 
 // readDir reads path's directory listing, normalizes it into Results, and applies sequencing.
@@ -183,8 +194,14 @@ func sequence(entries []*One) []*One {
 }
 
 // baseName drops the extension, except on dot-prefixed bases (.env.local, .gitignore).
-func baseName(path string) string {
-	base := filepath.Base(path)
+func baseName(source string) string {
+	if parsed, err := url.Parse(source); err == nil && parsed.Host != "" {
+		source = parsed.Path
+	}
+	base := filepath.Base(source)
+	if base == "." || base == "/" {
+		return ""
+	}
 	if strings.HasPrefix(base, ".") {
 		return base
 	}
