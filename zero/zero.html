@@ -40,24 +40,93 @@
 				position: absolute;
 				inset: 0;
 				overflow: hidden;
+				display: grid;
+				grid-template-columns: repeat(2, minmax(0, 1fr));
+				grid-template-rows: repeat(2, minmax(0, 1fr));
 				container: universe / size;
-				touch-action: none;
+				touch-action: pan-y;
 				overscroll-behavior: none;
 			}
 			.space {
-				position: absolute;
-				left: calc((var(--left) + 1) * 50cqw);
-				top: calc((1 - var(--top)) * 50cqh);
-				width: calc((var(--right) - var(--left)) * 50cqw);
-				height: calc((var(--top) - var(--bottom)) * 50cqh);
 				display: flex;
 				overflow: hidden;
 				container-type: size;
 			}
-			.space > :first-child {
+			#zero {
+				grid-area: zero;
+			}
+			#one {
+				grid-area: one;
+			}
+			#two {
+				grid-area: two;
+			}
+			#universe[data-layout='0'] .space,
+			#universe[data-layout='1'] #two {
+				display: none;
+			}
+			#universe[data-layout='0'][data-focused='0'] #zero,
+			#universe[data-layout='0'][data-focused='1'] #one,
+			#universe[data-layout='0'][data-focused='2'] #two {
+				display: flex;
+			}
+			#universe[data-layout='0'][data-focused='0'] {
+				grid-template-areas: 'zero zero' 'zero zero';
+			}
+			#universe[data-layout='0'][data-focused='1'] {
+				grid-template-areas: 'one one' 'one one';
+			}
+			#universe[data-layout='0'][data-focused='2'] {
+				grid-template-areas: 'two two' 'two two';
+			}
+			#universe[data-layout='1'][data-variant='0'] {
+				grid-template-areas: 'zero one' 'zero one';
+			}
+			#universe[data-layout='1'][data-variant='1'] {
+				grid-template-areas: 'zero zero' 'one one';
+			}
+			#universe[data-layout='2'][data-variant='0'] {
+				grid-template-areas: 'zero one' 'zero two';
+			}
+			#universe[data-layout='2'][data-variant='1'] {
+				grid-template-areas: 'zero zero' 'two one';
+			}
+			#universe[data-layout='2'][data-variant='2'] {
+				grid-template-areas: 'two zero' 'one zero';
+			}
+			#universe[data-layout='2'][data-variant='3'] {
+				grid-template-areas: 'one two' 'zero zero';
+			}
+			#universe[data-layout='1'][data-variant='0'] #one,
+			#universe[data-layout='2'][data-variant='0'] :is(#one, #two) {
+				border-left: var(--b);
+			}
+			#universe[data-layout='1'][data-variant='1'] #one,
+			#universe[data-layout='2'][data-variant='1'] :is(#one, #two) {
+				border-top: var(--b);
+			}
+			#universe[data-layout='2'][data-variant='0'] #two,
+			#universe[data-layout='2'][data-variant='2'] #one {
+				border-top: var(--b);
+			}
+			#universe[data-layout='2'][data-variant='1'] #one,
+			#universe[data-layout='2'][data-variant='3'] #two {
+				border-left: var(--b);
+			}
+			#universe[data-layout='2'][data-variant='2'] :is(#one, #two) {
+				border-right: var(--b);
+			}
+			#universe[data-layout='2'][data-variant='3'] :is(#one, #two) {
+				border-bottom: var(--b);
+			}
+			.space > div:first-of-type {
 				flex: 1 1 auto;
 				min-width: 0;
 				min-height: 0;
+			}
+			.space img {
+				pointer-events: none;
+				-webkit-user-drag: none;
 			}
 		</style>
 		<script>
@@ -76,9 +145,10 @@
 						let value = 0;
 						let shift = 0;
 						let byte;
+
 						do {
 							byte = bytes[offset++];
-							value |= (byte & 0x7f) << shift;
+							value += (byte & 0x7f) * 2 ** shift;
 							shift += 7;
 						} while (byte & 0x80);
 
@@ -93,19 +163,14 @@
 					};
 
 					const text = () => Pathless.#td.decode(field());
-					const readers = [
-						field,
-						() =>
-							Array.from({ length: uvarint() }, () => ({
-								name: text(),
-								type: text(),
-								data: field(),
-							})),
-					];
-
-					return Array.from({ length: uvarint() }, () =>
-						readers[bytes[offset++]](),
-					);
+					const ones = () =>
+						Array.from({ length: uvarint() }, () => ({
+							name: text(),
+							type: text(),
+							data: field(),
+							ones: ones(),
+						}));
+					return ones();
 				}
 
 				constructor() {
@@ -129,6 +194,17 @@
 					return request;
 				}
 
+				url(entry) {
+					let value = this.cache.get(entry);
+					if (!value) {
+						value = URL.createObjectURL(
+							new Blob([entry.data], { type: entry.type }),
+						);
+						this.cache.set(entry, value);
+					}
+					return value;
+				}
+
 				exec(el, data) {
 					el.replaceChildren(
 						Pathless.#range.createContextualFragment(
@@ -138,10 +214,10 @@
 				}
 
 				async init() {
-					const [one, frames, panels] = await this.source('');
-					this.frames = frames.map(({ data }) => data);
-					this.panels = panels.map(({ data }) => data);
-					this.exec(document.getElementById('universe'), one);
+					const [root, frames, panels] = await this.source('');
+					this.frames = frames.ones.map(({ data }) => data);
+					this.panels = panels.ones.map(({ data }) => data);
+					this.exec(document.getElementById('universe'), root.data);
 				}
 			}
 			document.addEventListener('DOMContentLoaded', () => {
@@ -150,6 +226,10 @@
 		</script>
 	</head>
 	<body>
-		<div id="universe"></div>
+		<div
+			id="universe"
+			data-layout="0"
+			data-variant="0"
+			data-focused="0"></div>
 	</body>
 </html>
