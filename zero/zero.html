@@ -7,7 +7,7 @@
 		<title>hello.universe</title>
 		<style>
 			:root {
-				--b: 1px solid blue;
+				--line: blue;
 			}
 			*,
 			*::before,
@@ -17,6 +17,9 @@
 				padding: 0;
 				user-select: none;
 				-webkit-user-select: none;
+				-webkit-user-drag: none;
+				-webkit-touch-callout: none;
+				-webkit-tap-highlight-color: transparent;
 			}
 			[hidden] {
 				display: none !important;
@@ -25,17 +28,15 @@
 			body {
 				overflow: hidden;
 			}
-
 			body {
 				position: relative;
 				height: 100dvh;
 				background: #000;
 				color: #fff;
-				border: var(--b);
+				border: 1px solid var(--line);
 				border-radius: 5px;
 				font-family: sans-serif;
 			}
-
 			#universe {
 				position: absolute;
 				inset: 0;
@@ -43,14 +44,26 @@
 				display: grid;
 				grid-template-columns: repeat(2, minmax(0, 1fr));
 				grid-template-rows: repeat(2, minmax(0, 1fr));
+				gap: 1px;
+				background: var(--line);
 				container: universe / size;
 				touch-action: pan-y;
 				overscroll-behavior: none;
 			}
+			#universe:empty {
+				background: transparent;
+			}
 			.space {
 				display: flex;
 				overflow: hidden;
+				padding: clamp(0.25rem, 1vmin, 0.75rem);
+				background: #000;
 				container-type: size;
+			}
+			.space > div {
+				flex: 1 1 auto;
+				min-width: 0;
+				min-height: 0;
 			}
 			#zero {
 				grid-area: zero;
@@ -61,7 +74,10 @@
 			#two {
 				grid-area: two;
 			}
-			#universe[data-layout='0'] .space,
+			#universe[data-layout='0'] .space {
+				display: none;
+				grid-area: 1 / 1 / -1 / -1;
+			}
 			#universe[data-layout='1'] #two {
 				display: none;
 			}
@@ -69,15 +85,6 @@
 			#universe[data-layout='0'][data-focused='1'] #one,
 			#universe[data-layout='0'][data-focused='2'] #two {
 				display: flex;
-			}
-			#universe[data-layout='0'][data-focused='0'] {
-				grid-template-areas: 'zero zero' 'zero zero';
-			}
-			#universe[data-layout='0'][data-focused='1'] {
-				grid-template-areas: 'one one' 'one one';
-			}
-			#universe[data-layout='0'][data-focused='2'] {
-				grid-template-areas: 'two two' 'two two';
 			}
 			#universe[data-layout='1'][data-variant='0'] {
 				grid-template-areas: 'zero one' 'zero one';
@@ -96,37 +103,6 @@
 			}
 			#universe[data-layout='2'][data-variant='3'] {
 				grid-template-areas: 'one two' 'zero zero';
-			}
-			#universe[data-layout='1'][data-variant='0'] #one,
-			#universe[data-layout='2'][data-variant='0'] :is(#one, #two) {
-				border-left: var(--b);
-			}
-			#universe[data-layout='1'][data-variant='1'] #one,
-			#universe[data-layout='2'][data-variant='1'] :is(#one, #two) {
-				border-top: var(--b);
-			}
-			#universe[data-layout='2'][data-variant='0'] #two,
-			#universe[data-layout='2'][data-variant='2'] #one {
-				border-top: var(--b);
-			}
-			#universe[data-layout='2'][data-variant='1'] #one,
-			#universe[data-layout='2'][data-variant='3'] #two {
-				border-left: var(--b);
-			}
-			#universe[data-layout='2'][data-variant='2'] :is(#one, #two) {
-				border-right: var(--b);
-			}
-			#universe[data-layout='2'][data-variant='3'] :is(#one, #two) {
-				border-bottom: var(--b);
-			}
-			.space > div:first-of-type {
-				flex: 1 1 auto;
-				min-width: 0;
-				min-height: 0;
-			}
-			.space img {
-				pointer-events: none;
-				-webkit-user-drag: none;
 			}
 		</style>
 		<script>
@@ -175,7 +151,6 @@
 
 				constructor() {
 					this.cache = new Map();
-					this.init();
 				}
 
 				source(path) {
@@ -220,8 +195,18 @@
 					this.exec(document.getElementById('universe'), root.data);
 				}
 			}
-			document.addEventListener('DOMContentLoaded', () => {
+			document.addEventListener('DOMContentLoaded', async () => {
 				window.pathless = new Pathless();
+				await pathless.init();
+				pathless.input.bind({
+					1: () => pathless.universe.layout(0),
+					2: () => pathless.universe.layout(1),
+					3: () => pathless.universe.layout(2),
+					tab: () => pathless.universe.focus(),
+					q: () => pathless.universe.nav(-1),
+					e: () => pathless.universe.nav(1),
+				});
+				pathless.universe.sync();
 			});
 		</script>
 	</head>
