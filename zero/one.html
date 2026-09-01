@@ -133,17 +133,11 @@
 
 	class Input {
 		#bindings = new Map();
-		#active = new Map();
 
 		constructor() {
 			this.el = pathless.universe.el;
 
-			for (const type of [
-				'pointerdown',
-				'pointermove',
-				'pointerup',
-				'pointercancel',
-			])
+			for (const type of ['pointerdown', 'pointerup'])
 				this.el.addEventListener(type, this);
 			for (const type of ['keydown', 'keyup'])
 				window.addEventListener(type, this);
@@ -171,8 +165,8 @@
 		}
 
 		keydown(event) {
-			const name = event.key.toLowerCase();
-			if (this.dispatch(name, event.repeat ? 'hold' : 'start', event))
+			const phase = event.repeat ? 'hold' : 'start';
+			if (this.dispatch(event.key.toLowerCase(), phase, event))
 				event.preventDefault();
 		}
 
@@ -185,37 +179,15 @@
 			const point = pathless.universe.point(event.clientX, event.clientY);
 			if (!point) return;
 			this.el.setPointerCapture(event.pointerId);
-			this.#active.set(event.pointerId, point);
-			this.dispatch('point', 'start', event);
-		}
-
-		pointermove(event) {
-			if (!this.#active.has(event.pointerId)) return;
-			this.dispatch('point', 'hold', event);
 		}
 
 		pointerup(event) {
-			const origin = this.#active.get(event.pointerId);
-			if (!origin) return;
-			this.#discrete(event, origin);
-			this.#active.delete(event.pointerId);
-			this.dispatch('point', 'end', event);
+			this.#tap(event);
 		}
 
-		pointercancel(event) {
-			if (!this.#active.delete(event.pointerId)) return;
-			this.dispatch('point', 'cancel', event);
-		}
-
-		#discrete(event, origin) {
+		#tap(event) {
 			const point = pathless.universe.point(event.clientX, event.clientY);
 			if (!point) return;
-			const dx = point.x - origin.x;
-			const dy = point.y - origin.y;
-			if (Math.abs(dx) >= 0.25 && Math.abs(dx) > Math.abs(dy)) {
-				pathless.universe.nav(dx < 0 ? 1 : -1);
-				return;
-			}
 			const direction =
 				Math.abs(point.x) > Math.abs(point.y)
 					? point.x < 0
@@ -224,25 +196,38 @@
 					: point.y < 0
 						? 'down'
 						: 'up';
-			this.dispatch('tap', direction, event);
+			this.dispatch(direction, 'start', event);
+		}
+
+		up(binding) {
+			return this.bind({ up: binding, w: binding });
+		}
+
+		down(binding) {
+			return this.bind({ down: binding, s: binding });
+		}
+
+		left(binding) {
+			return this.bind({ left: binding, a: binding });
+		}
+
+		right(binding) {
+			return this.bind({ right: binding, d: binding });
 		}
 
 		bind(bindings) {
-			for (const [name, binding] of Object.entries(bindings))
+			for (let [name, binding] of Object.entries(bindings)) {
+				if (typeof binding === 'function')
+					binding = { start: binding, hold: binding };
 				this.#bindings.set(name, binding);
+			}
 			return this;
 		}
 
 		dispatch(name, phase, value) {
 			const binding = this.#bindings.get(name);
-			if (!binding) return false;
-
-			if (typeof binding === 'function') {
-				if (phase !== 'end') binding(value);
-			} else {
-				binding[phase]?.(value);
-			}
-			return true;
+			binding?.[phase]?.(value);
+			return Boolean(binding);
 		}
 	}
 

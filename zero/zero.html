@@ -127,7 +127,6 @@
 							value += (byte & 0x7f) * 2 ** shift;
 							shift += 7;
 						} while (byte & 0x80);
-
 						return value >>> 0;
 					};
 
@@ -189,23 +188,14 @@
 				}
 
 				async init() {
-					const [root, frames, panels] = await this.source('');
+					const [root, frames] = await this.source('');
 					this.frames = frames.ones.map(({ data }) => data);
-					this.panels = panels.ones.map(({ data }) => data);
 					this.exec(document.getElementById('universe'), root.data);
 				}
 			}
 			document.addEventListener('DOMContentLoaded', async () => {
 				window.pathless = new Pathless();
 				await pathless.init();
-				pathless.input.bind({
-					1: () => pathless.universe.layout(0),
-					2: () => pathless.universe.layout(1),
-					3: () => pathless.universe.layout(2),
-					tab: () => pathless.universe.focus(),
-					q: () => pathless.universe.nav(-1),
-					e: () => pathless.universe.nav(1),
-				});
 				pathless.universe.sync();
 			});
 		</script>

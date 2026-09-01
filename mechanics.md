@@ -1,64 +1,39 @@
-# Sequence
+# Mechanics
 
-Pathless is constructed in two phases:
+Pathless is a library. It is constructed in two phases:
 
 1. Establish the point of observation.
 2. Register and serve the experience observed from it.
 
-## Runtime sequence
-
-```mermaid
-sequenceDiagram
-    participant App as main
-    participant Pathless
-    participant Zero
-    participant Fx
-    participant Browser
-
-    App->>Pathless: NewPathless(args...)
-    Pathless->>Zero: NewZero(args...)
-    Zero->>Zero: Embed and render `pathless.html`
-    Zero->>Zero: Gzip shell once
-    Zero-->>Browser: Start shell server on :1000
-    Pathless->>Fx: NewFx(zero)
-    Fx-->>Pathless: Input, Frames, Panels, Routes
-
-    App->>Fx: Home / Text / Slides / Keyboard
-    Fx->>Fx: Build frames and register payload routes
-
-    App->>Fx: Start()
-    Fx->>Fx: Encode bootstrap payload
-    Fx->>Fx: Encode registered route payloads
-    Fx-->>Browser: Start circuit server on :1001
-
-    Browser->>Zero: GET /
-    Zero-->>Browser: `pathless.html`
-    Browser->>Fx: GET /
-    Fx-->>Browser: [universe, frames, panels]
-    Browser->>Browser: Execute universe and initialize observation
-```
+Templates and applications live outside this module. `pathless` provides the runtime, `frames` provides ready-made frames, and a `main` package composes them.
 
 ## Composition
 
-`Pathless` embeds `*fx.Fx`:
+`Pathless` embeds the `fx.Fx` interface:
 
 ```go
 type Pathless struct {
-	*fx.Fx
+	fx.Fx
 }
-```
 
-`NewPathless` constructs `Zero` first, then gives it to `Fx`:
-
-```go
 func NewPathless(args ...string) *Pathless {
 	z := zero.NewZero(args...)
-	f := fx.NewFx(z)
-	return &Pathless{Fx: f}
+	return &Pathless{Fx: fx.NewFx(z)}
 }
 ```
 
-Because `Fx` is embedded, its exported methods are promoted onto `Pathless`. Calls such as `p.Home(...)`, `p.Slides(...)`, and `p.Start()` are therefore `Fx` methods exposed through the composed `Pathless` value.
+`NewPathless` constructs `Zero` first, then hands it to `Fx`. Because `Fx` is embedded, its methods are promoted onto `Pathless`:
+
+```go
+type Fx interface {
+	Input(string, ...bool) ([]*One, error)
+	Frame(string, ...bool) error
+	Save(string, ...bool) ([]byte, error)
+	Start()
+}
+```
+
+Four methods are the entire public surface. Everything else — templates, markdown rendering, slide decks — is built on top of them by other modules.
 
 ## Zero
 
@@ -75,199 +50,165 @@ During construction, Zero:
 2. Renders `pathless.html` with the circuit URL.
 3. Compresses the rendered shell once.
 4. Registers the shell handler.
-5. Starts the shell server on port `1000`.
+5. Starts the shell server on port `1000` in a goroutine.
 
-The shell payload is closed over by its HTTP handler. Rendering and compression do not occur per request.
+The shell payload is closed over by its HTTP handler. Rendering and compression do not occur per request. Any request that is not exactly `/` is redirected to `/` — the shell has no paths.
 
-In local mode:
+`NewZero` accepts zero or two arguments. Zero arguments is local mode:
 
 ```text
 Shell:   http://localhost:1000
 Circuit: http://localhost:1001
 ```
 
-In hosted mode, `NewPathless` accepts the shell and circuit domains.
+Two arguments are the shell and circuit domains, served as `https://`. Any other argument count panics.
+
+`Zero` exposes `UniverseHTML` and `PathlessURL`. `PathlessURL` is the origin `Fx` allows through CORS — `*` in local mode.
 
 ## Fx
 
-`Fx` owns the experience assembled above Zero:
+`fx` owns the experience assembled above Zero:
 
 ```go
-type Fx struct {
-	*zero.Zero
-	Input  Input
-	Frames Entries
-	Panels Entries
-	Routes map[string]Payload
+type fx struct {
+	z      *zero.Zero
+	frames []*One
+	panels []*One
+	routes map[string][]*One
+	mux    *http.ServeMux
+	client *http.Client
 }
 ```
 
 Its responsibilities are:
 
-- Read local and remote resources.
+- Read local and remote resources into `One` values.
 - Build executable HTML frames and panels.
-- Register additional payload routes.
+- Retain named routes for on-demand payloads.
 - Encode the bootstrap and route payloads.
 - Serve the circuit on port `1001`.
 
-## Registration phase
+The concrete type is unexported. Consumers hold the `Fx` interface.
 
-Content is registered before `Start`:
+## One
 
-```go
-p := pathless.NewPathless()
-
-p.Home(logo, heading)
-p.Text("./README.md")
-p.Slides("./slides")
-p.Keyboard()
-
-p.Start()
-```
-
-Registration order determines frame and panel order.
-
-`Start` creates the bootstrap payload:
+There is one data type. `One` is a node in a tree:
 
 ```go
-Payload{
-	Data(f.UniverseHTML),
-	f.Frames,
-	f.Panels,
+type One struct {
+	Name string
+	Type string
+	Data []byte
+	Ones []*One
 }
 ```
 
-Its client-side meaning is positional:
+A file is a leaf. A directory is a node whose `Ones` are its children. A frame is a leaf whose `Type` is `text/html`. A payload is just `[]*One`.
 
-```text
-0: universe HTML
-1: frames
-2: panels
-```
-
-Every registered route is encoded at startup as well. The resulting compressed bytes are retained in memory and written directly for each request.
-
-The served experience is therefore a startup snapshot. Content should be registered before `Start`.
+Source location and cardinality do not create separate APIs, and nesting does not create a second representation. Consumers decide whether they need one node, a list, or a subtree.
 
 ## Input
 
-All resource inputs share one return shape:
-
 ```go
-type Input interface {
-	String(string) (Entries, error)
-}
+Input(path string, public ...bool) ([]*One, error)
 ```
 
-`String` accepts:
+`Input` accepts:
 
 - An HTTP or HTTPS URL
 - A local file
 - A local directory
 
-Every source becomes `Entries`:
+A URL or file returns one entry. A directory returns its children, recursively.
 
-```go
-type Entries []*Entry
+When `public` is true, the result is also retained in `routes` under a derived name — the URL or file base name, or the directory's own name. Retained routes are encoded and served at `/<name>` by `Start`.
 
-type Entry struct {
-	Name string
-	Type string
-	Data Data
-}
-```
-
-A URL or file returns one entry. A directory returns its direct file entries.
-
-This uniform shape means source location and cardinality do not create separate APIs. Consumers decide whether they require one entry or a collection.
+A URL response is first attempted as an encoded payload via `decode`. If it decodes, those entries are returned directly, so one Pathless instance can consume another's payload. Otherwise the raw bytes become a single entry.
 
 ### Directory processing
 
-Directory input:
+`readDir` reads a directory, then:
 
-1. Reads direct children.
-2. Ignores nested directories.
-3. Reads each file into an `Entry`.
-4. Detects its MIME type.
-5. Removes unambiguous filename extensions.
-6. Applies an optional `sequence` file.
-7. Removes the consumed `sequence` entry.
+1. Reads each file into a `One` via `readFile`.
+2. Recurses into subdirectories, attaching children as `Ones`.
+3. Detects each file's MIME type by extension, falling back to content sniffing.
+4. Strips extensions from names that stay unique once shortened.
+5. Applies an optional `sequence` file.
 
-A `sequence.txt` file can define presentation order by listing normalized entry names line by line. Unlisted entries retain their relative order afterward.
+A `sequence.txt` file defines presentation order by listing normalized entry names line by line. The sequence entry is consumed and removed from the result. Unlisted entries keep their relative order afterward.
+
+Names beginning with a dot keep their extension (`.gitignore`, `.env.local`).
 
 ## Frames and panels
 
-Frames and panels are HTML entries built by `Fx.build`.
+```go
+Frame(source string, panel ...bool) error
+```
 
-The build process:
+`source` is either literal HTML — detected by a leading `<` — or a path or URL resolved through `Input`, which must produce exactly one entry. When `panel` is true the result is appended to `panels`, otherwise to `frames`. Registration order is presentation order.
 
-1. Collects multiple style blocks into one style block.
-2. Collects script blocks into one isolated script block.
+Every frame passes through `build`, which:
+
+1. Merges multiple style blocks into one.
+2. Merges script blocks into one block wrapped in an isolated scope.
 3. Returns a `text/html` entry.
+
+Script bodies that are not already a block are wrapped in braces before merging, so frames do not leak identifiers into each other.
 
 Frames are rendered into observable spaces. Panels are rendered into the panel region.
 
-Built-in templates use the same mechanism as user-authored frames:
+A frame may call `pathless.source(route)` to obtain a public route. This keeps the bootstrap small while allowing frames to load typed resources as needed.
 
-- `Home`
-- `Text`
-- `Slides`
-- `Keyboard`
+## Start
 
-A frame may call `pathless.source(route)` to obtain additional payloads. This keeps the bootstrap small while allowing frames to load typed resources as needed.
+```go
+func (f *fx) Start() {
+	f.handle("/", encode(f.universe()))
+	for key, payload := range f.routes {
+		f.handle("/"+key, encode(payload))
+	}
+	http.ListenAndServe(":1001", f.cors(f.mux))
+}
+```
+
+The bootstrap payload is positional:
+
+```text
+0: universe HTML
+1: frames   (as Ones)
+2: panels   (as Ones)
+```
+
+Every public route is encoded at startup as well. The compressed bytes are retained in memory and written directly for each request, so the served experience is a startup snapshot. Register everything before `Start`.
+
+`Start` blocks, and panics if the circuit port cannot be bound.
+
+## Save
+
+```go
+Save(key string, binary ...bool) ([]byte, error)
+```
+
+`Save` encodes an already-registered route and returns the wire bytes. When `binary` is true it also writes them to a file named for the route. This makes a payload publishable as a static artifact — object storage, a CDN — that another instance can consume through `Input`.
 
 ## Payload protocol
 
-A payload is an ordered collection of encodable values:
-
-```go
-type Value interface {
-	encode(io.Writer)
-}
-
-type Payload []Value
-type Data []byte
-type Entries []*Entry
-```
-
-The current value tags are:
+A payload is `[]*One`, encoded recursively:
 
 ```text
-0: Data
-1: Entries
-```
-
-The binary format is:
-
-```text
-payload-count
-value-tag
-value-data
-value-tag
-value-data
+one-count
+name  type  data  child-count  <children...>
+name  type  data  child-count  <children...>
 ...
 ```
 
-Counts and field lengths use unsigned varints. Small values therefore require only one byte of framing.
+Counts and field lengths are unsigned varints, so small values need only one byte of framing. There are no type tags; every node has the same shape, and a zero child count terminates a leaf.
 
-A `Data` value contains one length-prefixed byte field.
+Payloads are gzip-compressed at best compression when encoded, which happens once per route at registration or in `Save`.
 
-An `Entries` value contains:
+`decode` is the inverse and is defensive: it bounds nesting depth, rejects entry counts larger than the remaining bytes could hold, rejects field lengths that exceed the remainder, and rejects trailing bytes.
 
-```text
-entry-count
-name
-type
-data
-name
-type
-data
-...
-```
-
-Each field is length-prefixed.
-
-Payloads are gzip-compressed once when their HTTP handlers are registered.
+Responses are served as `application/octet-stream` with `Content-Encoding: gzip`. CORS allows `GET` and `OPTIONS` from `Zero.PathlessURL`.
 
 ## Client decoding
 
@@ -277,9 +218,8 @@ The decoder maintains one cursor over the response bytes:
 
 - `uv()` reads an unsigned varint.
 - `field()` reads one length-prefixed byte field.
-- The value tag chooses the appropriate reader.
-- `Data` becomes a `Uint8Array`.
-- `Entries` becomes an array of `{ name, type, data }` objects.
+- Each node reads name, type, data, then recurses over its child count.
+- A node becomes `{ name, type, data, ones }`, with `data` as a `Uint8Array`.
 
 The corrected field reader decodes the length before advancing the cursor:
 
@@ -339,6 +279,46 @@ A pointer, touch, or key event is normalized before a frame handles it. Screen d
 
 Pathless therefore does not reproduce an application across platforms. It establishes one point of origin that any HTTP-capable screen can observe.
 
+## Frames library
+
+`github.com/timefactoryio/frames` is a separate module built entirely on the four `Fx` methods:
+
+```go
+type Frames struct {
+	*pathless.Pathless
+	*fx.Fx
+}
+
+func NewFrames(p *pathless.Pathless) *Frames
+```
+
+Its `Fx` holds the `*pathless.Pathless` it was given plus the embedded frame and panel templates, and exposes template constructors:
+
+- `Home(logo, heading)` renders the home template. An SVG logo is inlined from its bytes, a local raster logo is registered as a public route and referenced by `data-src`, and a remote logo is referenced by `src`.
+- `Text(path)` reads one entry, converts markdown to HTML, and renders it.
+- `Slides(dir)` registers the directory as a public route and renders a template that fetches it by name.
+- `Keyboard()` registers the embedded keyboard template as a panel.
+
+Each constructor ends in `Frame(html)`. They are ordinary callers, not privileged ones.
+
+## Application
+
+An application is a `main` package that composes the two:
+
+```go
+func main() {
+	p := pathless.NewPathless()
+	f := frames.NewFrames(p)
+	f.Home("https://zero.s3.timefactory.io/timefactory.svg", "the point of origin")
+	f.Text("./theplan.md")
+	f.Slides("https://zero.s3.timefactory.io/slides")
+	f.Keyboard()
+	f.Start()
+}
+```
+
+`frames/one` is that demo. It demonstrates the libraries; it is not part of them.
+
 ## Deployment
 
 Pathless requires one executable runtime.
@@ -361,14 +341,14 @@ The deployment contract is:
 The architecture keeps several concerns deliberately separate:
 
 - `Zero` establishes observation.
-- `Input` converts resources into entries.
-- `Fx` composes the experience.
-- `Payload` defines transport.
+- `Input` converts resources into `One` values.
+- `Fx` composes the experience and serves the circuit.
+- `One` is both the domain type and the wire type.
 - Frames interpret resources.
 - Universe normalizes observation and interaction.
 
-Input returns domain data, not wire payloads. Routes introduce payload composition only at the transport boundary.
+The library defines no templates and no content. Templates are a separate module, and applications are a third. Each layer depends only on the interface below it.
 
-Frames may use complete entry metadata when identity and MIME type matter. This supports richer applications, such as associating slide images with descriptions, without forcing every bootstrap value into the same representation.
+One recursive type covers a file, a directory, a frame, and a payload, so no conversion layer exists between what `Input` returns and what the circuit sends. Frames receive complete node metadata when identity and MIME type matter — associating slide images with descriptions, for example — without a second representation.
 
 The result is a small origin from which applications can be assembled without inheriting a device vendor’s application model.
