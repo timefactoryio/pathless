@@ -1,0 +1,109 @@
+<script>
+	class Input {
+		#bindings = new Map();
+
+		constructor(universe) {
+			this.universe = universe;
+			this.tap = this.#directions('tap', {
+				up: ['arrowup', 'w'],
+				down: ['arrowdown', 's'],
+				left: ['arrowleft', 'a'],
+				right: ['arrowright', 'd'],
+			});
+			this.swipe = this.#directions('swipe');
+			this.pointer = new Pointer(this);
+			this.keyboard = new Keyboard(this);
+		}
+
+		vertical(callback) {
+			this.#bindings.set('vertical', callback);
+			return this;
+		}
+
+		horizontal(callback) {
+			this.#bindings.set('horizontal', callback);
+			return this;
+		}
+
+		dispatch(name, event) {
+			const callback = this.#bindings.get(name);
+			callback?.(event);
+			return Boolean(callback);
+		}
+
+		#directions(prefix, aliases = {}) {
+			const directions = {};
+			for (const direction of ['up', 'down', 'left', 'right'])
+				directions[direction] = (callback) => {
+					for (const name of [
+						`${prefix}.${direction}`,
+						...(aliases[direction] ?? []),
+					])
+						this.#bindings.set(name, callback);
+					return directions;
+				};
+			return directions;
+		}
+	}
+
+	class Pointer {
+		#active = new Map();
+
+		constructor(input) {
+			this.el = input.universe.el;
+
+			for (const type of [
+				'pointerdown',
+				'pointermove',
+				'pointerup',
+				'pointercancel',
+			])
+				this.el.addEventListener(type, (event) => this[type](event));
+		}
+
+		get active() {
+			return [...this.#active.values()];
+		}
+
+		pointerdown(event) {
+			if (this.#active.size === 2 || this.#active.has(event.pointerId))
+				return;
+			this.#active.set(event.pointerId, event);
+			this.el.setPointerCapture(event.pointerId);
+		}
+
+		pointerup(event) {
+			this.#finish(event);
+		}
+
+		pointercancel(event) {
+			this.#finish(event);
+		}
+
+		pointermove(event) {
+			if (!this.#active.has(event.pointerId)) return;
+			this.#active.set(event.pointerId, event);
+		}
+
+		#finish(event) {
+			if (!this.#active.has(event.pointerId)) return;
+			if (this.el.hasPointerCapture(event.pointerId))
+				this.el.releasePointerCapture(event.pointerId);
+			this.#active.delete(event.pointerId);
+		}
+	}
+
+	class Keyboard {
+		constructor(input) {
+			this.input = input;
+
+			for (const type of ['keydown', 'keyup'])
+				window.addEventListener(type, (event) => this.#dispatch(event));
+		}
+
+		#dispatch(event) {
+			if (this.input.dispatch(event.key.toLowerCase(), event))
+				event.preventDefault();
+		}
+	}
+</script>

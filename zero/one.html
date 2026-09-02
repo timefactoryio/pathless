@@ -12,7 +12,15 @@
 				el: document.getElementById(id),
 				frame: 0,
 				state: [],
+				bindings: [],
 			}));
+			this.tap = this.#directions('tap', {
+				up: ['arrowup', 'w'],
+				down: ['arrowdown', 's'],
+				left: ['arrowleft', 'a'],
+				right: ['arrowright', 'd'],
+			});
+			this.swipe = this.#directions('swipe');
 
 			this.layouts = [null, this.spaces.slice(0, 2), this.spaces.slice()];
 			this.variants = [1, 2, 4];
@@ -82,6 +90,7 @@
 			try {
 				for (const current of space ? [space] : visible) {
 					this.#rendering = current;
+					current.bindings[current.frame] = new Map();
 					pathless.exec(current.el, pathless.frames[current.frame]);
 				}
 			} finally {
@@ -119,118 +128,131 @@
 			return this.active;
 		}
 
-		point(clientX, clientY) {
-			const target = document.elementFromPoint(clientX, clientY);
-			const space = this.spaces.find(({ el }) => el.contains(target));
+		vertical(callback) {
+			this.#bind('vertical', callback);
+			return this;
+		}
+
+		horizontal(callback) {
+			this.#bind('horizontal', callback);
+			return this;
+		}
+
+		dispatch(name, value) {
+			const callback = this.space.bindings[this.space.frame]?.get(name);
+			callback?.(value);
+			return Boolean(callback);
+		}
+
+		pointer(type, pointers, event) {}
+
+		point(event, space) {
+			if (!space) {
+				const target = document.elementFromPoint(
+					event.clientX,
+					event.clientY,
+				);
+				space = this.spaces.find(({ el }) => el.contains(target));
+			}
 			if (!space) return;
-			this.space = space;
 			const { left, top, width, height } = this.rect;
-			const x = (2 * (clientX - left)) / (width || 1) - 1;
-			const y = 1 - (2 * (clientY - top)) / (height || 1);
+			const x = (2 * (event.clientX - left)) / (width || 1) - 1;
+			const y = 1 - (2 * (event.clientY - top)) / (height || 1);
 			return { x, y, space };
+		}
+
+		#bind(name, callback) {
+			const bindings = (this.space.bindings[this.space.frame] ??=
+				new Map());
+			bindings.set(name, callback);
+		}
+
+		#directions(prefix, aliases = {}) {
+			const directions = {};
+			for (const direction of ['up', 'down', 'left', 'right'])
+				directions[direction] = (callback) => {
+					for (const name of [
+						`${prefix}.${direction}`,
+						...(aliases[direction] ?? []),
+					])
+						this.#bind(name, callback);
+					return directions;
+				};
+			return directions;
 		}
 	}
 
 	class Input {
-		#bindings = new Map();
+		#active = new Map();
+		#space = null;
 
-		constructor() {
-			this.el = pathless.universe.el;
+		constructor(universe) {
+			this.universe = universe;
 
-			for (const type of ['pointerdown', 'pointerup'])
-				this.el.addEventListener(type, this);
-			for (const type of ['keydown', 'keyup'])
-				window.addEventListener(type, this);
-
-			let lastTouch = 0;
-			this.el.addEventListener(
-				'touchend',
-				(event) => {
-					const now = performance.now();
-					if (now - lastTouch < 300) event.preventDefault();
-					lastTouch = now;
-				},
-				{ passive: false },
-			);
-			for (const type of ['gesturestart', 'gesturechange'])
-				this.el.addEventListener(
-					type,
-					(event) => event.preventDefault(),
-					{ passive: false },
+			for (const type of [
+				'pointerdown',
+				'pointermove',
+				'pointerup',
+				'pointercancel',
+			])
+				universe.el.addEventListener(type, (event) =>
+					this[type](event),
 				);
+			for (const type of ['keydown', 'keyup'])
+				window.addEventListener(type, (event) => {
+					if (universe.dispatch(event.key.toLowerCase(), event))
+						event.preventDefault();
+				});
 		}
 
-		handleEvent(event) {
-			this[event.type]?.(event);
-		}
-
-		keydown(event) {
-			const phase = event.repeat ? 'hold' : 'start';
-			if (this.dispatch(event.key.toLowerCase(), phase, event))
-				event.preventDefault();
-		}
-
-		keyup(event) {
-			if (this.dispatch(event.key.toLowerCase(), 'end', event))
-				event.preventDefault();
+		get active() {
+			return [...this.#active.values()];
 		}
 
 		pointerdown(event) {
-			const point = pathless.universe.point(event.clientX, event.clientY);
-			if (!point) return;
-			this.el.setPointerCapture(event.pointerId);
+			if (this.#active.size === 2 || this.#active.has(event.pointerId))
+				return;
+
+			const point = this.universe.point(event);
+			if (!point || (this.#space && point.space !== this.#space)) return;
+			if (!this.#space) {
+				this.#space = point.space;
+				this.universe.space = point.space;
+			}
+
+			this.#active.set(event.pointerId, { start: point, point });
+			this.universe.el.setPointerCapture(event.pointerId);
+			this.universe.pointer('down', this.active, event);
 		}
 
 		pointerup(event) {
-			this.#tap(event);
+			this.#finish('up', event);
 		}
 
-		#tap(event) {
-			const point = pathless.universe.point(event.clientX, event.clientY);
-			if (!point) return;
-			const direction =
-				Math.abs(point.x) > Math.abs(point.y)
-					? point.x < 0
-						? 'left'
-						: 'right'
-					: point.y < 0
-						? 'down'
-						: 'up';
-			this.dispatch(direction, 'start', event);
+		pointercancel(event) {
+			this.#finish('cancel', event);
 		}
 
-		up(binding) {
-			return this.bind({ up: binding, w: binding });
+		pointermove(event) {
+			const active = this.#active.get(event.pointerId);
+			if (!active) return;
+			active.point = this.universe.point(event, this.#space);
+			this.universe.pointer('move', this.active, event);
 		}
 
-		down(binding) {
-			return this.bind({ down: binding, s: binding });
-		}
+		#finish(type, event) {
+			const active = this.#active.get(event.pointerId);
+			if (!active) return;
+			active.point = this.universe.point(event, this.#space);
+			this.universe.pointer(type, this.active, event);
 
-		left(binding) {
-			return this.bind({ left: binding, a: binding });
-		}
-
-		right(binding) {
-			return this.bind({ right: binding, d: binding });
-		}
-
-		bind(bindings) {
-			for (let [name, binding] of Object.entries(bindings)) {
-				if (typeof binding === 'function')
-					binding = { start: binding, hold: binding };
-				this.#bindings.set(name, binding);
-			}
-			return this;
-		}
-
-		dispatch(name, phase, value) {
-			const binding = this.#bindings.get(name);
-			binding?.[phase]?.(value);
-			return Boolean(binding);
+			if (this.universe.el.hasPointerCapture(event.pointerId))
+				this.universe.el.releasePointerCapture(event.pointerId);
+			this.#active.delete(event.pointerId);
+			if (!this.#active.size) this.#space = null;
 		}
 	}
 
 	pathless.universe = new Universe();
-	pathless.input = new Input();
+	pathless.input = new Input(pathless.universe);
 </script>
