@@ -106,11 +106,13 @@
 			}
 		</style>
 		<script>
-			window.circuit = '{{.CIRCUIT}}'.replace(
+			const circuit = '{{.CIRCUIT}}'.replace(
 				'localhost',
 				location.hostname,
 			);
 			class Pathless {
+				#cache = new Map();
+
 				static #td = new TextDecoder();
 				static #range = document.createRange();
 
@@ -148,33 +150,29 @@
 					return ones();
 				}
 
-				constructor() {
-					this.cache = new Map();
-				}
-
 				source(path) {
-					let request = this.cache.get(path);
-					if (request) return request;
-					request = fetch(`${window.circuit}/${path}`)
-						.then(async (response) => {
-							const buffer = await response.arrayBuffer();
-							return Pathless.decode(new Uint8Array(buffer));
-						})
+					const cached = this.#cache.get(path);
+					if (cached) return cached;
+					const request = fetch(`${circuit}/${path}`)
+						.then((response) => response.arrayBuffer())
+						.then((buffer) =>
+							Pathless.decode(new Uint8Array(buffer)),
+						)
 						.catch((error) => {
-							this.cache.delete(path);
+							this.#cache.delete(path);
 							throw error;
 						});
-					this.cache.set(path, request);
+					this.#cache.set(path, request);
 					return request;
 				}
 
 				url(entry) {
-					let value = this.cache.get(entry);
+					let value = this.#cache.get(entry);
 					if (!value) {
 						value = URL.createObjectURL(
 							new Blob([entry.data], { type: entry.type }),
 						);
-						this.cache.set(entry, value);
+						this.#cache.set(entry, value);
 					}
 					return value;
 				}
@@ -193,12 +191,12 @@
 					this.exec(document.getElementById('universe'), root.data);
 					this.universe = new Universe();
 					this.input = this.universe.input;
+					this.universe.sync();
 				}
 			}
 			document.addEventListener('DOMContentLoaded', async () => {
-				window.pathless = new Pathless();
+				const pathless = (window.pathless = new Pathless());
 				await pathless.init();
-				pathless.universe.sync();
 			});
 		</script>
 	</head>
