@@ -191,6 +191,8 @@
 					const [root, frames] = await this.source('');
 					this.frames = frames.ones.map(({ data }) => data);
 					this.exec(document.getElementById('universe'), root.data);
+					this.universe = new Universe();
+					this.input = this.universe.input;
 				}
 			}
 			document.addEventListener('DOMContentLoaded', async () => {
