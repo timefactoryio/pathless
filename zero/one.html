@@ -137,16 +137,15 @@
 
 	class Input {
 		#bindings = new WeakMap();
-		#pointers;
+		#controller;
+		#observer;
+		#pointers = new Map();
+		#keys = new Set();
+		#lastTouch = 0;
 
 		constructor(universe) {
 			this.universe = universe;
 			this.delta = 0.2;
-			this.#pointers = Array.from({ length: 2 }, () => ({
-				id: null,
-				start: { x: 0, y: 0, space: null },
-				point: { x: 0, y: 0, space: null },
-			}));
 			this.tap = {
 				x: this.#input('tap', 'x', { a: 'minus', d: 'plus' }),
 				y: this.#input('tap', 'y', { s: 'minus', w: 'plus' }),
@@ -177,36 +176,24 @@
 					universe.layout(-1, false),
 				),
 			};
-
-			const measure = () =>
-				(this.rect = universe.el.getBoundingClientRect());
-			measure();
-			new ResizeObserver(measure).observe(universe.el);
-			let lastTouch = 0;
-			universe.el.addEventListener(
-				'touchend',
-				(event) => {
+			this.events = {
+				pointerdown: (event, space) =>
+					this.#pointer('down', event, space),
+				pointermove: (event, space) =>
+					this.#pointer('move', event, space),
+				pointerup: (event, space) => this.#pointer('up', event, space),
+				pointercancel: (event, space) =>
+					this.#pointer('cancel', event, space),
+				keydown: (event, space) => this.#key('down', event, space),
+				keyup: (event, space) => this.#key('up', event, space),
+				blur: () => this.#keys.clear(),
+				touchend: (event) => {
 					const now = Date.now();
-					if (now - lastTouch < 300) event.preventDefault();
-					lastTouch = now;
+					if (now - this.#lastTouch < 300) event.preventDefault();
+					this.#lastTouch = now;
 				},
-				{ passive: false },
-			);
-
-			universe.el.addEventListener('pointerdown', (event) =>
-				this.#pointerdown(event),
-			);
-			universe.el.addEventListener('pointermove', (event) =>
-				this.#pointermove(event),
-			);
-			universe.el.addEventListener('pointerup', (event) =>
-				this.#release(event, true),
-			);
-			universe.el.addEventListener('pointercancel', (event) =>
-				this.#release(event, false),
-			);
-			window.addEventListener('keydown', (event) => this.#keydown(event));
-			window.addEventListener('keyup', (event) => this.#keyup(event));
+			};
+			this.on();
 		}
 
 		get #inputs() {
@@ -226,7 +213,7 @@
 					this.#bindings.set(space, bindings);
 					return this;
 				},
-				{ active: false, type, axis, keys, minus, plus },
+				{ type, axis, keys, minus, plus },
 			);
 		}
 
@@ -234,107 +221,103 @@
 			this.#bindings.delete(space);
 		}
 
-		#keydown(event) {
+		on() {
+			this.off();
+			this.#controller = new AbortController();
+			const { signal } = this.#controller;
+			const measure = () =>
+				(this.rect = this.universe.el.getBoundingClientRect());
+			measure();
+			this.#observer = new ResizeObserver(measure);
+			this.#observer.observe(this.universe.el);
+			for (const space of this.universe.spaces) {
+				if (!space.el.hasAttribute('tabindex')) space.el.tabIndex = -1;
+				for (const [type, handler] of Object.entries(this.events))
+					space.el.addEventListener(
+						type,
+						(event) => handler(event, space),
+						{
+							signal,
+							passive: type === 'touchend' ? false : undefined,
+						},
+					);
+			}
+			return this;
+		}
+
+		off() {
+			this.#controller?.abort();
+			this.#observer?.disconnect();
+			this.#controller = this.#observer = undefined;
+			this.#pointers.clear();
+			this.#keys.clear();
+			return this;
+		}
+
+		#key(phase, event, space) {
 			const key = event.key.toLowerCase();
-			for (const input of this.#inputs) {
-				const direction = input.keys[key];
-				if (!direction) continue;
-				if (input.active) return;
-				input.active = true;
-				const space = this.universe.space;
-				const callback =
-					input[direction] ??
-					this.#bindings.get(space)?.[input.type]?.[input.axis]?.[
-						direction
-					];
-				callback?.(space);
-				return;
+			if (phase === 'up') return void this.#keys.delete(key);
+			if (this.#keys.has(key)) return;
+			const input = this.#inputs.find(({ keys }) => keys[key]);
+			if (input) {
+				this.#keys.add(key);
+				this.#emit(input.type, input.axis, input.keys[key], space);
 			}
 		}
 
-		#keyup(event) {
-			const key = event.key.toLowerCase();
-			for (const input of this.#inputs)
-				if (input.keys[key]) input.active = false;
-		}
-
-		#pointerdown(event) {
-			if (
-				this.#pointers.some((pointer) => pointer.id === event.pointerId)
-			)
+		#pointer(phase, event, space) {
+			if (phase === 'down') {
+				if (
+					this.#pointers.has(event.pointerId) ||
+					this.#pointers.size === 2
+				)
+					return;
+				const point = this.#point(event);
+				this.#pointers.set(event.pointerId, {
+					start: point,
+					point,
+					space,
+				});
+				this.universe.space = space;
+				space.el.focus({ preventScroll: true });
+				space.el.setPointerCapture(event.pointerId);
 				return;
-
-			const pointer = this.#pointers.find(({ id }) => id === null);
-			if (!pointer) return;
-			const point = this.#point(event, undefined, pointer.start);
-			if (!point) return;
-			this.universe.space = point.space;
-
-			pointer.id = event.pointerId;
-			Object.assign(pointer.point, point);
-			this.universe.el.setPointerCapture(event.pointerId);
-		}
-
-		#pointermove(event) {
-			const pointers = this.#pointers.filter(({ id }) => id !== null);
-			if (pointers.length !== 2) return;
-			const pointer = this.#pointers.find(
-				({ id }) => id === event.pointerId,
-			);
-			if (!pointer) return;
-			this.#point(event, pointer.start.space, pointer.point);
-			this.#scale(pointers);
-		}
-
-		#release(event, classify) {
-			const pointer = this.#pointers.find(
-				({ id }) => id === event.pointerId,
-			);
-			if (!pointer) return;
-
-			const pointers = this.#pointers.filter(({ id }) => id !== null);
-			if (classify && pointers.length === 1) {
-				const end = this.#point(
-					event,
-					pointer.start.space,
-					pointer.point,
-				);
-				const movement = this.#movement(
-					end.x - pointer.start.x,
-					end.y - pointer.start.y,
-				);
-				if (movement.distance < this.delta) this.#tap(end);
-				else this.#swipe(pointer.start.space, movement);
 			}
-
-			for (const current of pointers.length > 1 ? pointers : [pointer])
-				this.#reset(current);
+			const pointer = this.#pointers.get(event.pointerId);
+			if (!pointer) return;
+			for (const point of this.#points(event)) {
+				pointer.point = point;
+				if (phase === 'move' && this.#pointers.size === 2)
+					this.#scale();
+			}
+			if (phase === 'up' && this.#pointers.size === 1)
+				this.#gesture(pointer);
+			if (phase === 'up' || phase === 'cancel') this.#pointers.clear();
 		}
 
-		#reset(pointer) {
-			pointer.id = null;
-			Object.assign(pointer.start, { x: 0, y: 0, space: null });
-			Object.assign(pointer.point, { x: 0, y: 0, space: null });
+		#gesture(pointer) {
+			const movement = this.#movement(
+				pointer.point.x - pointer.start.x,
+				pointer.point.y - pointer.start.y,
+			);
+			if (movement.distance < this.delta) {
+				const { axis, direction } = this.#movement(
+					pointer.point.x,
+					pointer.point.y,
+				);
+				this.#emit('tap', axis, direction, pointer.space);
+			} else {
+				this.#emit(
+					'swipe',
+					movement.axis,
+					movement.direction,
+					pointer.space,
+				);
+			}
 		}
 
-		#tap(point) {
-			const { axis, direction } = this.#movement(point.x, point.y);
-			const input = this.tap[axis];
-			const callback =
-				input[direction] ??
-				this.#bindings.get(point.space)?.tap?.[axis]?.[direction];
-			callback?.(point.space);
-		}
-
-		#swipe(space, { axis, direction }) {
-			const input = this.swipe[axis];
-			const callback =
-				input[direction] ??
-				this.#bindings.get(space)?.swipe?.[axis]?.[direction];
-			callback?.(space);
-		}
-
-		#scale([first, second]) {
+		#scale() {
+			const [first, second] = this.#pointers.values();
 			const scale = this.#movement(
 				Math.abs(second.point.x - first.point.x) -
 					Math.abs(second.start.x - first.start.x),
@@ -342,16 +325,17 @@
 					Math.abs(second.start.y - first.start.y),
 			);
 			if (scale.distance < this.delta) return;
-			const space = first.start.space;
-			const input = this.scale[scale.axis];
-			const callback =
-				input[scale.direction] ??
-				this.#bindings.get(space)?.scale?.[scale.axis]?.[
-					scale.direction
-				];
-			callback?.(space);
-			Object.assign(first.start, first.point);
-			Object.assign(second.start, second.point);
+			this.#emit('scale', scale.axis, scale.direction, first.space);
+			first.start = first.point;
+			second.start = second.point;
+		}
+
+		#emit(type, axis, direction, space) {
+			const input = this[type][axis];
+			(
+				input[direction] ??
+				this.#bindings.get(space)?.[type]?.[axis]?.[direction]
+			)?.(space);
 		}
 
 		#movement(x, y) {
@@ -363,21 +347,19 @@
 			};
 		}
 
-		#point(event, space, point = {}) {
-			if (!space) {
-				const target = document.elementFromPoint(
-					event.clientX,
-					event.clientY,
-				);
-				space = this.universe.spaces.find(({ el }) =>
-					el.contains(target),
-				);
-			}
-			if (!space) return;
+		#points(event) {
+			const events = event.getCoalescedEvents?.() ?? [];
+			return (events.length ? events : [event]).map((current) =>
+				this.#point(current),
+			);
+		}
+
+		#point(event) {
 			const { left, top, width, height } = this.rect;
-			const x = (2 * (event.clientX - left)) / (width || 1) - 1;
-			const y = 1 - (2 * (event.clientY - top)) / (height || 1);
-			return Object.assign(point, { x, y, space });
+			return {
+				x: (2 * (event.clientX - left)) / (width || 1) - 1,
+				y: 1 - (2 * (event.clientY - top)) / (height || 1),
+			};
 		}
 	}
 </script>
