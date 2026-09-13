@@ -1,22 +1,23 @@
 <script>
 	class Input {
-		#bindings = new WeakMap();
-
 		constructor(universe) {
 			this.universe = universe;
-			this.keyboard = new Keyboard(universe, (input) =>
-				this.handle(input),
-			);
-			this.pointer = new Pointer(universe, (input) => this.handle(input));
+			const emit = this.handle.bind(this);
+			new Keyboard(universe, emit);
+			new Pointer(universe, emit);
 		}
 
-		handle(input) {}
+		handle({ action, value, space }) {
+			if (!action) return;
+			if (action === 'layout') return this.universe.layout(value);
+			if (action === 'focus') return this.universe.focus();
+			if (action === 'backward') this.universe.navigate(-1);
+			if (action === 'forward') this.universe.navigate(1);
+			space.bindings[action]?.();
+		}
 
 		#bind(bindings) {
-			const space = this.universe.space;
-			const current = this.#bindings.get(space) ?? {};
-			Object.assign(current, bindings);
-			this.#bindings.set(space, current);
+			Object.assign(this.universe.space.bindings, bindings);
 			return this;
 		}
 
@@ -28,29 +29,34 @@
 			return this.#bind({ up, down });
 		}
 
-		backward(fn) {
-			return this.#bind({ backward: fn });
-		}
-
-		forward(fn) {
-			return this.#bind({ forward: fn });
+		z(backward, forward) {
+			return this.#bind({ backward, forward });
 		}
 
 		clear(space = this.universe.space) {
-			this.#bindings.delete(space);
+			space.bindings = {};
 		}
 	}
 
 	class Keyboard {
 		constructor(universe, emit) {
-			for (const type of ['keydown', 'keyup'])
-				window.addEventListener(type, (event) =>
-					emit({
-						key: event.key.toLowerCase(),
-						down: type === 'keydown',
-						space: universe.space,
-					}),
-				);
+			const actions = {
+				1: ['layout', 0],
+				2: ['layout', 1],
+				3: ['layout', 2],
+				tab: ['focus'],
+				a: ['left'],
+				d: ['right'],
+				w: ['up'],
+				s: ['down'],
+				q: ['backward'],
+				e: ['forward'],
+			};
+			window.addEventListener('keydown', (event) => {
+				const [action, value] = actions[event.key.toLowerCase()] ?? [];
+				if (action === 'focus') event.preventDefault();
+				emit({ action, value, space: universe.space });
+			});
 		}
 	}
 
@@ -65,8 +71,13 @@
 				const type = event.type.slice(7);
 				const point =
 					type === 'cancel' ? undefined : universe.coordinate(event);
-				if (type === 'down') this.#start(event, point);
-				else if (type === 'move') this.#move(event, point);
+				if (type === 'down') {
+					const el = event.target.closest?.('.space');
+					const space = universe.spaces.find(
+						(current) => current.el === el,
+					);
+					this.#start(event, point, space);
+				} else if (type === 'move') this.#move(event, point);
 				else this.#end(event, point);
 			};
 			for (const type of [
@@ -95,11 +106,15 @@
 			return y < 0 ? 'down' : 'up';
 		}
 
-		#start(event, point) {
-			if (this.#active.has(event.pointerId) || this.#active.size === 2)
+		#start(event, point, space) {
+			if (
+				!space ||
+				this.#active.has(event.pointerId) ||
+				this.#active.size === 2
+			)
 				return;
 			this.#active.set(event.pointerId, {
-				space: event.target.closest?.('.space'),
+				space,
 				start: point,
 				current: point,
 			});
@@ -120,7 +135,7 @@
 			const steps = Math.trunc(change[axis] / this.threshold);
 			const space = this.#active.values().next().value.space;
 			for (let count = Math.abs(steps); count; count--)
-				this.emit({ event: `scale.${direction}`, space });
+				this.emit({ action: 'scale', value: direction, space });
 			this.#baseline[axis] += steps * this.threshold;
 		}
 
@@ -141,10 +156,10 @@
 				const direction = this.#direction(
 					tap ? pointer.current : movement,
 				);
-				this.emit({
-					event: `${tap ? 'tap' : 'swipe'}.${direction}`,
-					space: pointer.space,
-				});
+				const action = tap
+					? direction
+					: { left: 'backward', right: 'forward' }[direction];
+				this.emit({ action, space: pointer.space });
 			}
 			this.#active.delete(event.pointerId);
 		}

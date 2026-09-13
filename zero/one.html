@@ -15,7 +15,7 @@
 			).observe(this.el);
 			this.spaces = Array.from(
 				this.el.querySelectorAll(':scope > .space'),
-				(el) => ({ el, frame: 0, states: [] }),
+				(el) => ({ el, frame: 0, states: [], bindings: {} }),
 			);
 			this.layouts = [
 				{ variants: [0] },
