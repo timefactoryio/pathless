@@ -37,6 +37,92 @@
 				border-radius: 5px;
 				font-family: sans-serif;
 			}
+		</style>
+		<script>
+			const circuit = '{{.CIRCUIT}}'.replace(
+				'localhost',
+				location.hostname,
+			);
+			class Pathless {
+				#cache = new Map();
+				static #decoder = new TextDecoder();
+				static #range = new Range();
+
+				static decode(bytes) {
+					let offset = 0;
+					const uvarint = () => {
+						let value = 0;
+						for (let shift = 0; ; shift += 7) {
+							const byte = bytes[offset++];
+							value += (byte & 0x7f) * 2 ** shift;
+							if (!(byte & 0x80)) return value >>> 0;
+						}
+					};
+					const field = () => {
+						const length = uvarint();
+						return bytes.subarray(offset, (offset += length));
+					};
+					const text = () => Pathless.#decoder.decode(field());
+					const ones = () =>
+						Array.from({ length: uvarint() }, () => ({
+							name: text(),
+							type: text(),
+							data: field(),
+							ones: ones(),
+						}));
+					return ones();
+				}
+
+				source(path, blobs = false) {
+					let request = this.#cache.get(path);
+					if (!request) {
+						request = fetch(`${circuit}/${path}`)
+							.then((response) => response.bytes())
+							.then(Pathless.decode)
+							.catch((error) => {
+								this.#cache.delete(path);
+								throw error;
+							});
+						this.#cache.set(path, request);
+					}
+					if (!blobs) return request;
+					return request.then((ones) =>
+						ones.map((one) => {
+							let url = this.#cache.get(one);
+							if (!url) {
+								url = URL.createObjectURL(
+									new Blob([one.data], { type: one.type }),
+								);
+								this.#cache.set(one, url);
+							}
+							return url;
+						}),
+					);
+				}
+
+				exec(el, data) {
+					el.replaceChildren(
+						Pathless.#range.createContextualFragment(
+							Pathless.#decoder.decode(data),
+						),
+					);
+				}
+
+				async init() {
+					const [zero, frames] = await this.source('');
+					this.frames = frames.ones.map(({ data }) => data);
+					if (!this.frames.length) return;
+					this.exec(document.getElementById('universe'), zero.data);
+					this.universe = new Universe();
+				}
+			}
+			document.addEventListener('DOMContentLoaded', () =>
+				(window.pathless = new Pathless()).init(),
+			);
+		</script>
+	</head>
+	<body>
+		<style>
 			#universe {
 				position: absolute;
 				inset: 0;
@@ -109,88 +195,6 @@
 				grid-template-areas: 'one two' 'zero zero';
 			}
 		</style>
-		<script>
-			const circuit = '{{.CIRCUIT}}'.replace(
-				'localhost',
-				location.hostname,
-			);
-			class Pathless {
-				#cache = new Map();
-				static #decoder = new TextDecoder();
-				static #range = new Range();
-
-				static decode(bytes) {
-					let offset = 0;
-					const uvarint = () => {
-						let value = 0;
-						for (let shift = 0; ; shift += 7) {
-							const byte = bytes[offset++];
-							value += (byte & 0x7f) * 2 ** shift;
-							if (!(byte & 0x80)) return value >>> 0;
-						}
-					};
-					const field = () => {
-						const length = uvarint();
-						return bytes.subarray(offset, (offset += length));
-					};
-					const text = () => Pathless.#decoder.decode(field());
-					const ones = () =>
-						Array.from({ length: uvarint() }, () => ({
-							name: text(),
-							type: text(),
-							data: field(),
-							ones: ones(),
-						}));
-					return ones();
-				}
-
-				source(path) {
-					const cached = this.#cache.get(path);
-					if (cached) return cached;
-					const request = fetch(`${circuit}/${path}`)
-						.then((response) => response.bytes())
-						.then(Pathless.decode)
-						.catch((error) => {
-							this.#cache.delete(path);
-							throw error;
-						});
-					this.#cache.set(path, request);
-					return request;
-				}
-
-				url(entry) {
-					const cached = this.#cache.get(entry);
-					if (cached) return cached;
-					const url = URL.createObjectURL(
-						new Blob([entry.data], { type: entry.type }),
-					);
-					this.#cache.set(entry, url);
-					return url;
-				}
-
-				exec(el, data) {
-					el.replaceChildren(
-						Pathless.#range.createContextualFragment(
-							Pathless.#decoder.decode(data),
-						),
-					);
-				}
-
-				async init() {
-					const [zero, frames] = await this.source('');
-					this.frames = frames.ones.map(({ data }) => data);
-					if (!this.frames.length) return;
-					this.exec(document.getElementById('universe'), zero.data);
-					this.universe = new Universe();
-					this.universe.sync();
-				}
-			}
-			document.addEventListener('DOMContentLoaded', () =>
-				(window.pathless = new Pathless()).init(),
-			);
-		</script>
-	</head>
-	<body>
 		<div
 			id="universe"
 			data-layout="0"

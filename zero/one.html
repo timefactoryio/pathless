@@ -15,13 +15,15 @@
 			).observe(this.el);
 			this.spaces = Array.from(
 				this.el.querySelectorAll(':scope > .space'),
-				(el) => ({ el, frame: 0, states: [], bindings: {} }),
+				(el) => ({ el, frame: 0, states: [] }),
 			);
 			this.layouts = [
 				{ variants: [0] },
 				{ variants: [0, 1] },
 				{ variants: [0, 1, 2, 3] },
 			];
+			this.input = new Input(this);
+			this.sync();
 		}
 
 		get #state() {
@@ -37,7 +39,6 @@
 		get visible() {
 			return this.spaces.filter(({ el }) => el.offsetParent !== null);
 		}
-
 		set view([layout, variant]) {
 			this.el.dataset.layout = layout;
 			this.el.dataset.variant = variant;
@@ -65,6 +66,7 @@
 			try {
 				for (const current of space ? [space] : this.visible) {
 					this.#rendering = current;
+					this.input.clear();
 					pathless.exec(current.el, pathless.frames[current.frame]);
 				}
 			} finally {
@@ -119,6 +121,175 @@
 				];
 			this.focused = next;
 			return next;
+		}
+	}
+	class Input {
+		#bindings = new WeakMap();
+
+		constructor(universe) {
+			this.universe = universe;
+			new Keyboard(universe, {
+				w: () => this.up(),
+				a: () => this.left(),
+				s: () => this.down(),
+				d: () => this.right(),
+			});
+			new Pointer(universe, {
+				tap: (point) => this.tap(point),
+				swipe: (movement) => this.swipe(movement),
+				scale: (axis, direction) =>
+					universe.layout({ axis, direction }),
+			});
+		}
+
+		#trigger(action) {
+			this.#bindings.get(this.universe.space)?.[action]?.();
+		}
+
+		bind(bindings) {
+			const space = this.universe.space;
+			this.#bindings.set(space, {
+				...this.#bindings.get(space),
+				...bindings,
+			});
+			return this.universe;
+		}
+
+		clear() {
+			this.#bindings.delete(this.universe.space);
+		}
+
+		up() {
+			this.#trigger('up');
+		}
+
+		down() {
+			this.#trigger('down');
+		}
+
+		left() {
+			this.#trigger('left');
+		}
+
+		right() {
+			this.#trigger('right');
+		}
+
+		tap({ x, y }) {
+			const action =
+				Math.abs(x) >= Math.abs(y)
+					? x < 0
+						? 'left'
+						: 'right'
+					: y < 0
+						? 'down'
+						: 'up';
+			this[action]();
+		}
+
+		swipe({ x, y }) {
+			if (Math.abs(x) >= Math.abs(y))
+				this.universe.navigate(Math.sign(x));
+		}
+	}
+
+	class Keyboard {
+		constructor(universe, actions) {
+			actions = {
+				...actions,
+				1: () => universe.layout(0),
+				2: () => universe.layout(1),
+				3: () => universe.layout(2),
+				tab: () => universe.focus(),
+				q: () => universe.navigate(-1),
+				e: () => universe.navigate(1),
+			};
+			window.addEventListener('keydown', (event) => {
+				const key = event.key.toLowerCase();
+				if (key === 'tab') event.preventDefault();
+				actions[key]?.();
+			});
+		}
+	}
+
+	class Pointer {
+		#active = new Map();
+		#baseline;
+
+		constructor(universe, actions) {
+			this.actions = actions;
+			this.threshold = 0.25;
+			const handle = (event) => {
+				const type = event.type.slice(7);
+				const point =
+					type === 'cancel' ? undefined : universe.coordinate(event);
+				if (type === 'down') this.#start(event, point);
+				else if (type === 'move') this.#move(event, point);
+				else this.#end(event, point);
+			};
+			for (const type of [
+				'pointerdown',
+				'pointermove',
+				'pointerup',
+				'pointercancel',
+			])
+				universe.el.addEventListener(type, handle);
+		}
+
+		#delta(from, to, magnitude = false) {
+			const x = to.x - from.x,
+				y = to.y - from.y;
+			return magnitude ? { x: Math.abs(x), y: Math.abs(y) } : { x, y };
+		}
+
+		#gap() {
+			const [first, second] = this.#active.values();
+			return this.#delta(first.current, second.current, true);
+		}
+
+		#start(event, point) {
+			if (this.#active.has(event.pointerId) || this.#active.size === 2)
+				return;
+			this.#active.set(event.pointerId, {
+				start: point,
+				current: point,
+			});
+			event.currentTarget.setPointerCapture(event.pointerId);
+			if (this.#active.size === 2) this.#baseline = this.#gap();
+		}
+
+		#move(event, point) {
+			const pointer = this.#active.get(event.pointerId);
+			if (!pointer) return;
+			pointer.current = point;
+			if (this.#active.size < 2) return;
+
+			const change = this.#delta(this.#baseline, this.#gap());
+			const axis = Math.abs(change.x) >= Math.abs(change.y) ? 'x' : 'y';
+			const steps = Math.trunc(change[axis] / this.threshold);
+			for (let count = Math.abs(steps); count; count--)
+				this.actions.scale(axis, Math.sign(steps));
+			this.#baseline[axis] += steps * this.threshold;
+		}
+
+		#end(event, point) {
+			const pointer = this.#active.get(event.pointerId);
+			if (!pointer) return;
+			if (point) this.#move(event, point);
+
+			if (this.#active.size === 2) {
+				this.#active.clear();
+				this.#baseline = undefined;
+				return;
+			}
+
+			if (point) {
+				const movement = this.#delta(pointer.start, pointer.current);
+				const tap = Math.hypot(movement.x, movement.y) < this.threshold;
+				if (tap) this.actions.tap(pointer.current);
+				else this.actions.swipe(movement);
+			}
+			this.#active.delete(event.pointerId);
 		}
 	}
 </script>
