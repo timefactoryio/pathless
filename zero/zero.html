@@ -113,7 +113,7 @@
 					this.frames = frames.ones.map(({ data }) => data);
 					if (!this.frames.length) return;
 					this.exec(document.getElementById('universe'), zero.data);
-					this.universe = new Universe();
+					this.universe = new Universe(this);
 				}
 			}
 			document.addEventListener('DOMContentLoaded', () =>
