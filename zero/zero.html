@@ -114,6 +114,7 @@
 					if (!this.frames.length) return;
 					this.exec(document.getElementById('universe'), zero.data);
 					this.universe = new Universe(this);
+					this.universe.sync();
 				}
 			}
 			document.addEventListener('DOMContentLoaded', () =>
