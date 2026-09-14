@@ -142,6 +142,16 @@
 			window.addEventListener('keydown', this);
 			for (const type of ['pointerdown', 'pointerup', 'pointercancel'])
 				universe.el.addEventListener(type, this);
+			let lastTap = 0;
+			universe.el.addEventListener(
+				'touchend',
+				(event) => {
+					const now = Date.now();
+					if (now - lastTap < 300) event.preventDefault();
+					lastTap = now;
+				},
+				{ passive: false },
+			);
 		}
 
 		handleEvent(event) {
