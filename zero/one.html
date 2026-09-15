@@ -143,11 +143,44 @@
 	}
 
 	class Input {
-		#pointer;
-		#keys;
-
 		constructor(universe) {
 			this.universe = universe;
+			this.keyboard = new Keyboard(this);
+			this.pointer = new Pointer(this);
+		}
+
+		command(direction) {
+			this.universe.space.bindings[direction]?.();
+		}
+
+		#bind(direction, callback) {
+			this.universe.space.bindings[direction] = callback;
+			return this.universe;
+		}
+
+		up(callback) {
+			return this.#bind('up', callback);
+		}
+
+		down(callback) {
+			return this.#bind('down', callback);
+		}
+
+		left(callback) {
+			return this.#bind('left', callback);
+		}
+
+		right(callback) {
+			return this.#bind('right', callback);
+		}
+	}
+
+	class Keyboard {
+		#keys;
+
+		constructor(input) {
+			const { universe } = input;
+			const tap = (direction) => () => input.command(direction);
 			this.#keys = {
 				1: () => universe.layout(0),
 				2: () => universe.layout(1),
@@ -156,12 +189,48 @@
 				q: () => universe.navigate(-1),
 				e: () => universe.navigate(1),
 				z: () => universe.togglePanel(),
-				w: () => this.#activate('y', 1),
-				a: () => this.#activate('x', -1),
-				s: () => this.#activate('y', -1),
-				d: () => this.#activate('x', 1),
+				w: tap('up'),
+				a: tap('left'),
+				s: tap('down'),
+				d: tap('right'),
 			};
 			window.addEventListener('keydown', this);
+		}
+
+		handleEvent(event) {
+			this[event.type](event);
+		}
+
+		keydown(event) {
+			const key = event.key.toLowerCase();
+			if (key === 'tab') event.preventDefault();
+			this.#keys[key]?.();
+		}
+	}
+
+	class Pointer {
+		#commands;
+		#pointers = new Map();
+
+		constructor(input) {
+			this.input = input;
+			const { universe } = input;
+			const tap = (direction) => () => input.command(direction);
+			this.#commands = {
+				'tap.up': tap('up'),
+				'tap.down': tap('down'),
+				'tap.left': tap('left'),
+				'tap.right': tap('right'),
+				'swipe.left': () => universe.navigate(-1),
+				'swipe.right': () => universe.navigate(1),
+				'scale.down': () => {
+					const layout = Number(universe.el.dataset.layout);
+					if (layout < 2) universe.layout(layout + 1);
+				},
+				'scale.up': () => {
+					if (Number(universe.el.dataset.layout)) universe.layout(0);
+				},
+			};
 			for (const type of ['pointerdown', 'pointerup', 'pointercancel'])
 				universe.el.addEventListener(type, this);
 			let lastTap = 0;
@@ -180,70 +249,53 @@
 			this[event.type](event);
 		}
 
-		keydown(event) {
-			const key = event.key.toLowerCase();
-			if (key === 'tab') event.preventDefault();
-			this.#keys[key]?.();
-		}
-
 		pointerdown(event) {
-			if (this.#pointer) return;
-			const panel = this.universe.panel;
-			const space = panel.el.contains(event.target)
-				? panel
-				: this.universe.visible.find(({ el }) =>
-						el.contains(event.target),
-					);
-			if (!space) return;
-			if (space !== panel) this.universe.focused = space;
-			this.#pointer = {
-				id: event.pointerId,
-				space,
-				start: this.universe.coordinate(event),
-			};
-			if (space !== panel)
-				event.currentTarget.setPointerCapture(event.pointerId);
+			if (this.#pointers.size === 2) return;
+			this.#pointers.set(event.pointerId, {
+				start: this.input.universe.coordinate(event),
+			});
+			event.currentTarget.setPointerCapture(event.pointerId);
 		}
 
 		pointerup(event) {
-			if (event.pointerId !== this.#pointer?.id) return;
-			const { space, start } = this.#pointer;
-			this.#pointer = undefined;
-			const end = this.universe.coordinate(event);
-			const movement = { x: end.x - start.x, y: end.y - start.y };
-			const tap = Math.hypot(movement.x, movement.y) < 0.25;
-			if (tap && Math.hypot(end.x, end.y + 1) < 0.25) {
-				this.universe.togglePanel();
-				return;
+			const pointer = this.#pointers.get(event.pointerId);
+			if (!pointer) return;
+			pointer.end = this.input.universe.coordinate(event);
+			if (![...this.#pointers.values()].every(({ end }) => end)) return;
+			const { type, direction } = this.points();
+			this.#pointers.clear();
+			this.#commands[`${type}.${direction}`]?.();
+		}
+
+		pointercancel() {
+			this.#pointers.clear();
+		}
+
+		points() {
+			const [first, second] = this.#pointers.values();
+			const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+			if (second) {
+				return {
+					type: 'scale',
+					direction:
+						distance(first.end, second.end) <
+						distance(first.start, second.start)
+							? 'down'
+							: 'up',
+				};
 			}
-			if (space === this.universe.panel) return;
-			const point = tap ? end : movement;
+			const { start, end } = first;
+			const tap = distance(start, end) < 0.25;
+			const point = {
+				x: tap ? end.x : end.x - start.x,
+				y: tap ? end.y : end.y - start.y,
+			};
 			const axis = Math.abs(point.x) >= Math.abs(point.y) ? 'x' : 'y';
-			const direction = Math.sign(point[axis]);
-			if (tap) this.#activate(axis, direction);
-			else if (axis === 'x') this.universe.navigate(direction);
-		}
-
-		pointercancel(event) {
-			if (event.pointerId === this.#pointer?.id)
-				this.#pointer = undefined;
-		}
-
-		#activate(axis, direction) {
-			this.universe.space.bindings[axis]?.[direction < 0 ? 0 : 1]?.();
-		}
-
-		#bind(axis, actions) {
-			this.universe.space.bindings[axis] = actions;
-			return this.universe;
-		}
-
-		x(left, right) {
-			return this.#bind('x', [left, right]);
-		}
-
-		y(up, down) {
-			return this.#bind('y', [down, up]);
+			const directions = { x: ['left', 'right'], y: ['down', 'up'] };
+			return {
+				type: tap ? 'tap' : 'swipe',
+				direction: directions[axis][point[axis] < 0 ? 0 : 1],
+			};
 		}
 	}
 </script>
