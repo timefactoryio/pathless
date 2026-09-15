@@ -109,8 +109,9 @@
 				}
 
 				async init() {
-					const [zero, frames] = await this.source('');
+					const [zero, frames, panels] = await this.source('');
 					this.frames = frames.ones.map(({ data }) => data);
+					this.panels = panels.ones.map(({ data }) => data);
 					if (!this.frames.length) return;
 					this.exec(document.getElementById('universe'), zero.data);
 					this.universe = new Universe(this);
@@ -162,7 +163,15 @@
 			#two {
 				grid-area: two;
 			}
-			#universe[data-layout='0'] .space {
+			#panel {
+				position: absolute;
+				inset: auto 0 0;
+				height: 15dvh;
+				z-index: 1;
+				border-top: 1px solid var(--line);
+				touch-action: none;
+			}
+			#universe[data-layout='0'] .space:not(#panel) {
 				display: none;
 			}
 			#universe[data-layout='1']:not([data-focused='2']) #two,

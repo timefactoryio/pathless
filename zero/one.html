@@ -1,6 +1,7 @@
 <div id="zero" class="space"></div>
 <div id="one" class="space"></div>
 <div id="two" class="space"></div>
+<div id="panel" class="space" hidden></div>
 
 <script>
 	class Universe {
@@ -16,8 +17,15 @@
 			).observe(this.el);
 			this.spaces = Array.from(
 				this.el.querySelectorAll(':scope > .space'),
-				(el) => ({ el, frame: 0, states: [], bindings: {} }),
+				(el, index) => ({
+					el,
+					frame: 0,
+					states: [],
+					bindings: {},
+					frames: index === 3 ? pathless.panels : pathless.frames,
+				}),
 			);
+			this.panel = this.spaces[3];
 			this.input = new Input(this);
 		}
 
@@ -31,8 +39,13 @@
 		get frame() {
 			return this.space.el.querySelector(':scope > div');
 		}
+		get previous() {
+			return this.#previous;
+		}
 		get visible() {
-			return this.spaces.filter(({ el }) => el.offsetParent !== null);
+			return this.spaces
+				.slice(0, 3)
+				.filter(({ el }) => el.offsetParent !== null);
 		}
 		set view([layout, variant]) {
 			this.el.dataset.layout = layout;
@@ -64,12 +77,20 @@
 					current.bindings = {};
 					this.pathless.exec(
 						current.el,
-						this.pathless.frames[current.frame],
+						current.frames[current.frame],
 					);
 				}
 			} finally {
 				this.#rendering = null;
 			}
+		}
+
+		togglePanel() {
+			if (!this.panel.frames.length) return false;
+			this.panel.el.hidden = !this.panel.el.hidden;
+			if (!this.panel.el.hidden && !this.panel.el.firstElementChild)
+				this.sync(this.panel);
+			return !this.panel.el.hidden;
 		}
 
 		#cycle(index, direction, length) {
@@ -134,6 +155,7 @@
 				tab: () => universe.focus(),
 				q: () => universe.navigate(-1),
 				e: () => universe.navigate(1),
+				z: () => universe.togglePanel(),
 				w: () => this.#activate('y', 1),
 				a: () => this.#activate('x', -1),
 				s: () => this.#activate('y', -1),
@@ -166,24 +188,35 @@
 
 		pointerdown(event) {
 			if (this.#pointer) return;
-			const space = this.universe.spaces.find(({ el }) =>
-				el.contains(event.target),
-			);
-			if (space) this.universe.focused = space;
+			const panel = this.universe.panel;
+			const space = panel.el.contains(event.target)
+				? panel
+				: this.universe.visible.find(({ el }) =>
+						el.contains(event.target),
+					);
+			if (!space) return;
+			if (space !== panel) this.universe.focused = space;
 			this.#pointer = {
 				id: event.pointerId,
+				space,
 				start: this.universe.coordinate(event),
 			};
-			event.currentTarget.setPointerCapture(event.pointerId);
+			if (space !== panel)
+				event.currentTarget.setPointerCapture(event.pointerId);
 		}
 
 		pointerup(event) {
 			if (event.pointerId !== this.#pointer?.id) return;
-			const { start } = this.#pointer;
+			const { space, start } = this.#pointer;
 			this.#pointer = undefined;
 			const end = this.universe.coordinate(event);
 			const movement = { x: end.x - start.x, y: end.y - start.y };
 			const tap = Math.hypot(movement.x, movement.y) < 0.25;
+			if (tap && Math.hypot(end.x, end.y + 1) < 0.25) {
+				this.universe.togglePanel();
+				return;
+			}
+			if (space === this.universe.panel) return;
 			const point = tap ? end : movement;
 			const axis = Math.abs(point.x) >= Math.abs(point.y) ? 'x' : 'y';
 			const direction = Math.sign(point[axis]);
