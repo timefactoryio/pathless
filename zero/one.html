@@ -64,7 +64,11 @@
 				y: 1 - (2 * (clientY - top)) / (height || 1),
 			};
 		}
-
+		coordinates(start, end) {
+			const x = end.x - start.x;
+			const y = end.y - start.y;
+			return { x, y, distance: Math.hypot(x, y) };
+		}
 		state() {
 			const space = this.space;
 			return (space.states[space.frame] ??= new Map());
@@ -147,31 +151,60 @@
 			this.universe = universe;
 			this.keyboard = new Keyboard(this);
 			this.pointer = new Pointer(this);
+			let lastTap = 0;
+			universe.el.addEventListener(
+				'touchend',
+				(event) => {
+					const now = Date.now();
+					if (now - lastTap < 300) event.preventDefault();
+					lastTap = now;
+				},
+				{ passive: false },
+			);
 		}
 
 		command(direction) {
 			this.universe.space.bindings[direction]?.();
 		}
 
-		#bind(direction, callback) {
-			this.universe.space.bindings[direction] = callback;
+		#bind(type, direction, callback) {
+			this.universe.space.bindings[`${type}:${direction}`] = callback;
 			return this.universe;
 		}
 
+		tap(direction, callback) {
+			return this.#bind('tap', direction, callback);
+		}
+
+		swipe(direction, callback) {
+			return this.#bind('swipe', direction, callback);
+		}
+
+		scale(direction, callback) {
+			return this.#bind('scale', direction, callback);
+		}
+
 		up(callback) {
-			return this.#bind('up', callback);
+			return this.tap('up', callback);
 		}
 
 		down(callback) {
-			return this.#bind('down', callback);
+			return this.tap('down', callback);
 		}
 
 		left(callback) {
-			return this.#bind('left', callback);
+			return this.tap('left', callback);
 		}
 
 		right(callback) {
-			return this.#bind('right', callback);
+			return this.tap('right', callback);
+		}
+
+		forward(callback) {
+			return this.tap('forward', callback);
+		}
+		back(callback) {
+			return this.tap('back', callback);
 		}
 	}
 
@@ -206,22 +239,23 @@
 	}
 
 	class Pointer {
+		#distance;
 		#pointers = new Map();
 
-		constructor({ universe }) {
+		constructor(input) {
+			const { universe } = input;
+			this.input = input;
 			this.universe = universe;
-			for (const type of ['pointerdown', 'pointerup', 'pointercancel'])
+			this.interval = 0.25;
+			this.gestures = ['tap', 'swipe', 'scale'];
+			this.directions = ['up', 'down', 'left', 'right'];
+			for (const type of [
+				'pointerdown',
+				'pointermove',
+				'pointerup',
+				'pointercancel',
+			])
 				universe.el.addEventListener(type, this);
-			let lastTap = 0;
-			universe.el.addEventListener(
-				'touchend',
-				(event) => {
-					const now = Date.now();
-					if (now - lastTap < 300) event.preventDefault();
-					lastTap = now;
-				},
-				{ passive: false },
-			);
 		}
 
 		handleEvent(event) {
@@ -230,46 +264,68 @@
 
 		pointerdown(event) {
 			if (this.#pointers.size === 2) return;
-			this.#pointers.set(event.pointerId, {
-				start: this.universe.coordinate(event),
-			});
+			this.#pointers.set(event.pointerId, [
+				this.universe.coordinate(event),
+			]);
+			if (this.#pointers.size === 2) {
+				const [first, second] = this.#pointers.values();
+				this.#distance = this.universe.coordinates(
+					first[0],
+					second[0],
+				).distance;
+			}
 			event.currentTarget.setPointerCapture(event.pointerId);
 		}
 
+		pointermove(event) {
+			if (this.#pointers.size !== 2) return;
+			const points = this.#pointers.get(event.pointerId);
+			if (!points) return;
+			points[1] = this.universe.coordinate(event);
+			this.two();
+		}
+
 		pointerup(event) {
-			const pointer = this.#pointers.get(event.pointerId);
-			if (!pointer) return;
-			pointer.end = this.universe.coordinate(event);
-			if (![...this.#pointers.values()].every(({ end }) => end)) return;
-			const gesture = this.points();
+			const points = this.#pointers.get(event.pointerId);
+			if (!points) return;
+			if (this.#pointers.size === 1) this.one(event);
 			this.#pointers.clear();
-			return gesture;
+			this.#distance = undefined;
 		}
 
 		pointercancel() {
 			this.#pointers.clear();
+			this.#distance = undefined;
 		}
 
-		points() {
-			const [first, second] = this.#pointers.values();
-			const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-			if (second)
-				return [
-					2,
-					distance(first.end, second.end) <
-					distance(first.start, second.start)
-						? 1
-						: 0,
+		one(event) {
+			const [points] = this.#pointers.values();
+			points.push(this.universe.coordinate(event));
+			const movement = this.universe.coordinates(...points);
+			const isTap = movement.distance < this.interval;
+			const { x, y } = isTap ? points[1] : movement;
+			const direction =
+				this.directions[
+					Math.abs(x) >= Math.abs(y)
+						? 2 + Number(x >= 0)
+						: Number(y < 0)
 				];
-			const { start, end } = first;
-			const isTap = distance(start, end) < 0.25;
-			const point = {
-				x: isTap ? end.x : end.x - start.x,
-				y: isTap ? end.y : end.y - start.y,
-			};
-			const axis = Math.abs(point.x) >= Math.abs(point.y) ? 'x' : 'y';
-			const directions = { x: [2, 3], y: [1, 0] };
-			return [isTap ? 0 : 1, directions[axis][point[axis] < 0 ? 0 : 1]];
+			this.input.command(`${this.gestures[Number(!isTap)]}:${direction}`);
+		}
+
+		two() {
+			const [first, second] = this.#pointers.values();
+			const distance = this.universe.coordinates(
+				first.at(-1),
+				second.at(-1),
+			).distance;
+			const change = distance - this.#distance;
+			const steps = Math.floor(Math.abs(change) / this.interval);
+			if (!steps) return;
+			const direction = this.directions[Number(change < 0)];
+			for (let step = 0; step < steps; step++)
+				this.input.command(`${this.gestures[2]}:${direction}`);
+			this.#distance += Math.sign(change) * steps * this.interval;
 		}
 	}
 </script>
