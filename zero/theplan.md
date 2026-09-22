@@ -1,3 +1,5 @@
+(0,0), (1,0), (-1,0), (0,1), (0,-1) 
+
 ## Plan: Space-Scoped Input
 
 `Pathless` loads and starts the root; `Universe` owns spaces and render context; `Input` exposes a fixed set of directional/gesture hooks that frames cherry-pick from — a frame never binds a raw key or pointer name. Gestures and held keys belong to the space where they began, and every rerender resolves that space's outstanding input before frame scripts register replacements.

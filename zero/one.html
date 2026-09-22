@@ -11,22 +11,31 @@
 		constructor(pathless) {
 			this.pathless = pathless;
 			this.el = document.getElementById('universe');
+			this.spaces = ['zero', 'one', 'two'].map((id) => this.#space(id));
+			this.panel = this.#space('panel');
 			this.#plane = this.el.getBoundingClientRect();
 			new ResizeObserver(
 				() => (this.#plane = this.el.getBoundingClientRect()),
 			).observe(this.el);
-			this.spaces = Array.from(
-				this.el.querySelectorAll(':scope > .space'),
-				(el, index) => ({
-					el,
-					frame: 0,
-					states: [],
-					bindings: {},
-					frames: index === 3 ? pathless.panels : pathless.frames,
-				}),
-			);
-			this.panel = this.spaces[3];
 			this.input = new Input(this);
+		}
+
+		#space(id) {
+			return {
+				el: document.getElementById(id),
+				frame: 0,
+				states: [],
+				bindings: {},
+			};
+		}
+		#render(space, frame) {
+			this.#rendering = space;
+			space.bindings = {};
+			try {
+				this.pathless.exec(space.el, frame);
+			} finally {
+				this.#rendering = null;
+			}
 		}
 
 		get #state() {
@@ -39,13 +48,8 @@
 		get frame() {
 			return this.space.el.querySelector(':scope > div');
 		}
-		get previous() {
-			return this.#previous;
-		}
 		get visible() {
-			return this.spaces
-				.slice(0, 3)
-				.filter(({ el }) => el.offsetParent !== null);
+			return this.spaces.filter(({ el }) => el.offsetParent !== null);
 		}
 		set view([layout, variant]) {
 			this.el.dataset.layout = layout;
@@ -60,41 +64,23 @@
 		coordinate({ clientX, clientY }) {
 			const { left, top, width, height } = this.#plane;
 			return {
-				x: (2 * (clientX - left)) / (width || 1) - 1,
-				y: 1 - (2 * (clientY - top)) / (height || 1),
+				x: ((clientX - left) * 2) / (width || 1) - 1,
+				y: 1 - ((clientY - top) * 2) / (height || 1),
 			};
 		}
 		coordinates(start, end) {
-			const x = end.x - start.x;
-			const y = end.y - start.y;
+			const x = end.x - start.x,
+				y = end.y - start.y;
 			return { x, y, distance: Math.hypot(x, y) };
 		}
 		state() {
-			const space = this.space;
-			return (space.states[space.frame] ??= new Map());
+			const { states, frame } = this.space;
+			return (states[frame] ??= new Map());
 		}
 
-		sync(space) {
-			try {
-				for (const current of space ? [space] : this.visible) {
-					this.#rendering = current;
-					current.bindings = {};
-					this.pathless.exec(
-						current.el,
-						current.frames[current.frame],
-					);
-				}
-			} finally {
-				this.#rendering = null;
-			}
-		}
-
-		togglePanel() {
-			if (!this.panel.frames.length) return false;
-			this.panel.el.hidden = !this.panel.el.hidden;
-			if (!this.panel.el.hidden && !this.panel.el.firstElementChild)
-				this.sync(this.panel);
-			return !this.panel.el.hidden;
+		sync(...spaces) {
+			for (const space of spaces.length ? spaces : this.visible)
+				this.#render(space, this.pathless.frames[space.frame]);
 		}
 
 		#cycle(index, direction, length) {
@@ -102,15 +88,14 @@
 		}
 
 		navigate(direction) {
-			const space = this.space;
-			const frame = this.#cycle(
+			const space = this.spaces[this.#state[2]];
+			space.frame = this.#cycle(
 				space.frame,
 				direction,
 				this.pathless.frames.length,
 			);
-			space.frame = frame;
 			this.sync(space);
-			return frame;
+			return space.frame;
 		}
 
 		layout(layout) {
@@ -124,25 +109,31 @@
 				next = current === layout ? (variant + 1) % 2 ** layout : 0;
 				this.#previous = [layout, next];
 			}
-			const view = [layout, next];
-			this.view = view;
-			return view;
+			return (this.view = [layout, next]);
 		}
 
 		focus(direction = 1) {
 			const visible = this.visible;
 			const current = this.space;
 			if (visible.length < 2) return current;
-			const next =
+			return (this.focused =
 				visible[
 					this.#cycle(
 						visible.indexOf(current),
 						direction,
 						visible.length,
 					)
-				];
-			this.focused = next;
-			return next;
+				]);
+		}
+
+		togglePanel() {
+			if (!this.pathless.panels.length) return false;
+			const { el } = this.panel;
+			const visible = el.hidden;
+			el.hidden = !visible;
+			if (visible && !el.firstElementChild)
+				this.#render(this.panel, this.pathless.panels[0]);
+			return visible;
 		}
 	}
 
@@ -151,6 +142,12 @@
 			this.universe = universe;
 			this.keyboard = new Keyboard(this);
 			this.pointer = new Pointer(this);
+			this.outputs = [
+				universe.navigate,
+				universe.layout,
+				universe.focus,
+				universe.togglePanel,
+			];
 			let lastTap = 0;
 			universe.el.addEventListener(
 				'touchend',
@@ -201,10 +198,10 @@
 		}
 
 		forward(callback) {
-			return this.tap('forward', callback);
+			return this.swipe('right', callback);
 		}
 		back(callback) {
-			return this.tap('back', callback);
+			return this.swipe('left', callback);
 		}
 	}
 
