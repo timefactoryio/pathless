@@ -138,10 +138,21 @@
 	}
 
 	class Input {
+		#distance;
 		constructor(universe) {
 			this.universe = universe;
 			this.keyboard = new Keyboard(this);
-			this.pointer = new Pointer(this);
+			this.pointer = new Pointer(universe);
+			this.interval = 0.25;
+			this.gestures = ['tap', 'swipe', 'scale'];
+			this.directions = ['up', 'down', 'left', 'right'];
+			for (const type of [
+				'pointerdown',
+				'pointermove',
+				'pointerup',
+				'pointercancel',
+			])
+				universe.el.addEventListener(type, this);
 			this.outputs = [
 				universe.navigate,
 				universe.layout,
@@ -160,12 +171,53 @@
 			);
 		}
 
-		command(direction) {
-			this.universe.space.bindings[direction]?.();
+		handleEvent(event) {
+			const pointers = this.pointer.handleEvent(event);
+			let input;
+			if (event.type === 'pointerdown' && pointers?.length === 2) {
+				const [first, second] = pointers;
+				this.#distance = this.universe.coordinates(
+					first[0],
+					second[0],
+				).distance;
+			} else if (event.type === 'pointermove' && pointers?.length === 2)
+				input = this.two(pointers);
+			else if (event.type === 'pointerup' && pointers?.length === 1)
+				input = this.one(pointers[0]);
+			if (event.type === 'pointerup' || event.type === 'pointercancel')
+				this.#distance = undefined;
+			const [gesture, direction] = input ?? [];
+			this.universe.space.bindings[gesture]?.[direction]?.();
+		}
+
+		one(points) {
+			const movement = this.universe.coordinates(...points);
+			const isTap = movement.distance < this.interval;
+			const { x, y } = isTap ? points[1] : movement;
+			const direction =
+				this.directions[
+					Math.abs(x) >= Math.abs(y)
+						? 2 + Number(x >= 0)
+						: Number(y < 0)
+				];
+			return [this.gestures[Number(!isTap)], direction];
+		}
+
+		two([first, second]) {
+			const distance = this.universe.coordinates(
+				first.at(-1),
+				second.at(-1),
+			).distance;
+			const change = distance - this.#distance;
+			const steps = Math.floor(Math.abs(change) / this.interval);
+			if (!steps) return;
+			const direction = this.directions[Number(change < 0)];
+			this.#distance += Math.sign(change) * steps * this.interval;
+			return [this.gestures[2], direction];
 		}
 
 		#bind(type, direction, callback) {
-			this.universe.space.bindings[`${type}:${direction}`] = callback;
+			(this.universe.space.bindings[type] ??= {})[direction] = callback;
 			return this.universe;
 		}
 
@@ -236,27 +288,14 @@
 	}
 
 	class Pointer {
-		#distance;
 		#pointers = new Map();
 
-		constructor(input) {
-			const { universe } = input;
-			this.input = input;
+		constructor(universe) {
 			this.universe = universe;
-			this.interval = 0.25;
-			this.gestures = ['tap', 'swipe', 'scale'];
-			this.directions = ['up', 'down', 'left', 'right'];
-			for (const type of [
-				'pointerdown',
-				'pointermove',
-				'pointerup',
-				'pointercancel',
-			])
-				universe.el.addEventListener(type, this);
 		}
 
 		handleEvent(event) {
-			this[event.type](event);
+			return this[event.type](event);
 		}
 
 		pointerdown(event) {
@@ -264,14 +303,8 @@
 			this.#pointers.set(event.pointerId, [
 				this.universe.coordinate(event),
 			]);
-			if (this.#pointers.size === 2) {
-				const [first, second] = this.#pointers.values();
-				this.#distance = this.universe.coordinates(
-					first[0],
-					second[0],
-				).distance;
-			}
 			event.currentTarget.setPointerCapture(event.pointerId);
+			return [...this.#pointers.values()];
 		}
 
 		pointermove(event) {
@@ -279,50 +312,20 @@
 			const points = this.#pointers.get(event.pointerId);
 			if (!points) return;
 			points[1] = this.universe.coordinate(event);
-			this.two();
+			return [...this.#pointers.values()];
 		}
 
 		pointerup(event) {
 			const points = this.#pointers.get(event.pointerId);
 			if (!points) return;
-			if (this.#pointers.size === 1) this.one(event);
+			points[1] = this.universe.coordinate(event);
+			const pointers = [...this.#pointers.values()];
 			this.#pointers.clear();
-			this.#distance = undefined;
+			return pointers;
 		}
 
 		pointercancel() {
 			this.#pointers.clear();
-			this.#distance = undefined;
-		}
-
-		one(event) {
-			const [points] = this.#pointers.values();
-			points.push(this.universe.coordinate(event));
-			const movement = this.universe.coordinates(...points);
-			const isTap = movement.distance < this.interval;
-			const { x, y } = isTap ? points[1] : movement;
-			const direction =
-				this.directions[
-					Math.abs(x) >= Math.abs(y)
-						? 2 + Number(x >= 0)
-						: Number(y < 0)
-				];
-			this.input.command(`${this.gestures[Number(!isTap)]}:${direction}`);
-		}
-
-		two() {
-			const [first, second] = this.#pointers.values();
-			const distance = this.universe.coordinates(
-				first.at(-1),
-				second.at(-1),
-			).distance;
-			const change = distance - this.#distance;
-			const steps = Math.floor(Math.abs(change) / this.interval);
-			if (!steps) return;
-			const direction = this.directions[Number(change < 0)];
-			for (let step = 0; step < steps; step++)
-				this.input.command(`${this.gestures[2]}:${direction}`);
-			this.#distance += Math.sign(change) * steps * this.interval;
 		}
 	}
 </script>
