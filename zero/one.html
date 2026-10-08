@@ -5,7 +5,6 @@
 
 <script>
 	class Universe {
-		#plane;
 		#previous = null;
 		#rendering = null;
 		constructor(pathless) {
@@ -13,10 +12,7 @@
 			this.el = document.getElementById('universe');
 			this.spaces = ['zero', 'one', 'two'].map((id) => this.#space(id));
 			this.panel = this.#space('panel');
-			this.#plane = this.el.getBoundingClientRect();
-			new ResizeObserver(
-				() => (this.#plane = this.el.getBoundingClientRect()),
-			).observe(this.el);
+			this.plane = new Plane(this.el);
 			this.input = new Input(this);
 		}
 
@@ -25,12 +21,11 @@
 				el: document.getElementById(id),
 				frame: 0,
 				states: [],
-				bindings: {},
 			};
 		}
 		#render(space, frame) {
 			this.#rendering = space;
-			space.bindings = {};
+			this.input.clear(space);
 			try {
 				this.pathless.exec(space.el, frame);
 			} finally {
@@ -61,18 +56,6 @@
 			this.el.dataset.focused = this.spaces.indexOf(space);
 		}
 
-		coordinate({ clientX, clientY }) {
-			const { left, top, width, height } = this.#plane;
-			return {
-				x: ((clientX - left) * 2) / (width || 1) - 1,
-				y: 1 - ((clientY - top) * 2) / (height || 1),
-			};
-		}
-		coordinates(start, end) {
-			const x = end.x - start.x,
-				y = end.y - start.y;
-			return { x, y, distance: Math.hypot(x, y) };
-		}
 		state() {
 			const { states, frame } = this.space;
 			return (states[frame] ??= new Map());
@@ -84,11 +67,10 @@
 		}
 
 		#cycle(index, direction, length) {
-			return (index + direction + length) % length;
+			return (((index + direction) % length) + length) % length;
 		}
 
-		navigate(direction) {
-			const space = this.spaces[this.#state[2]];
+		navigate(direction, space = this.space) {
 			space.frame = this.#cycle(
 				space.frame,
 				direction,
@@ -98,32 +80,30 @@
 			return space.frame;
 		}
 
-		layout(layout) {
-			const [current, variant] = this.#state;
-			let next = 0;
-			if (layout === 0) {
-				if (current > 0) this.#previous = [current, variant];
-				else if (this.#previous) [layout, next] = this.#previous;
-				else return;
-			} else {
-				next = current === layout ? (variant + 1) % 2 ** layout : 0;
-				this.#previous = [layout, next];
+		layout(l, v) {
+			const [layout, variant] = this.#state;
+			l ??= layout;
+			v ??= l === layout ? variant + 1 : 0;
+			if (l === 0 && layout === 0) {
+				if (!this.#previous) return;
+				[l, v] = this.#previous;
+			} else if (l === 0) {
+				this.#previous = [layout, variant];
+				v = 0;
 			}
-			return (this.view = [layout, next]);
+			if (l) this.#previous = [l, (v = this.#cycle(v, 0, 2 ** l))];
+			return (this.view = [l, v]);
 		}
 
-		focus(direction = 1) {
+		focus(direction = 1, space = this.space) {
 			const visible = this.visible;
-			const current = this.space;
-			if (visible.length < 2) return current;
+			if (!visible.length) return;
+
+			const index = visible.indexOf(space);
+			if (index < 0)
+				return (this.focused = visible.at(direction < 0 ? -1 : 0));
 			return (this.focused =
-				visible[
-					this.#cycle(
-						visible.indexOf(current),
-						direction,
-						visible.length,
-					)
-				]);
+				visible[this.#cycle(index, direction, visible.length)]);
 		}
 
 		togglePanel() {
@@ -138,194 +118,141 @@
 	}
 
 	class Input {
-		#distance;
+		#bindings = new Map();
+		#universe;
+		#down = null;
+		#lastTap = 0;
+
 		constructor(universe) {
-			this.universe = universe;
-			this.keyboard = new Keyboard(this);
-			this.pointer = new Pointer(universe);
-			this.interval = 0.25;
-			this.gestures = ['tap', 'swipe', 'scale'];
-			this.directions = ['up', 'down', 'left', 'right'];
-			for (const type of [
-				'pointerdown',
-				'pointermove',
-				'pointerup',
-				'pointercancel',
-			])
+			this.#universe = universe;
+			this.x = this.#axis(3, 2);
+			this.y = this.#axis(0, 1);
+			this.z = this.#axis(4, 5);
+			for (const type of ['pointerdown', 'pointercancel', 'pointerup'])
 				universe.el.addEventListener(type, this);
-			this.outputs = [
-				universe.navigate,
-				universe.layout,
-				universe.focus,
-				universe.togglePanel,
-			];
-			let lastTap = 0;
-			universe.el.addEventListener(
-				'touchend',
-				(event) => {
-					const now = Date.now();
-					if (now - lastTap < 300) event.preventDefault();
-					lastTap = now;
-				},
-				{ passive: false },
-			);
+			universe.el.addEventListener('touchend', this, { passive: false });
 		}
 
 		handleEvent(event) {
-			const pointers = this.pointer.handleEvent(event);
-			let input;
-			if (event.type === 'pointerdown' && pointers?.length === 2) {
-				const [first, second] = pointers;
-				this.#distance = this.universe.coordinates(
-					first[0],
-					second[0],
-				).distance;
-			} else if (event.type === 'pointermove' && pointers?.length === 2)
-				input = this.two(pointers);
-			else if (event.type === 'pointerup' && pointers?.length === 1)
-				input = this.one(pointers[0]);
-			if (event.type === 'pointerup' || event.type === 'pointercancel')
-				this.#distance = undefined;
-			const [gesture, direction] = input ?? [];
-			this.universe.space.bindings[gesture]?.[direction]?.();
+			if (event.type === 'touchend') {
+				const now = Date.now();
+				if (now - this.#lastTap < 300) event.preventDefault();
+				this.#lastTap = now;
+				return;
+			}
+			if (event.type === 'pointerdown') {
+				if (event.isPrimary) this.#down = this.pointerdown(event);
+				return;
+			}
+			const down = this.#down;
+			this.#down = null;
+			if (!down || !event.isPrimary || event.type === 'pointercancel')
+				return;
+			this.pointerup(down, event);
 		}
 
-		one(points) {
-			const movement = this.universe.coordinates(...points);
-			const isTap = movement.distance < this.interval;
-			const { x, y } = isTap ? points[1] : movement;
-			const direction =
-				this.directions[
-					Math.abs(x) >= Math.abs(y)
-						? 2 + Number(x >= 0)
-						: Number(y < 0)
-				];
-			return [this.gestures[Number(!isTap)], direction];
+		pointerdown(event) {
+			return {
+				start: this.#universe.plane.coordinate(event),
+				target: event.target,
+			};
 		}
 
-		two([first, second]) {
-			const distance = this.universe.coordinates(
-				first.at(-1),
-				second.at(-1),
-			).distance;
-			const change = distance - this.#distance;
-			const steps = Math.floor(Math.abs(change) / this.interval);
-			if (!steps) return;
-			const direction = this.directions[Number(change < 0)];
-			this.#distance += Math.sign(change) * steps * this.interval;
-			return [this.gestures[2], direction];
+		pointerup({ start, target }, event) {
+			const universe = this.#universe;
+			const space = universe.visible.find(({ el }) =>
+				el.contains(target),
+			);
+			if (!space) return;
+			const { plane } = universe;
+			const end = plane.coordinate(event);
+			const delta = { x: end.x - start.x, y: end.y - start.y };
+			if (Math.hypot(delta.x, delta.y) < 0.1)
+				this.handle(
+					plane.direction(plane.coordinate(event, space.el)),
+					space,
+				);
+			else {
+				const direction = plane.direction(delta);
+				if (direction > 1)
+					universe.navigate(direction === 2 ? 1 : -1, space);
+			}
 		}
 
-		#bind(type, direction, callback) {
-			(this.universe.space.bindings[type] ??= {})[direction] = callback;
-			return this.universe;
+		handle(direction, space = this.#universe.space) {
+			if (!this.#universe.visible.includes(space)) return;
+			this.#bindings.get(space)?.[direction]?.();
 		}
 
-		tap(direction, callback) {
-			return this.#bind('tap', direction, callback);
+		#axis(plusDirection, minusDirection) {
+			return (plus, minus) => {
+				const space = this.#universe.space;
+				const bindings = this.#bindings.get(space) ?? [];
+				bindings[plusDirection] = plus;
+				bindings[minusDirection] = minus;
+				this.#bindings.set(space, bindings);
+				return this.#universe;
+			};
 		}
 
-		swipe(direction, callback) {
-			return this.#bind('swipe', direction, callback);
+		clear(space) {
+			this.#bindings.delete(space);
+		}
+	}
+
+	class Plane {
+		constructor(el) {
+			this.el = el;
 		}
 
-		scale(direction, callback) {
-			return this.#bind('scale', direction, callback);
+		coordinate({ clientX, clientY }, el = this.el) {
+			const { left, top, width, height } = el.getBoundingClientRect();
+			return {
+				x: ((clientX - left) * 2) / (width || 1) - 1,
+				y: 1 - ((clientY - top) * 2) / (height || 1),
+			};
 		}
 
-		up(callback) {
-			return this.tap('up', callback);
-		}
-
-		down(callback) {
-			return this.tap('down', callback);
-		}
-
-		left(callback) {
-			return this.tap('left', callback);
-		}
-
-		right(callback) {
-			return this.tap('right', callback);
-		}
-
-		forward(callback) {
-			return this.swipe('right', callback);
-		}
-		back(callback) {
-			return this.swipe('left', callback);
+		direction({ x, y }) {
+			return Math.abs(x) >= Math.abs(y)
+				? 2 + Number(x >= 0)
+				: Number(y < 0);
 		}
 	}
 
 	class Keyboard {
-		constructor(input) {
-			const { universe } = input;
-			const keys = {
-				1: () => universe.layout(0),
-				2: () => universe.layout(1),
-				3: () => universe.layout(2),
-				tab: () => universe.focus(),
-				q: () => universe.navigate(-1),
-				e: () => universe.navigate(1),
-				z: () => universe.togglePanel(),
-			};
-			window.addEventListener('keydown', (event) => {
-				const action = keys[event.key.toLowerCase()];
-				if (
-					!action ||
-					event.metaKey ||
-					event.ctrlKey ||
-					event.altKey ||
-					event.target.closest?.(
-						'input, textarea, select, [contenteditable]',
-					)
-				)
-					return;
-				event.preventDefault();
-				action();
-			});
+		#keys = new Map();
+
+		constructor() {
+			window.addEventListener('keydown', this);
 		}
-	}
 
-	class Pointer {
-		#pointers = new Map();
+		get keys() {
+			return Object.fromEntries(this.#keys);
+		}
 
-		constructor(universe) {
-			this.universe = universe;
+		set keys(keys) {
+			this.#keys = new Map(
+				Object.entries(keys).map(([key, fn]) => [
+					key.toLowerCase(),
+					fn,
+				]),
+			);
 		}
 
 		handleEvent(event) {
-			return this[event.type](event);
-		}
+			if (
+				event.metaKey ||
+				event.ctrlKey ||
+				event.altKey ||
+				event.shiftKey
+			)
+				return;
 
-		pointerdown(event) {
-			if (this.#pointers.size === 2) return;
-			this.#pointers.set(event.pointerId, [
-				this.universe.coordinate(event),
-			]);
-			event.currentTarget.setPointerCapture(event.pointerId);
-			return [...this.#pointers.values()];
-		}
-
-		pointermove(event) {
-			if (this.#pointers.size !== 2) return;
-			const points = this.#pointers.get(event.pointerId);
-			if (!points) return;
-			points[1] = this.universe.coordinate(event);
-			return [...this.#pointers.values()];
-		}
-
-		pointerup(event) {
-			const points = this.#pointers.get(event.pointerId);
-			if (!points) return;
-			points[1] = this.universe.coordinate(event);
-			const pointers = [...this.#pointers.values()];
-			this.#pointers.clear();
-			return pointers;
-		}
-
-		pointercancel() {
-			this.#pointers.clear();
+			const fn = this.#keys.get(event.key.toLowerCase());
+			if (!fn) return;
+			event.preventDefault();
+			fn();
 		}
 	}
 </script>
