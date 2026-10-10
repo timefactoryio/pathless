@@ -7,11 +7,13 @@
 	class Universe {
 		#previous = null;
 		#rendering = null;
+		#spaces;
 		constructor(pathless) {
 			this.pathless = pathless;
 			this.el = document.getElementById('universe');
-			this.spaces = ['zero', 'one', 'two'].map((id) => this.#space(id));
-			this.panel = this.#space('panel');
+			this.#spaces = ['zero', 'one', 'two', 'panel'].map((id) =>
+				this.#space(id),
+			);
 			this.plane = new Plane(this.el);
 			this.input = new Input(this);
 		}
@@ -23,22 +25,32 @@
 				states: [],
 			};
 		}
-		#render(space, frame) {
+		#render(space) {
+			const frames =
+				space === this.panel
+					? this.pathless.panels
+					: this.pathless.frames;
 			this.#rendering = space;
 			this.input.clear(space);
 			try {
-				this.pathless.exec(space.el, frame);
+				this.pathless.exec(space.el, frames[space.frame]);
 			} finally {
 				this.#rendering = null;
 			}
 		}
 
+		get spaces() {
+			return this.#spaces.slice(0, -1);
+		}
+		get panel() {
+			return this.#spaces.at(-1);
+		}
 		get #state() {
 			const { layout, variant, focused } = this.el.dataset;
 			return [layout, variant, focused].map(Number);
 		}
 		get space() {
-			return this.#rendering ?? this.spaces[this.#state[2]];
+			return this.#rendering ?? this.#spaces[this.#state[2]];
 		}
 		get frame() {
 			return this.space.el.querySelector(':scope > div');
@@ -53,7 +65,9 @@
 		}
 
 		set focused(space) {
-			this.el.dataset.focused = this.spaces.indexOf(space);
+			const index = this.#spaces.indexOf(space);
+			if (index < 0 || space === this.panel) return;
+			this.el.dataset.focused = index;
 		}
 
 		state() {
@@ -63,7 +77,7 @@
 
 		sync(...spaces) {
 			for (const space of spaces.length ? spaces : this.visible)
-				this.#render(space, this.pathless.frames[space.frame]);
+				this.#render(space);
 		}
 
 		#cycle(index, direction, length) {
@@ -108,12 +122,32 @@
 
 		togglePanel() {
 			if (!this.pathless.panels.length) return false;
-			const { el } = this.panel;
+			const panel = this.panel;
+			const { el } = panel;
 			const visible = el.hidden;
 			el.hidden = !visible;
-			if (visible && !el.firstElementChild)
-				this.#render(this.panel, this.pathless.panels[0]);
+			if (visible && !el.firstElementChild) this.sync(panel);
 			return visible;
+		}
+	}
+
+	class Plane {
+		constructor(el) {
+			this.el = el;
+		}
+
+		coordinate({ clientX, clientY }, el = this.el) {
+			const { left, top, width, height } = el.getBoundingClientRect();
+			return {
+				x: ((clientX - left) * 2) / (width || 1) - 1,
+				y: 1 - ((clientY - top) * 2) / (height || 1),
+			};
+		}
+
+		direction({ x, y }) {
+			return Math.abs(x) >= Math.abs(y)
+				? 2 + Number(x >= 0)
+				: Number(y < 0);
 		}
 	}
 
@@ -197,26 +231,6 @@
 
 		clear(space) {
 			this.#bindings.delete(space);
-		}
-	}
-
-	class Plane {
-		constructor(el) {
-			this.el = el;
-		}
-
-		coordinate({ clientX, clientY }, el = this.el) {
-			const { left, top, width, height } = el.getBoundingClientRect();
-			return {
-				x: ((clientX - left) * 2) / (width || 1) - 1,
-				y: 1 - ((clientY - top) * 2) / (height || 1),
-			};
-		}
-
-		direction({ x, y }) {
-			return Math.abs(x) >= Math.abs(y)
-				? 2 + Number(x >= 0)
-				: Number(y < 0);
 		}
 	}
 
