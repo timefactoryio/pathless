@@ -17,6 +17,7 @@
 			});
 			this.spaces = ['zero', 'one', 'two'].map(space);
 			this.panel = space('three');
+			this.input = new Input(this);
 		}
 
 		get space() {
@@ -32,9 +33,15 @@
 		get visible() {
 			const { layout, focused } = pathless.el.dataset;
 			const [zero, one, two] = this.spaces;
-			if (layout === '0') return [this.spaces[focused]];
-			if (layout === '1') return [zero, focused === '2' ? two : one];
-			return this.spaces;
+			const visible =
+				layout === '0'
+					? [this.spaces[focused]]
+					: layout === '1'
+						? [zero, focused === '2' ? two : one]
+						: this.spaces;
+			return pathless.el.classList.contains('panel')
+				? [...visible, this.panel]
+				: visible;
 		}
 
 		set focused(space) {
@@ -45,13 +52,12 @@
 		}
 
 		sync(...spaces) {
-			for (const space of spaces.length ? spaces : this.visible) {
+			if (!spaces.length)
+				spaces = this.visible.filter(({ el }) => !el.firstElementChild);
+			for (const space of spaces) {
 				const frames = space === this.panel ? this.panels : this.frames;
-				if (
-					!frames.length ||
-					(!spaces.length && space.el.firstElementChild)
-				)
-					continue;
+				if (!frames.length) continue;
+				this.input.clear(space);
 				this.#rendering = space;
 				try {
 					pathless.exec(space.el, frames[space.frame].data);
@@ -93,7 +99,9 @@
 		}
 
 		focus(direction = 1, space = this.space) {
-			const visible = this.visible;
+			const visible = this.visible.filter(
+				(space) => space !== this.panel,
+			);
 			const index = visible.indexOf(space);
 			this.focused =
 				index < 0
@@ -103,46 +111,190 @@
 
 		togglePanel() {
 			if (!this.panels.length) return;
-			const panel = this.panel;
-			if (
-				pathless.el.classList.toggle('panel') &&
-				!panel.el.firstElementChild
-			)
-				this.sync(panel);
+			pathless.el.classList.toggle('panel');
+			this.sync();
 		}
 
 		coordinate({ clientX, clientY }) {
-			const target = document.elementFromPoint(clientX, clientY);
 			return {
 				x: (clientX * 2) / pathless.width - 1,
 				y: 1 - (clientY * 2) / pathless.height,
-				space: this.panel.el.contains(target)
-					? this.panel
-					: this.spaces.find(({ el }) => el.contains(target)),
+			};
+		}
+		coordinateV2(event) {
+			const target = document.elementFromPoint(
+				event.clientX,
+				event.clientY,
+			);
+			return {
+				x: (event.clientX * 2) / pathless.width - 1,
+				y: 1 - (event.clientY * 2) / pathless.height,
+				z: this.visible.find(({ el }) => el.contains(target)),
 			};
 		}
 
 		displacement(start, end) {
+			const space = start.space ?? this.coordinateV2(start).space;
+			start = this.coordinate(start);
+			end = this.coordinate(end);
 			const delta = { x: end.x - start.x, y: end.y - start.y };
 			const swipe = Math.abs(delta.x) + Math.abs(delta.y) >= 0.1;
-			const point = swipe ? delta : end;
-			const horizontal = Math.abs(point.x);
-			const vertical = Math.abs(point.y);
+			let point = delta;
+			if (!swipe && space) {
+				const { left, top, width, height } =
+					space.el.getBoundingClientRect();
+				const center = this.coordinate({
+					clientX: left + width / 2,
+					clientY: top + height / 2,
+				});
+				point = { x: end.x - center.x, y: end.y - center.y };
+			}
 			return {
-				space: start.space,
-				tap: !swipe,
+				space,
+				...point,
 				swipe,
-				direction:
-					horizontal + vertical < 0.1
-						? 'origin'
-						: horizontal >= vertical
-							? point.x >= 0
-								? 'right'
-								: 'left'
-							: point.y >= 0
-								? 'up'
-								: 'down',
+				origin: !swipe && Math.abs(end.x) + Math.abs(end.y) < 0.2,
 			};
+		}
+	}
+
+	class Input {
+		#universe;
+		#bindings = new Map();
+		#down = null;
+		#tap = null;
+
+		constructor(universe) {
+			this.#universe = universe;
+			pathless.el.addEventListener('pointerdown', this);
+			for (const type of [
+				'pointerup',
+				'pointercancel',
+				'keydown',
+				'blur',
+			])
+				window.addEventListener(type, this);
+		}
+
+		x(left, right) {
+			return this.#bind({ x: [left, right] });
+		}
+
+		y(up, down) {
+			return this.#bind({ y: [up, down] });
+		}
+
+		#bind(pair) {
+			const space = this.#universe.space;
+			const bindings = this.#bindings.get(space) ?? {};
+			this.#bindings.set(space, Object.assign(bindings, pair));
+			return this;
+		}
+
+		clear(space) {
+			this.#bindings.delete(space);
+			if (this.#down?.start.space === space) this.#down = null;
+			if (this.#tap?.space === space) this.#tap = null;
+		}
+
+		#handle(action, space) {
+			const universe = this.#universe;
+			if (!universe.visible.includes(space)) return;
+			if (action === 'panel') universe.togglePanel();
+			else if (action === 'next' || action === 'previous')
+				universe.navigate(action === 'next' ? 1 : -1, space);
+			else {
+				const { x, y } = action;
+				const bindings = this.#bindings.get(space);
+				if (bindings?.x && (!bindings.y || Math.abs(x) >= Math.abs(y)))
+					bindings.x[x < 0 ? 0 : 1]?.();
+				else bindings?.y?.[y >= 0 ? 0 : 1]?.();
+			}
+		}
+
+		handleEvent(event) {
+			this[event.type]?.(event);
+		}
+
+		#ignore(event) {
+			return (
+				event.defaultPrevented ||
+				event.target.isContentEditable ||
+				event.target.closest?.(
+					'input, textarea, select, button, a[href], summary, [role="button"]',
+				)
+			);
+		}
+
+		blur() {
+			this.#down = this.#tap = null;
+		}
+
+		pointerdown(event) {
+			if (
+				this.#ignore(event) ||
+				!event.isPrimary ||
+				event.button !== 0 ||
+				this.#down
+			)
+				return;
+			const { clientX, clientY, pointerId } = event;
+			const { space } = this.#universe.coordinateV2(event);
+			if (space)
+				this.#down = {
+					id: pointerId,
+					start: { clientX, clientY, space },
+				};
+			else this.#tap = null;
+		}
+
+		pointercancel(event) {
+			if (this.#down?.id === event.pointerId) this.blur();
+		}
+
+		pointerup(event) {
+			const down = this.#down;
+			if (!down || down.id !== event.pointerId) return;
+			if (event.defaultPrevented) {
+				this.pointercancel(event);
+				return;
+			}
+			this.#down = null;
+			const universe = this.#universe;
+			const { space, x, y, swipe, origin } = universe.displacement(
+				down.start,
+				event,
+			);
+			const tap = this.#tap;
+			this.#tap = null;
+			if (!universe.visible.includes(space)) return;
+			if (swipe) {
+				if (Math.abs(x) >= Math.abs(y))
+					this.#handle(x < 0 ? 'next' : 'previous', space);
+			} else if (origin) {
+				if (tap?.space === space && event.timeStamp - tap.time < 300)
+					this.#handle('panel', space);
+				else this.#tap = { space, time: event.timeStamp };
+			} else this.#handle({ x, y }, space);
+		}
+
+		keydown(event) {
+			if (
+				this.#ignore(event) ||
+				event.repeat ||
+				event.isComposing ||
+				event.metaKey ||
+				event.ctrlKey ||
+				event.altKey ||
+				event.shiftKey
+			)
+				return;
+			const action = { q: 'previous', e: 'next', z: 'panel' }[event.key];
+			if (!action) return;
+			this.#tap = null;
+			const universe = this.#universe;
+			this.#handle(action, universe.spaces[pathless.el.dataset.focused]);
+			event.preventDefault();
 		}
 	}
 </script>
