@@ -9,10 +9,10 @@ import (
 	"net/http"
 )
 
-//go:embed zero.html
+//go:embed pathless.html
 var pathlessHTML string
 
-//go:embed one.html
+//go:embed universe.html
 var universeHTML []byte
 
 type Zero struct {
