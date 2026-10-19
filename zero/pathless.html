@@ -6,10 +6,6 @@
 			content="width=device-width,initial-scale=1.0,viewport-fit=cover,user-scalable=no" />
 		<title>hello.universe</title>
 		<style>
-			:root {
-				--line: blue;
-				--panel-height: 15dvh;
-			}
 			*,
 			*::before,
 			*::after {
@@ -26,50 +22,58 @@
 				display: none !important;
 			}
 			html,
-			body {
+			body,
+			#universe,
+			.space {
 				overflow: hidden;
 			}
-			body {
+			body,
+			#universe {
 				background: #000;
+			}
+			body {
 				color: #fff;
 				font-family: sans-serif;
 			}
 			#universe {
+				--rows: minmax(0, 1fr);
+				--panel-row: 0px;
 				position: fixed;
 				inset: 0;
-				overflow: hidden;
-				display: flex;
-				gap: 1px;
-				background: var(--line);
-				border: 1px solid var(--line);
+				display: grid;
+				grid-auto-columns: minmax(0, 1fr);
+				grid-template-rows: var(--rows) var(--panel-row);
+				grid-template-areas: 'zero' 'three';
 				border-radius: 5px;
 				container: universe / size;
 				touch-action: none;
 				overscroll-behavior: none;
 			}
-			#universe:empty {
-				background: transparent;
+			#universe:not(:empty)::after {
+				content: '';
+				position: absolute;
+				inset: 0;
+				z-index: 2;
+				border-radius: inherit;
+				box-shadow: inset 0 0 0 1px blue;
+				pointer-events: none;
 			}
 			#universe.panel {
-				padding-bottom: var(--panel-height);
+				--panel-row: 15dvh;
 			}
-			#universe:not(.panel) > #three {
-				display: none;
+			.space,
+			.space > :first-child {
+				min-width: 0;
+				min-height: 0;
 			}
 			.space {
 				display: flex;
-				flex: 1 1 0;
-				min-width: 0;
-				min-height: 0;
-				overflow: hidden;
 				padding: clamp(0.25rem, 1vmin, 0.75rem);
-				background: #000;
+				box-shadow: inset 0 0 0 0.5px blue;
 				container-type: size;
 			}
 			.space > :first-child {
 				flex: 1;
-				min-width: 0;
-				min-height: 0;
 			}
 			#zero {
 				grid-area: zero;
@@ -81,15 +85,10 @@
 				grid-area: two;
 			}
 			#three {
-				position: absolute;
-				inset: auto 0 0;
-				height: var(--panel-height);
-				z-index: 1;
-				border-top: 1px solid var(--line);
+				grid-area: three;
 			}
-			#universe[data-layout='0'] > :not(#three) {
-				display: none;
-			}
+			#universe:not(.panel) > #three,
+			#universe[data-layout='0'] > :not(#three),
 			#universe[data-layout='1']:not([data-focused='2']) #two,
 			#universe[data-layout='1'][data-focused='2'] #one {
 				display: none;
@@ -98,26 +97,32 @@
 			#universe[data-layout='0'][data-focused='1'] #one,
 			#universe[data-layout='0'][data-focused='2'] #two {
 				display: flex;
+				grid-area: zero;
+			}
+			#universe[data-layout='1'] {
+				grid-template-areas: 'zero one' 'three three';
+			}
+			#universe[data-layout='1'][data-focused='2'] #two {
+				grid-area: one;
 			}
 			#universe[data-layout='1'][data-variant='1'] {
-				flex-direction: column;
+				grid-template-areas: 'zero' 'one' 'three';
 			}
+			#universe[data-layout='1'][data-variant='1'],
 			#universe[data-layout='2'] {
-				display: grid;
-				grid-auto-columns: minmax(0, 1fr);
-				grid-auto-rows: minmax(0, 1fr);
+				--rows: repeat(2, minmax(0, 1fr));
 			}
 			#universe[data-layout='2'][data-variant='0'] {
-				grid-template-areas: 'zero one' 'zero two';
+				grid-template-areas: 'zero one' 'zero two' 'three three';
 			}
 			#universe[data-layout='2'][data-variant='1'] {
-				grid-template-areas: 'zero zero' 'two one';
+				grid-template-areas: 'zero zero' 'two one' 'three three';
 			}
 			#universe[data-layout='2'][data-variant='2'] {
-				grid-template-areas: 'two zero' 'one zero';
+				grid-template-areas: 'two zero' 'one zero' 'three three';
 			}
 			#universe[data-layout='2'][data-variant='3'] {
-				grid-template-areas: 'one two' 'zero zero';
+				grid-template-areas: 'one two' 'zero zero' 'three three';
 			}
 		</style>
 		<script>
@@ -132,12 +137,6 @@
 
 				constructor() {
 					this.el = document.getElementById('universe');
-					({ width: this.width, height: this.height } =
-						this.el.getBoundingClientRect());
-					new ResizeObserver(([entry]) => {
-						({ inlineSize: this.width, blockSize: this.height } =
-							entry.borderBoxSize[0]);
-					}).observe(this.el, { box: 'border-box' });
 				}
 
 				static decode(bytes) {
@@ -215,17 +214,19 @@
 
 				async init() {
 					const [zero, frames, panels] = await this.source('');
+					this.frames = frames.ones;
+					this.panels = panels.ones;
 					this.exec(this.el, zero.data);
-					this.universe = new Universe(frames.ones, panels.ones);
+
+					const { universe } = this;
+					this.x = universe.pointer.x;
+					this.y = universe.pointer.y;
+					if (this.frames.length) universe.sync();
 				}
 			}
 			document.addEventListener('DOMContentLoaded', async () => {
 				window.pathless = new Pathless();
 				await pathless.init();
-				const { universe } = pathless;
-				pathless.x = (left, right) => universe.x(left, right);
-				pathless.y = (up, down) => universe.y(up, down);
-				if (universe.frames.length) universe.sync();
 			});
 		</script>
 	</head>

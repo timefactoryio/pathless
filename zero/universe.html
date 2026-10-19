@@ -7,28 +7,34 @@
 	class Universe {
 		#previous = null;
 		#rendering = null;
-		#bindings = new WeakMap();
-		constructor(frames, panels) {
-			this.frames = frames;
-			this.panels = panels;
+		constructor() {
+			this.el = pathless.el;
 			const space = (id) => ({
 				el: document.getElementById(id),
 				frame: 0,
 				states: [],
+				bindings: {},
 			});
 			this.spaces = ['zero', 'one', 'two'].map(space);
 			this.panel = space('three');
 			this.pointer = new Pointer(this);
-			this.bind(
-				{
-					left: ({ space }) => this.navigate(1, space),
-					right: ({ space }) => this.navigate(-1, space),
-				},
-				'swipe',
-				pathless.el,
-			);
-			this.bind({ origin: () => this.togglePanel() }, 'tap', pathless.el);
-			this.pointer.onGesture = (event) => this.route(event);
+			this.#measure();
+			const observer = new ResizeObserver(() => this.#measure());
+			observer.observe(this.el, { box: 'border-box' });
+		}
+
+		#measure() {
+			const { width, height } = this.el.getBoundingClientRect();
+			this.width = width;
+			this.height = height;
+			for (const space of this.visible) {
+				const { left, top, width, height } =
+					space.el.getBoundingClientRect();
+				space.center = {
+					x: (left + width / 2) / (this.width / 2) - 1,
+					y: 1 - (top + height / 2) / (this.height / 2),
+				};
+			}
 		}
 
 		get space() {
@@ -59,6 +65,7 @@
 			const index = this.spaces.indexOf(space);
 			if (index < 0) return;
 			pathless.el.dataset.focused = index;
+			this.#measure();
 			this.sync();
 		}
 
@@ -66,10 +73,12 @@
 			if (!spaces.length)
 				spaces = this.visible.filter(({ el }) => !el.firstElementChild);
 			for (const space of spaces) {
-				const frames = space === this.panel ? this.panels : this.frames;
+				const frames =
+					space === this.panel ? pathless.panels : pathless.frames;
 				if (!frames.length) continue;
 				this.#rendering = space;
 				try {
+					space.bindings = {};
 					pathless.exec(space.el, frames[space.frame].data);
 				} finally {
 					this.#rendering = null;
@@ -82,7 +91,8 @@
 		}
 
 		navigate(direction, space = this.space) {
-			const frames = space === this.panel ? this.panels : this.frames;
+			const frames =
+				space === this.panel ? pathless.panels : pathless.frames;
 			if (!frames.length) return;
 			space.frame = this.#cycle(space.frame, direction, frames.length);
 			this.sync(space);
@@ -105,6 +115,7 @@
 			if (l) v = this.#cycle(v, 0, 2 ** l);
 			dataset.layout = l;
 			dataset.variant = v;
+			this.#measure();
 			this.sync();
 		}
 
@@ -120,38 +131,10 @@
 		}
 
 		togglePanel() {
-			if (!this.panels.length) return;
+			if (!pathless.panels.length) return;
 			pathless.el.classList.toggle('panel');
+			this.#measure();
 			this.sync();
-		}
-
-		x(left, right) {
-			this.bind({ left, right });
-		}
-
-		y(up, down) {
-			this.bind({ up, down });
-		}
-
-		bind(pair, gesture = 'tap', el = this.space.el.firstElementChild) {
-			if (el) {
-				const bindings = this.#bindings.get(el) ?? {};
-				bindings[gesture] = Object.assign(
-					bindings[gesture] ?? {},
-					pair,
-				);
-				this.#bindings.set(el, bindings);
-			}
-		}
-
-		route(event) {
-			const { gesture, direction, space } = event;
-			const callback =
-				this.#bindings.get(pathless.el)?.[gesture]?.[direction] ??
-				this.#bindings.get(space.el.firstElementChild)?.[gesture]?.[
-					direction
-				];
-			callback?.(event);
 		}
 	}
 
@@ -159,80 +142,90 @@
 		state = null;
 
 		constructor(universe) {
-			this.down = (event) => {
-				if (!event.isPrimary || event.button !== 0 || this.state)
-					return;
-				const { clientX, clientY } = event;
-				const target = document.elementFromPoint(clientX, clientY);
-				const space = universe.visible.find(({ el }) =>
-					el.contains(target),
+			this.universe = universe;
+			this.x = (first, second) => {
+				this.universe.space.bindings.x = [first, second];
+			};
+			this.y = (first, second) => {
+				this.universe.space.bindings.y = [first, second];
+			};
+			for (const [type, method] of [
+				['pointerdown', 'down'],
+				['pointerup', 'up'],
+				['pointercancel', 'cancel'],
+				['lostpointercapture', 'cancel'],
+			]) {
+				pathless.el.addEventListener(type, (event) =>
+					this[method](event),
 				);
-				if (!space) return;
-				pathless.el.setPointerCapture(event.pointerId);
-				this.state = {
-					id: event.pointerId,
-					zero: { clientX, clientY, z: space },
-				};
-			};
-			this.up = (event) => {
-				const pointer = this.state;
-				if (!pointer || pointer.id !== event.pointerId) return;
-				this.state = null;
-				if (
-					event.defaultPrevented ||
-					!universe.visible.includes(pointer.zero.z)
-				)
-					return;
-				const result = this.xyz(event, pointer.zero);
-				if (result) this.onGesture?.(result);
-				return result;
-			};
-			this.cancel = (event) => {
-				if (this.state?.id === event.pointerId) this.state = null;
-			};
-			pathless.el.addEventListener('pointerdown', this.down);
-			pathless.el.addEventListener('pointerup', this.up);
-			pathless.el.addEventListener('pointercancel', this.cancel);
-			pathless.el.addEventListener('lostpointercapture', this.cancel);
-		}
-
-		normalize(point, { left = 0, top = 0, width, height } = pathless) {
-			return {
-				x: (point.clientX - left - width / 2) / (width / 2),
-				y: (top + height / 2 - point.clientY) / (height / 2),
-			};
-		}
-
-		xyz(event, zero) {
-			const start = this.normalize(zero);
-			const end = this.normalize(event);
-			const delta = { x: end.x - start.x, y: end.y - start.y };
-			if (Math.hypot(delta.x, delta.y) > 0.1) {
-				if (Math.abs(delta.x) < Math.abs(delta.y)) return;
-				return {
-					gesture: 'swipe',
-					direction: delta.x < 0 ? 'left' : 'right',
-					space: zero.z,
-				};
 			}
-			if (Math.hypot(end.x, end.y) <= 0.05)
-				return { gesture: 'tap', direction: 'origin', space: zero.z };
-			const point = this.normalize(
-				event,
-				zero.z.el.getBoundingClientRect(),
-			);
-			const horizontal = Math.abs(point.x) >= Math.abs(point.y);
-			return {
-				gesture: 'tap',
-				direction: horizontal
-					? point.x < 0
-						? 'left'
-						: 'right'
-					: point.y > 0
-						? 'up'
-						: 'down',
-				space: zero.z,
+		}
+
+		down(event) {
+			if (!event.isPrimary || event.button !== 0 || this.state) return;
+			const visible = this.universe.visible;
+			const space = visible.find(({ el }) => el.contains(event.target));
+			if (!space) return;
+			if (visible.length > 1 && space !== this.universe.space)
+				this.universe.focused = space;
+			pathless.el.setPointerCapture(event.pointerId);
+			this.state = {
+				id: event.pointerId,
+				start: this.coordinate(event),
+				space,
 			};
+		}
+
+		up(event) {
+			const pointer = this.state;
+			if (!pointer || pointer.id !== event.pointerId) return;
+			if (
+				event.defaultPrevented ||
+				!this.universe.visible.includes(pointer.space)
+			) {
+				this.cancel(event);
+				return;
+			}
+			const end = this.coordinate(event);
+			this.output(pointer.start, end);
+		}
+
+		cancel(event) {
+			if (this.state?.id === event.pointerId) this.state = null;
+		}
+
+		coordinate(point) {
+			const { width, height } = this.universe;
+			return {
+				x: point.clientX / (width / 2) - 1,
+				y: 1 - point.clientY / (height / 2),
+			};
+		}
+
+		output(start, end) {
+			const deltaX = Math.abs(end.x - start.x);
+			const deltaY = Math.abs(end.y - start.y);
+			const { space } = this.state;
+			const { bindings, center } = space;
+			this.state = null;
+			if (Math.max(deltaX, deltaY) >= 0.1) {
+				if (deltaX >= deltaY)
+					this.universe.navigate(end.x < start.x ? -1 : 1, space);
+			} else if (
+				Math.min(Math.abs(start.x), Math.abs(start.y)) <= 0.05 &&
+				Math.min(Math.abs(end.x), Math.abs(end.y)) <= 0.05
+			) {
+				this.universe.togglePanel();
+			} else {
+				const offsetX = end.x - center.x;
+				const offsetY = end.y - center.y;
+				const callback =
+					Math.abs(offsetX) >= Math.abs(offsetY)
+						? bindings.x?.[offsetX < 0 ? 0 : 1]
+						: bindings.y?.[offsetY < 0 ? 1 : 0];
+				callback?.(start, end, space);
+			}
 		}
 	}
+	pathless.universe = new Universe();
 </script>

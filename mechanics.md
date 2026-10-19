@@ -1,263 +1,303 @@
 # Mechanics
 
-Pathless is a library. It is constructed in two phases:
+This guide describes the components behind the public API in
+[README.md](README.md). Private names are implementation details, not additional
+application contracts.
 
-1. Establish the point of observation.
-2. Register and serve the experience observed from it.
+## Ownership
 
-Templates and applications live outside this module. `pathless` provides the runtime, `frames` provides ready-made frames, and a `main` package composes them.
+| Component          | Owns                                                            |
+| ------------------ | --------------------------------------------------------------- |
+| Go `Pathless`      | Embedded `fx.Fx` interface                                      |
+| `zero.Zero`        | Universe bytes, shell origin, private circuit URL and shell mux |
+| Private `fx`       | Zero reference, frames/panels, routes, circuit mux, HTTP client |
+| Browser `Pathless` | Root, resource/blob cache, decoded frames/panels, universe      |
+| Browser `Universe` | Space records, geometry, layout/focus operations, pointer       |
+| Browser `Pointer`  | Active gesture and binding functions                            |
 
-## Composition
+There is no separate Go `one` serving package: `fx.One` is the tree data type,
+and `fx` encodes and serves circuit payloads.
 
-`Pathless` embeds the `fx.Fx` interface:
+## Construction
 
-```go
-type Pathless struct {
-	fx.Fx
-}
+1. `NewPathless(args...)` calls `zero.NewZero(args...)`.
+2. `NewZero` chooses local/hosted origins, exposes embedded universe bytes,
+   and calls `Zero.pathless` to render/compress/register the shell.
+3. `NewZero` launches the shell server on `:1000` in a goroutine.
+4. `fx.NewFx` allocates routes, the circuit mux, and the HTTP client.
+5. Application code registers content with `Input` and `Frame`.
+6. `Start` encodes bootstrap/public routes, registers handlers, and blocks
+   serving the CORS-wrapped circuit mux on `:1001`.
 
-func NewPathless(args ...string) *Pathless {
-	z := zero.NewZero(args...)
-	return &Pathless{Fx: fx.NewFx(z)}
-}
-```
+These are separate HTTP servers with no exposed shutdown handle. `Start`
+does not watch files or dynamically register later content.
 
-`NewPathless` constructs `Zero` first, then hands it to `Fx`. Because `Fx` is embedded, its methods are promoted onto `Pathless`:
+### Zero Internals
 
-```go
-type Fx interface {
-	Input(string, ...bool) ([]*One, error)
-	Frame(string, ...bool) error
-	Save(string, ...bool) ([]byte, error)
-	Start()
-}
-```
+`pathlessHTML` is an embedded string; `universeHTML` is embedded bytes. Editing
+their source files requires rebuilding the Go application.
 
-Four methods are the entire public surface. Everything else — templates, markdown rendering, slide decks — is built on top of them by other modules.
+`Zero.pathless` renders the shell with `html/template`, passing the private
+`circuitURL` as `CIRCUIT`. `Zero.zip` compresses it using `gzip.BestCompression`.
+The shell handler closes over these bytes: no per-request rendering/compression.
+It redirects non-root paths/nonempty queries and otherwise serves gzip HTML.
 
-## Zero
+Private `mux` owns shell routing. Exported `PathlessURL` supplies circuit CORS,
+not the server's bind address. Hosted mode changes advertised HTTPS origins,
+not the plain HTTP listeners.
 
-`zero.NewZero` establishes the point of origin.
+## Content Pipeline
 
-It embeds two resources into the Go binary:
-
-- `pathless.html`: the browser shell and payload decoder
-- `universe.html`: the observable runtime delivered through the circuit
-
-During construction, Zero:
-
-1. Selects local or hosted shell and circuit URLs.
-2. Renders `pathless.html` with the circuit URL.
-3. Compresses the rendered shell once.
-4. Registers the shell handler.
-5. Starts the shell server on port `1000` in a goroutine.
-
-The shell payload is closed over by its HTTP handler. Rendering and compression do not occur per request. Any request that is not exactly `/` is redirected to `/` — the shell has no paths.
-
-`NewZero` accepts zero or two arguments. Zero arguments is local mode:
-
-```text
-Shell:   http://localhost:1000
-Circuit: http://localhost:1001
-```
-
-Two arguments are the shell and circuit domains, served as `https://`. Any other argument count panics.
-
-`Zero` exposes `UniverseHTML` and `PathlessURL`. `PathlessURL` is the origin `Fx` allows through CORS — `*` in local mode.
-
-## Fx
-
-`fx` owns the experience assembled above Zero:
+### fx State
 
 ```go
 type fx struct {
-	z      *zero.Zero
-	frames []*One
-	panels []*One
-	routes map[string][]*One
-	mux    *http.ServeMux
-	client *http.Client
+    z      *zero.Zero
+    frames []*One
+    panels []*One
+    routes map[string][]*One
+    mux    *http.ServeMux
+    client *http.Client
 }
 ```
 
-Its responsibilities are:
+Collections preserve registration order; route keys derive from source paths.
+Public input retains slices of pointers. Frame building shallow-copies the
+node, replacing type/data but sharing children. Mutations are not synchronized.
 
-- Read local and remote resources into `One` values.
-- Build executable HTML frames and panels.
-- Retain named routes for on-demand payloads.
-- Encode the bootstrap and route payloads.
-- Serve the circuit on port `1001`.
+### Input Helpers
 
-The concrete type is unexported. Consumers hold the `Fx` interface.
+| Helper                        | Role                                                                                                            |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `(*fx).url(source)`           | GET, reject non-2xx, read bytes, try `decode`, otherwise return a raw leaf.                                     |
+| `detectType(path, data)`      | Extension-based MIME resolution, then content sniffing.                                                         |
+| `readDir(path)`               | Read listing, call `processFiles`, apply `sequence`.                                                            |
+| `processFiles(path, entries)` | Recurse into directories, read files, call `stripExtensions`.                                                   |
+| `readFile(path, name)`        | Read bytes and construct a typed leaf with the supplied name.                                                   |
+| `stripExtensions(entries)`    | Count shortened candidates, mutate only unique candidates.                                                      |
+| `sequence(entries)`           | Consume the normalized `sequence` node and order siblings.                                                      |
+| `baseName(source)`            | Extract URL path if applicable, take basename, preserve dot-prefixed names, otherwise drop the final extension. |
 
-## One
+`baseName` returns empty for `.` or `/`. Sibling normalization includes
+directories, is local to each directory, and starts from `os.ReadDir` order.
+A direct file input instead gets its name from `baseName` immediately.
 
-There is one data type. `One` is a node in a tree:
+`sequence` trims overall data and individual lines, ignores unknown names,
+and tracks node identity to suppress duplicate listed entries. Unlisted nodes
+follow in their existing order. It triggers on normalized name `sequence`,
+not on a special filesystem extension. A collision that preserves the name
+`sequence.txt` prevents that entry from being consumed under that name.
 
-```go
-type One struct {
-	Name string
-	Type string
-	Data []byte
-	Ones []*One
-}
-```
+### Remote Transport Caveat
 
-A file is a leaf. A directory is a node whose `Ones` are its children. A frame is a leaf whose `Type` is `text/html`. A payload is just `[]*One`.
+`url` tries gzip-only `decode` on bytes read from the HTTP response body.
+The standard Go HTTP transport can automatically decompress responses carrying
+`Content-Encoding: gzip`, as Pathless circuit responses do. In that case it
+passes bare wire bytes to `decode`, which rejects them; `url` falls back to
+a raw resource. Direct circuit-to-circuit consumption is therefore not always
+equivalent to fetching a saved gzip artifact served without content decoding.
 
-Source location and cardinality do not create separate APIs, and nesting does not create a second representation. Consumers decide whether they need one node, a list, or a subtree.
+### Frame Builder
 
-## Input
-
-```go
-Input(path string, public ...bool) ([]*One, error)
-```
-
-`Input` accepts:
-
-- An HTTP or HTTPS URL
-- A local file
-- A local directory
-
-A URL or file returns one entry. A directory returns its children, recursively.
-
-When `public` is true, the result is also retained in `routes` under a derived name — the URL or file base name, or the directory's own name. Retained routes are encoded and served at `/<name>` by `Start`.
-
-A URL response is first attempted as an encoded payload via `decode`. If it decodes, those entries are returned directly, so one Pathless instance can consume another's payload. Otherwise the raw bytes become a single entry.
-
-### Directory processing
-
-`readDir` reads a directory, then:
-
-1. Reads each file into a `One` via `readFile`.
-2. Recurses into subdirectories, attaching children as `Ones`.
-3. Detects each file's MIME type by extension, falling back to content sniffing.
-4. Strips extensions from names that stay unique once shortened.
-5. Applies an optional `sequence` file.
-
-A `sequence.txt` file defines presentation order by listing normalized entry names line by line. The sequence entry is consumed and removed from the result. Unlisted entries keep their relative order afterward.
-
-Names beginning with a dot keep their extension (`.gitignore`, `.env.local`).
-
-## Frames and panels
-
-```go
-Frame(source string, panel ...bool) error
-```
-
-`source` is either literal HTML — detected by a leading `<` — or a path or URL resolved through `Input`, which must produce exactly one entry. When `panel` is true the result is appended to `panels`, otherwise to `frames`. Registration order is presentation order.
-
-Every frame passes through `build`, which:
-
-1. Merges multiple style blocks into one.
-2. Merges script blocks into one block wrapped in an isolated scope.
-3. Returns a `text/html` entry.
-
-Script bodies that are not already a block are wrapped in braces before merging, so frames do not leak identifiers into each other.
-
-Frames are rendered into observable spaces. Panels are rendered into the panel region.
-
-A frame may call `pathless.source(route)` to obtain a public route. This keeps the bootstrap small while allowing frames to load typed resources as needed.
-
-## Start
-
-```go
-func (f *fx) Start() {
-	f.handle("/", encode(f.universe()))
-	for key, payload := range f.routes {
-		f.handle("/"+key, encode(payload))
-	}
-	http.ListenAndServe(":1001", f.cors(f.mux))
-}
-```
-
-The bootstrap payload is positional:
+`(*fx).build` uses case-sensitive regular expressions for exact tags:
 
 ```text
-0: universe HTML
-1: frames   (as Ones)
-2: panels   (as Ones)
+(?s)<style>(.*?)</style>
+(?s)<script>(.*?)</script>
 ```
 
-Every public route is encoded at startup as well. The compressed bytes are retained in memory and written directly for each request, so the served experience is a startup snapshot. Register everything before `Start`.
+Multiple matching styles are concatenated and prepended; one style stays in
+place. Matching scripts are removed and merged at the end. Bodies whose
+trimmed source does not begin with `{` get block-wrapped, and the merged
+script receives an outer block. Output is a shallow node copy with rewritten
+data and `Type: "text/html"`.
 
-`Start` blocks, and panics if the circuit port cannot be bound.
+Attributes, uppercase tags, module scripts, and external scripts are not
+handled by the merger. Unmatched tags keep their original HTML behavior.
+Block scoping does not isolate globals, DOM access, asynchronous work, or
+privileges. This is not sanitization or general HTML parsing.
 
-## Save
+### Bootstrap and Serving
 
-```go
-Save(key string, binary ...bool) ([]byte, error)
-```
-
-`Save` encodes an already-registered route and returns the wire bytes. When `binary` is true it also writes them to a file named for the route. This makes a payload publishable as a static artifact — object storage, a CDN — that another instance can consume through `Input`.
-
-## Payload protocol
-
-A payload is `[]*One`, encoded recursively:
+`(*fx).universe()` creates three positional nodes:
 
 ```text
-one-count
-name  type  data  child-count  <children...>
-name  type  data  child-count  <children...>
-...
+0: { Name: "universe", Type: "text/html", Data: Zero.UniverseHTML }
+1: { Ones: frames }
+2: { Ones: panels }
 ```
 
-Counts and field lengths are unsigned varints, so small values need only one byte of framing. There are no type tags; every node has the same shape, and a zero child count terminates a leaf.
+The containers have otherwise zero-valued fields. Browser initialization
+depends on position, not names.
 
-Payloads are gzip-compressed at best compression when encoded, which happens once per route at registration or in `Save`.
+`(*fx).handle(path, bytes)` closes over encoded bytes in a `ServeMux` handler,
+writing octet-stream/gzip headers on every response. The root route is a
+catch-all; route keys and patterns follow Go mux semantics. `Start` encodes
+once per route at startup, while `Save` encodes on each invocation.
 
-`decode` is the inverse and is defensive: it bounds nesting depth, rejects entry counts larger than the remaining bytes could hold, rejects field lengths that exceed the remainder, and rejects trailing bytes.
+`(*fx).cors(next)` sets allowed-origin/method headers, returns `204` for
+`OPTIONS`, and passes other requests through. It advertises rather than
+enforces `GET, OPTIONS`. Compression is unconditional, without per-request
+`Accept-Encoding` negotiation.
 
-Responses are served as `application/octet-stream` with `Content-Encoding: gzip`. CORS allows `GET` and `OPTIONS` from `Zero.PathlessURL`.
+## Wire Protocol
 
-## Client decoding
+After gzip decompression, a list is encoded as:
 
-The shell fetches payloads from the circuit and decodes them into JavaScript values.
+```text
+unsigned-varint node count
+repeat for each node:
+    unsigned-varint name byte length; UTF-8 name bytes
+    unsigned-varint type byte length; UTF-8 MIME type bytes
+    unsigned-varint data byte length; raw data bytes
+    child list (same format, starting with its count)
+```
 
-The decoder maintains one cursor over the response bytes:
+There is no version, magic prefix, or directory tag. A leaf ends in a zero
+child count. Field lengths count bytes, not characters.
 
-- `uv()` reads an unsigned varint.
-- `field()` reads one length-prefixed byte field.
-- Each node reads name, type, data, then recurses over its child count.
-- A node becomes `{ name, type, data, ones }`, with `data` as a `Uint8Array`.
+### Encoder
 
-The corrected field reader decodes the length before advancing the cursor:
+Private `encoder` embeds `io.Writer`. `writeOnes` writes counts, fields, and
+children; `writeField` writes a byte length and bytes; `writeUvarint` uses
+`binary.PutUvarint` with a fixed scratch array.
+
+`encode` writes through best-compression gzip into an in-memory buffer. Internal
+writer errors are not propagated. Nodes must be non-nil and the tree acyclic;
+the encoder does not validate arbitrary user-created graphs.
+
+### Go Decoder
+
+`decode` opens gzip, reads its full decompressed contents, constructs a private
+`decoder` embedding `*bytes.Reader`, calls `readOnes(0)`, and rejects trailing
+bytes.
+
+`readOnes` rejects depths above 1000 and node counts larger than remaining
+minimum framing permits. It reads fields and recursively reconstructs nodes.
+`readField` bounds lengths against remaining bytes and uses `io.ReadFull`.
+These are framing checks, not resource limits: decompressed bytes are fully
+read before validation, without a total-size cap.
+
+## Browser Bootstrap
+
+The shell defines the circuit URL and `Pathless`, then runs:
 
 ```js
-const field = () => {
-	const length = uv();
-	return bytes.slice(position, (position += length));
-};
+window.pathless = new Pathless();
+await pathless.init();
+const { universe } = pathless;
+pathless.x = universe.pointer.x;
+pathless.y = universe.pointer.y;
+if (pathless.frames.length) universe.sync();
 ```
 
-`source(path)` caches the decoded promise by route. Failed requests are removed from the cache so a later request can retry.
-
-## Bootstrap
-
-Client initialization loads one payload:
+Construction captures `#universe`. `init` loads `source('')`, stores the two
+content collections, and executes universe HTML. That inserts four spaces,
+defines `Universe` and `Pointer`, and ends with:
 
 ```js
-const [universe, frames, panels] =
-	await pathless.source('');
+pathless.universe = new Universe();
 ```
 
-The universe HTML is executed inside `#universe`.
+Inline insertion executes the assignment before initialization resumes. The
+shell installs pointer aliases before syncing any frames. `init` does not
+construct a universe itself; there is no `pathless.input` object.
 
-Frame and panel data are stored directly on `pathless`:
+### Pathless Private Components
 
-```js
-pathless.frames
-pathless.panels
-```
+`#cache` holds two kinds of entries: route strings map to fetch/decode promises;
+decoded node identities map to blob URL strings. `source` deletes rejected
+requests for retry and optionally maps top-level nodes to blob URLs. There
+is no invalidation, bounded retention, recursive conversion, or URL revocation.
 
-The executed universe creates:
+Static `#decoder` is a shared `TextDecoder`. Static `#range` is a shared DOM
+`Range`; `exec` creates a contextual fragment and inserts it with
+`replaceChildren`, enabling inline script execution.
 
-```js
-pathless.universe
-pathless.input
-```
+`Pathless.decode` closes over a byte offset. Its local helpers are:
 
-`Universe` references frames and panels through `pathless`, preserving one canonical owner.
+- `uvarint`: reads continuation-bit integers, coercing to unsigned 32-bit with
+  `>>> 0`.
+- `field`: reads length, advances offset, returns a `subarray` view.
+- `ones`: recursively allocates/decodes node arrays, turning HTML data into
+  strings and leaving other data as byte views.
+
+Unlike the Go decoder, it does not explicitly reject truncation, trailing
+bytes, excessive depth, or oversized varints. It assumes trusted valid wire
+bytes and relies on browser HTTP gzip decompression.
+
+## Universe Private Components
+
+Construction creates three main space records and one panel record, each at
+frame zero with empty states/bindings. It creates `Pointer(this)`, measures,
+and observes the root border box with `ResizeObserver`.
+
+| Private member                     | Purpose                                                        |
+| ---------------------------------- | -------------------------------------------------------------- |
+| `#previous`                        | Last split layout/variant, used for single-space toggling.     |
+| `#rendering`                       | Temporary space context during synchronous script execution.   |
+| `#cycle(index, direction, length)` | Positive modulo wrapping.                                      |
+| `#measure()`                       | Store viewport dimensions and normalize visible space centers. |
+
+Centers come from bounding rectangles relative to viewport half-dimensions,
+with positive Y upward. Hidden spaces are measured only when visible.
+Resizes, focus/layout changes, and panel toggles trigger measurement. The
+observer is local to construction and has no disposal method.
+
+`space` chooses rendering context or focused main space. `frame` lazily creates
+its state map at `states[frame]`. `visible` derives main visibility from root
+dataset state and appends an open panel.
+
+`sync` fills visible empty spaces unless explicit records are supplied. It
+chooses `pathless.frames`/`pathless.panels`, skips empty collections, sets
+`#rendering`, resets bindings, and executes data. `finally` clears rendering
+context even on an exception. It does not clamp stale indexes or roll back
+DOM. Async work runs after the rendering context has ended.
+
+`navigate` wraps and rerenders. The `focused` setter, `layout`, and `togglePanel`
+update root state, measure, and sync missing content. `focus` computes a visible
+main target and delegates to the setter. Persistent state is per space/index;
+bindings and DOM are rebuilt, not stored in that state automatically.
+
+### CSS Components
+
+The shell owns CSS; the universe payload supplies the space elements. A fixed
+full-viewport grid uses `data-layout`/`data-variant` for grid areas,
+`data-focused` for selected main-space visibility, and class `panel` for a
+`15dvh` panel row. Main tracks use `minmax(0, 1fr)` to resist content overflow.
+
+`.space` supplies flex sizing, padding, minimum-size constraints, clipping,
+and a size container. Its first child flexes to fill it. The root is also a
+size container and has a pointer-transparent border overlay. Global CSS
+disables selection, native dragging, touch callouts, tap highlighting, root
+touch actions, and overscroll.
+
+## Pointer Private Machinery
+
+`Pointer` holds its universe and nullable `state`. Its `x/y` arrow functions
+remain bound when aliased onto `pathless` and assign callback pairs to the
+current space. Construction listens for root `pointerdown`, `pointerup`,
+`pointercancel`, and `lostpointercapture`. The last two delegate to `cancel`.
+There is no move listener or teardown API.
+
+1. `down` filters nonprimary/nonzero-button/overlapping presses, finds the
+   containing visible space, focuses a main space if needed, captures the
+   pointer, and records `{ id, start, space }`.
+2. `up` checks the active ID, cancels prevented releases or hidden spaces,
+   otherwise computes the endpoint and calls `output`.
+3. `cancel` clears only a matching pointer ID.
+4. `coordinate` maps client coordinates using measured viewport dimensions.
+5. `output` retains the pressed space/bindings/center, clears gesture state,
+   then selects swipe, central-axis panel toggle, or directional tap.
+
+The swipe threshold is `0.1` normalized units, with horizontal dominance
+required for navigation. Both tap endpoints must be within `0.05` of either
+central viewport axis to toggle the panel; they need not share the same axis.
+Other taps compare offsets from space center, choosing horizontal on ties,
+and call `(start, end, space)`. Returns are ignored and promises are not awaited.
+
+Thresholds are viewport-normalized, not pixels or fractions of an individual
+space. The panel does not become the focused main space when pressed.
 
 ## Observation
 
