@@ -139,6 +139,10 @@
 					this.el = document.getElementById('universe');
 				}
 
+				get frame() {
+					return this.universe.frame;
+				}
+
 				static decode(bytes) {
 					let offset = 0;
 					const uvarint = () => {
@@ -221,7 +225,16 @@
 					const { universe } = this;
 					this.x = universe.pointer.x;
 					this.y = universe.pointer.y;
-					if (this.frames.length) universe.sync();
+					for (const name of [
+						'navigate',
+						'layout',
+						'focus',
+						'togglePanel',
+						'sync',
+					]) {
+						this[name] = universe[name].bind(universe);
+					}
+					if (this.frames.length) this.sync();
 				}
 			}
 			document.addEventListener('DOMContentLoaded', async () => {
