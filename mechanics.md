@@ -6,14 +6,14 @@ application contracts.
 
 ## Ownership
 
-| Component          | Owns                                                            |
-| ------------------ | --------------------------------------------------------------- |
-| Go `Pathless`      | Embedded `fx.Fx` interface                                      |
-| `zero.Zero`        | Universe bytes, shell origin, private circuit URL and shell mux |
-| Private `fx`       | Zero reference, frames/panels, routes, circuit mux, HTTP client |
-| Browser `Pathless` | Root, resource/blob cache, decoded frames/panels, universe      |
-| Browser `Universe` | Space records, geometry, layout/focus operations, pointer       |
-| Browser `Pointer`  | Active gesture and binding functions                            |
+| Component          | Owns                                                                     |
+| ------------------ | ------------------------------------------------------------------------ |
+| Go `Pathless`      | Embedded `fx.Fx` interface                                               |
+| `zero.Zero`        | Universe bytes, shell origin, private circuit URL and shell mux          |
+| Private `fx`       | Zero reference, frames/panels, routes, circuit mux, HTTP client          |
+| Browser `Pathless` | Root, resource/blob cache, decoded frames/panels, universe               |
+| Browser `Universe` | Space records, geometry, bindings, layout/focus, public API registration |
+| Browser `Pointer`  | Universe reference, active gesture, pointer-event dispatch               |
 
 There is no separate Go `one` serving package: `fx.One` is the tree data type,
 and `fx` encodes and serves circuit payloads.
@@ -34,8 +34,9 @@ does not watch files or dynamically register later content.
 
 ### Zero Internals
 
-`pathlessHTML` is an embedded string; `universeHTML` is embedded bytes. Editing
-their source files requires rebuilding the Go application.
+`pathlessHTML` embeds [zero/zero.html](zero/zero.html) as a string;
+`universeHTML` embeds [zero/one.html](zero/one.html) as bytes. Editing either
+file requires rebuilding the Go application.
 
 `Zero.pathless` renders the shell with `html/template`, passing the private
 `circuitURL` as `CIRCUIT`. `Zero.zip` compresses it using `gzip.BestCompression`.
@@ -180,47 +181,50 @@ read before validation, without a total-size cap.
 
 ## Browser Bootstrap
 
-The shell defines the circuit URL and `Pathless`, then runs:
+The shell defines the circuit URL and `Pathless`, then runs on `DOMContentLoaded`:
 
 ```js
 window.pathless = new Pathless();
-await pathless.init();
-const { universe } = pathless;
-pathless.x = universe.pointer.x;
-pathless.y = universe.pointer.y;
-if (pathless.frames.length) universe.sync();
+pathless.init();
 ```
 
-Construction captures `#universe`. `init` loads `source('')`, stores the two
-content collections, and executes universe HTML. That inserts four spaces,
+Construction captures `#universe`. The asynchronous `init` loads `source('')`,
+stores the two content collections, and calls
+`this.exec(this.el, zero.data).sync()`. Insertion adds four spaces,
 defines `Universe` and `Pointer`, and ends with:
 
 ```js
 pathless.universe = new Universe();
 ```
 
-Inline insertion executes the assignment before initialization resumes. The
-shell installs pointer aliases before syncing any frames. `init` does not
-construct a universe itself; there is no `pathless.input` object.
+Universe's constructor installs the bound methods and live `pathless.frame`
+getter before returning. Inline insertion executes the assignment before
+`exec` returns the Pathless instance, so chained `sync()` can render frames
+with the API already installed. Sync skips empty collections without an outer
+frame-count guard. `Pathless` has no Universe-specific getter or binding list;
+there is no `pathless.input` object or stored ready promise.
 
 ### Pathless Private Components
 
 `#cache` holds two kinds of entries: route strings map to fetch/decode promises;
 decoded node identities map to blob URL strings. `source` deletes rejected
-requests for retry and optionally maps top-level nodes to blob URLs. There
+requests for retry and optionally maps top-level nodes to blob URLs. Each URL
+lookup explicitly creates and stores a Blob URL only on a cache miss. There
 is no invalidation, bounded retention, recursive conversion, or URL revocation.
 
 Static `#decoder` is a shared `TextDecoder`. Static `#range` is a shared DOM
 `Range`; `exec` creates a contextual fragment and inserts it with
-`replaceChildren`, enabling inline script execution.
+`replaceChildren`, enabling inline script execution. It returns `this` for
+chaining; it does not automatically sync or await asynchronous frame work.
 
 `Pathless.decode` closes over a byte offset. Its local helpers are:
 
 - `uvarint`: reads continuation-bit integers, coercing to unsigned 32-bit with
   `>>> 0`.
 - `field`: reads length, advances offset, returns a `subarray` view.
-- `ones`: recursively allocates/decodes node arrays, turning HTML data into
-  strings and leaving other data as byte views.
+- `ones`: reads the node count and uses `Array.from` to decode nodes in order,
+  recursively decoding each child list before the next sibling. HTML data
+  becomes strings; other data remains byte views.
 
 Unlike the Go decoder, it does not explicitly reject truncation, trailing
 bytes, excessive depth, or oversized varints. It assumes trusted valid wire
@@ -232,17 +236,36 @@ Construction creates three main space records and one panel record, each at
 frame zero with empty states/bindings. It creates `Pointer(this)`, measures,
 and observes the root border box with `ResizeObserver`.
 
-| Private member                     | Purpose                                                        |
-| ---------------------------------- | -------------------------------------------------------------- |
-| `#previous`                        | Last split layout/variant, used for single-space toggling.     |
-| `#rendering`                       | Temporary space context during synchronous script execution.   |
-| `#cycle(index, direction, length)` | Positive modulo wrapping.                                      |
-| `#measure()`                       | Store viewport dimensions and normalize visible space centers. |
+The controller is retained by its bound event listeners, not a `universe.pointer`
+property. The observer is constructed and observed directly without a stored
+handle. There is no teardown API for either.
 
-Centers come from bounding rectangles relative to viewport half-dimensions,
-with positive Y upward. Hidden spaces are measured only when visible.
+The constructor registers an explicit array of references to `x`, `y`,
+`navigate`, `layout`, `focus`, `togglePanel`, and `sync`. Each becomes
+`pathless[method.name] = method.bind(this)`, preserving the Universe receiver
+even when called through Pathless or detached. This relies on method names
+remaining intact if a future build adds minification.
+
+`Object.defineProperty` registers `pathless.frame` with `get: () => this.frame`.
+The arrow retains Universe as its receiver and delegates on every access,
+rather than capturing a frame snapshot. The property has no setter and is
+configurable so it can be registered again. This does not make initialization
+an idempotent reset: constructing another Universe still adds observers/listeners.
+
+| Private member                     | Purpose                                                      |
+| ---------------------------------- | ------------------------------------------------------------ |
+| `#previous`                        | Last split layout/variant, used for single-space toggling.   |
+| `#rendering`                       | Temporary space context during synchronous script execution. |
+| `#cycle(index, direction, length)` | Positive modulo wrapping.                                    |
+| `#measure()`                       | Store root dimensions and normalize visible space origins.   |
+
+Each `space.origin` is its bounding rectangle's center in the shared plane,
+normalized using the root border-box dimensions, with positive Y upward.
+The root fills the viewport at `(0, 0)`; measurement and pointer conversion
+assume that placement rather than subtracting root offsets.
+Hidden spaces are measured only when visible.
 Resizes, focus/layout changes, and panel toggles trigger measurement. The
-observer is local to construction and has no disposal method.
+observer has no disposal method.
 
 `space` chooses rendering context or focused main space. `frame` lazily creates
 its state map at `states[frame]`. `visible` derives main visibility from root
@@ -274,9 +297,11 @@ touch actions, and overscroll.
 
 ## Pointer Private Machinery
 
-`Pointer` holds its universe and nullable `state`. Its `x/y` arrow functions
-remain bound when aliased onto `pathless` and assign callback pairs to the
-current space. Construction listens for root `pointerdown`, `pointerup`,
+`Pointer` receives its Universe instance in the constructor and holds it with
+nullable `state`. Universe's regular `x(left, right)` and `y(up, down)` methods
+assign callback pairs to the current space; Pointer only reads the bindings.
+Construction binds direct handler references to the controller and listens
+for root `pointerdown`, `pointerup`,
 `pointercancel`, and `lostpointercapture`. The last two delegate to `cancel`.
 There is no move listener or teardown API.
 
@@ -286,18 +311,27 @@ There is no move listener or teardown API.
 2. `up` checks the active ID, cancels prevented releases or hidden spaces,
    otherwise computes the endpoint and calls `output`.
 3. `cancel` clears only a matching pointer ID.
-4. `coordinate` maps client coordinates using measured viewport dimensions.
-5. `output` retains the pressed space/bindings/center, clears gesture state,
-   then selects swipe, central-axis panel toggle, or directional tap.
+4. `coordinate` maps client coordinates using measured root dimensions:
+  `x = 2 * clientX / width - 1`, `y = 1 - 2 * clientY / height`. Both are
+  clamped to `[-1, 1]`, so captured events outside the element map to its edges.
+5. `output` retains the pressed space/bindings/origin, clears gesture state,
+  then uses early returns to select swipe, central-origin panel toggle, or
+  directional tap.
 
 The swipe threshold is `0.1` normalized units, with horizontal dominance
-required for navigation. Both tap endpoints must be within `0.05` of either
-central viewport axis to toggle the panel; they need not share the same axis.
-Other taps compare offsets from space center, choosing horizontal on ties,
+required for navigation; vertical-dominant swipes return without dispatching
+a tap. Panel toggling requires the maximum absolute value of all four endpoint
+coordinates to be at most `0.05`. Both press and release must therefore lie
+in the central `[-0.05, 0.05]` square, not along either full axis. The region
+spans 5% of root width and height and covers 0.25% of the plane. There is no
+debug overlay in the payload.
+Other taps compare offsets from `space.origin`, choosing horizontal on ties,
 and call `(start, end, space)`. Returns are ignored and promises are not awaited.
 
-Thresholds are viewport-normalized, not pixels or fractions of an individual
-space. The panel does not become the focused main space when pressed.
+Thresholds use the full root's normalized plane, not pixels or fractions of
+an individual space. The axes scale independently. The panel does not become
+the focused main space when pressed; the focus setter ignores nonmembers of
+the main spaces.
 
 ## Observation
 

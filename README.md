@@ -217,10 +217,12 @@ composition. These are construction facilities, not extra registration APIs.
 
 ### Lifecycle and Nodes
 
-The shell creates `window.pathless`, awaits `init()`, aliases pointer bindings
-as `pathless.x/y`, then syncs if frames exist. Frame scripts execute after
-the aliases are installed. There is no separate ready event or public ready
-promise. The universe script creates `pathless.universe` during initialization.
+The shell in [zero/zero.html](zero/zero.html) creates `window.pathless` and calls
+its asynchronous `init()`. Initialization loads the bootstrap, stores frames
+and panels, executes [zero/one.html](zero/one.html), and syncs visible content.
+The payload creates `pathless.universe`; its constructor registers the bound
+public methods and live `frame` getter on `pathless` before any frame scripts
+execute. There is no separate ready event or public ready promise.
 
 Decoded nodes are `{ name, type, data, ones }`. Names/types are strings and
 `ones` is an array. Data is text when `type.startsWith('text/html')`, otherwise
@@ -228,13 +230,15 @@ a `Uint8Array`. Other text formats require `TextDecoder`.
 
 ### Pathless Members
 
-| Member             | Contract                                                       |
-| ------------------ | -------------------------------------------------------------- |
-| `el`               | Root `#universe` element.                                      |
-| `frames`, `panels` | Decoded node arrays in registration order, assigned by `init`. |
-| `universe`         | Running `Universe` instance.                                   |
-| `x(first, second)` | Registers left/right tap callbacks in the current space.       |
-| `y(first, second)` | Registers top/bottom tap callbacks in the current space.       |
+| Member                                               | Contract                                                       |
+| ---------------------------------------------------- | -------------------------------------------------------------- |
+| `el`                                                 | Root `#universe` element.                                      |
+| `frames`, `panels`                                   | Decoded node arrays in registration order, assigned by `init`. |
+| `universe`                                           | Running `Universe` instance.                                   |
+| `frame`                                              | Live, read-only `{ el, state }` getter delegated to Universe.  |
+| `x(left, right)`                                     | Registers left/right tap callbacks in the current space.       |
+| `y(up, down)`                                        | Registers up/down tap callbacks in the current space.          |
+| `sync`, `navigate`, `layout`, `focus`, `togglePanel` | Methods bound to Universe; contracts below.                    |
 
 `pathless` owns frames/panels; `Universe` reads them directly. They are mutable
 implementation state, not managed collections. Replacing/shrinking them does
@@ -258,7 +262,7 @@ Use binary leaves rather than directories or already text-decoded HTML.
 
 ```js
 const [imageURL] = await pathless.source('photo', true);
-pathless.universe.frame.el.querySelector('img').src = imageURL;
+pathless.frame.el.querySelector('img').src = imageURL;
 ```
 
 #### exec, init, and decode
@@ -270,13 +274,16 @@ Pathless.decode(bytes)
 ```
 
 `exec` replaces the target's children with a contextual HTML fragment. Inline
-scripts execute on insertion. It returns no value, does not sanitize, and
+scripts execute on insertion. It returns the Pathless instance for chaining,
+such as `pathless.exec(el, html).sync()`. It does not sanitize and
 does not await external scripts or asynchronous work. It does not dispose
 replaced frames' timers, listeners, or observers.
 
-`init` loads bootstrap, stores frames/panels, and executes universe HTML. It
-is called once by the shell, not an idempotent reset. Pointer aliases and
-initial sync are installed afterward by the shell, not by this method.
+`init` loads bootstrap, stores frames/panels, and executes universe HTML.
+Universe installs the browser API during construction; `init` then calls
+`this.exec(this.el, zero.data).sync()` to fill visible spaces, including when
+the frame collection is empty. It is called once by the shell, not an
+idempotent reset.
 
 Static `Pathless.decode(bytes)` synchronously decodes a decompressed wire
 `Uint8Array` into nodes. It does not accept gzip directly and assumes trusted,
@@ -294,29 +301,34 @@ on `pathless` and the inserted space elements.
 | `el`              | Root element shared with `pathless.el`.                            |
 | `spaces`          | Main records in `zero`, `one`, `two` order.                        |
 | `panel`           | The `three` space record.                                          |
-| `pointer`         | Pointer controller and binding functions.                          |
-| `width`, `height` | Last measured viewport dimensions in CSS pixels.                   |
+| `width`, `height` | Last measured root border-box dimensions in CSS pixels.            |
 | `space`           | Currently rendering space, otherwise focused main space.           |
 | `frame`           | `{ el, state }`: current space's first child and persistent `Map`. |
 | `visible`         | Computed visible main spaces, followed by an open panel.           |
 
 A space has `el`, zero-based `frame`, `states`, `bindings`, and measured
-`center: { x, y }`. State maps are lazily allocated by `frame`, persist per
+`origin: { x, y }`, the space's center in the shared normalized plane.
+State maps are lazily allocated by `frame`, persist per
 space/frame-index pair, and survive navigation/rerenders. DOM and bindings
 are replaced on rendering. Spaces and the panel navigate independently.
 
 During synchronous frame execution, `space`/`frame` refer to that rendering
 space. After an `await` or in a later callback, they refer to the focused main
-space instead. Capture the relevant state/element when needed.
+space instead. Capture `const frame = pathless.frame` during synchronous
+initialization and retain it for asynchronous work or later event handlers.
+
+Universe creates a Pointer controller but does not retain it as a public
+property. Universe owns binding registration through its `x` and `y` methods;
+Pointer reads those bindings when dispatching gestures.
 
 ### Rendering and Navigation
 
 ```js
-universe.sync(...spaces)
-universe.navigate(direction, space = universe.space)
-universe.focus(direction = 1, space = universe.space)
-universe.focused = space
-universe.togglePanel()
+pathless.sync(...spaces)
+pathless.navigate(direction, space = pathless.universe.space)
+pathless.focus(direction = 1, space = pathless.universe.space)
+pathless.universe.focused = space
+pathless.togglePanel()
 ```
 
 - `sync()` fills visible spaces lacking a first element child. Explicit records
@@ -332,13 +344,15 @@ universe.togglePanel()
 - `togglePanel` changes visibility, measures, and syncs. No panels means no-op.
     Reopening a rendered panel preserves its DOM.
 
-Methods return no result. Arguments are not generally validated; use runtime
+These methods are also available directly on `pathless.universe`; their
+Pathless aliases are bound to that Universe instance and return no result.
+Arguments are not generally validated; use runtime
 space records and valid indexes rather than fabricated records.
 
 ### Layout
 
 ```js
-universe.layout(layout, variant)
+pathless.layout(layout, variant)
 ```
 
 | Layout | Variant | Main arrangement                        |
@@ -368,14 +382,18 @@ methods rather than direct dataset mutations to keep geometry/rendering aligned.
 
 ```js
 pathless.x(onLeft, onRight);
-pathless.y(onTop, onBottom);
+pathless.y(onUp, onDown);
 ```
 
 Each call replaces that axis's callbacks in the current space. Bindings reset
 on render, so register in the synchronous frame script. Missing callbacks
 are no-ops. Callbacks receive `(start, end, space)`; returns are ignored and
-promises are not awaited. Points are viewport-normalized: left/right
-`-1`/`1`, top/bottom `1`/`-1`, center `(0, 0)`.
+promises are not awaited. The full Universe element defines the shared plane:
+left/right are `-1`/`1`, top/bottom are `1`/`-1`, and its center is `(0, 0)`.
+Coordinates are clamped to `[-1, 1]` on each axis, including captured events
+outside the element. Each axis is normalized independently, so equal coordinate
+distances need not represent equal pixel distances. The conversion assumes
+the root starts at viewport position `(0, 0)`, as the shell's fixed grid does.
 
 Only a primary pointer with button zero is accepted, one gesture at a time.
 Pressing a visible main space focuses it; the root captures the pointer.
@@ -385,17 +403,18 @@ cancel the gesture. Precedence is:
 1. Movement at least `0.1` on either normalized axis is a swipe. Horizontal
      dominance navigates: left is previous, right is next. Vertical dominance
      does nothing.
-2. Otherwise, if both endpoints are within `0.05` of either central viewport
-     axis, toggle the panel. They need not be near the same axis.
+2. Otherwise, toggle the panel only when both endpoints have both coordinates
+        within `[-0.05, 0.05]`. This central square in normalized coordinates spans
+        5% of the root width and 5% of its height, or 0.25% of the plane's area.
 3. Other taps choose a callback by the dominant offset from the pressed space's
      center. Ties select horizontal.
 
-The controller exposes implementation members `state`, `universe`, `x`, `y`,
+The controller has implementation members `state`, `universe`,
 `down(event)`, `up(event)`, `cancel(event)`, `coordinate(point)`, and
-`output(start, end)`. `coordinate` converts client coordinates with measured
-viewport dimensions. `cancel` clears a matching pointer ID; the other handlers
+`output(start, end)`. `coordinate` converts and clamps client coordinates with
+measured root dimensions. `cancel` clears a matching pointer ID; the other handlers
 implement the gesture state machine. `output` requires an active gesture.
-Applications normally use the binding aliases, not these handlers.
+Applications use `pathless.x` and `pathless.y`, not these handlers.
 
 ## Boundaries
 

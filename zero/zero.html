@@ -139,10 +139,6 @@
 					this.el = document.getElementById('universe');
 				}
 
-				get frame() {
-					return this.universe.frame;
-				}
-
 				static decode(bytes) {
 					let offset = 0;
 					const uvarint = () => {
@@ -159,13 +155,12 @@
 						offset += length;
 						return bytes.subarray(start, offset);
 					};
-					const ones = () => {
-						const result = new Array(uvarint());
-						for (let index = 0; index < result.length; index++) {
+					const ones = () =>
+						Array.from({ length: uvarint() }, () => {
 							const name = Pathless.#decoder.decode(field());
 							const type = Pathless.#decoder.decode(field());
 							const data = field();
-							result[index] = {
+							return {
 								name,
 								type,
 								data: type.startsWith('text/html')
@@ -173,9 +168,7 @@
 									: data,
 								ones: ones(),
 							};
-						}
-						return result;
-					};
+						});
 					return ones();
 				}
 
@@ -193,20 +186,17 @@
 					}
 					if (!blobs) return request;
 					return request.then((ones) =>
-						ones.map(
-							(one) =>
-								this.#cache.get(one) ??
-								this.#cache
-									.set(
-										one,
-										URL.createObjectURL(
-											new Blob([one.data], {
-												type: one.type,
-											}),
-										),
-									)
-									.get(one),
-						),
+						ones.map((one) => {
+							let url = this.#cache.get(one);
+							if (!url) {
+								const blob = new Blob([one.data], {
+									type: one.type,
+								});
+								url = URL.createObjectURL(blob);
+								this.#cache.set(one, url);
+							}
+							return url;
+						}),
 					);
 				}
 
@@ -214,32 +204,19 @@
 					el.replaceChildren(
 						Pathless.#range.createContextualFragment(data),
 					);
+					return this;
 				}
 
 				async init() {
 					const [zero, frames, panels] = await this.source('');
 					this.frames = frames.ones;
 					this.panels = panels.ones;
-					this.exec(this.el, zero.data);
-
-					const { universe } = this;
-					this.x = universe.pointer.x;
-					this.y = universe.pointer.y;
-					for (const name of [
-						'navigate',
-						'layout',
-						'focus',
-						'togglePanel',
-						'sync',
-					]) {
-						this[name] = universe[name].bind(universe);
-					}
-					if (this.frames.length) this.sync();
+					this.exec(this.el, zero.data).sync();
 				}
 			}
-			document.addEventListener('DOMContentLoaded', async () => {
+			document.addEventListener('DOMContentLoaded', () => {
 				window.pathless = new Pathless();
-				await pathless.init();
+				pathless.init();
 			});
 		</script>
 	</head>

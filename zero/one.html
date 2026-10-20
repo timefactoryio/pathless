@@ -7,6 +7,7 @@
 	class Universe {
 		#previous = null;
 		#rendering = null;
+
 		constructor() {
 			this.el = pathless.el;
 			const space = (id) => ({
@@ -17,46 +18,70 @@
 			});
 			this.spaces = ['zero', 'one', 'two'].map(space);
 			this.panel = space('three');
-			this.pointer = new Pointer(this);
+			new Pointer(this);
 			this.#measure();
-			const observer = new ResizeObserver(() => this.#measure());
-			observer.observe(this.el, { box: 'border-box' });
+			new ResizeObserver(() => this.#measure()).observe(this.el, {
+				box: 'border-box',
+			});
+			for (const method of [
+				this.x,
+				this.y,
+				this.navigate,
+				this.layout,
+				this.focus,
+				this.togglePanel,
+				this.sync,
+			]) {
+				pathless[method.name] = method.bind(this);
+			}
+			Object.defineProperty(pathless, 'frame', {
+				get: () => this.frame,
+				configurable: true,
+			});
 		}
-
 		#measure() {
-			const { width, height } = this.el.getBoundingClientRect();
-			this.width = width;
-			this.height = height;
+			({ width: this.width, height: this.height } =
+				this.el.getBoundingClientRect());
 			for (const space of this.visible) {
 				const { left, top, width, height } =
 					space.el.getBoundingClientRect();
-				space.center = {
+				space.origin = {
 					x: (left + width / 2) / (this.width / 2) - 1,
 					y: 1 - (top + height / 2) / (this.height / 2),
 				};
 			}
 		}
+		#cycle(index, direction, length) {
+			return (((index + direction) % length) + length) % length;
+		}
+
+		x(left, right) {
+			this.space.bindings.x = [left, right];
+		}
+
+		y(up, down) {
+			this.space.bindings.y = [up, down];
+		}
 
 		get space() {
-			return this.#rendering ?? this.spaces[pathless.el.dataset.focused];
+			return this.#rendering ?? this.spaces[this.el.dataset.focused];
 		}
 		get frame() {
-			const { el, states, frame } = this.space;
+			const space = this.space;
 			return {
-				el: el.firstElementChild,
-				state: (states[frame] ??= new Map()),
+				el: space.el.firstElementChild,
+				state: (space.states[space.frame] ??= new Map()),
 			};
 		}
 		get visible() {
-			const { layout, focused } = pathless.el.dataset;
-			const [zero, one, two] = this.spaces;
+			const { layout, focused } = this.el.dataset;
 			const visible =
 				layout === '0'
 					? [this.spaces[focused]]
 					: layout === '1'
-						? [zero, focused === '2' ? two : one]
+						? [this.spaces[0], this.spaces[focused === '2' ? 2 : 1]]
 						: this.spaces;
-			return pathless.el.classList.contains('panel')
+			return this.el.classList.contains('panel')
 				? [...visible, this.panel]
 				: visible;
 		}
@@ -64,7 +89,7 @@
 		set focused(space) {
 			const index = this.spaces.indexOf(space);
 			if (index < 0) return;
-			pathless.el.dataset.focused = index;
+			this.el.dataset.focused = index;
 			this.#measure();
 			this.sync();
 		}
@@ -86,31 +111,26 @@
 			}
 		}
 
-		#cycle(index, direction, length) {
-			return (((index + direction) % length) + length) % length;
-		}
-
 		navigate(direction, space = this.space) {
-			const frames =
+			const { length } =
 				space === this.panel ? pathless.panels : pathless.frames;
-			if (!frames.length) return;
-			space.frame = this.#cycle(space.frame, direction, frames.length);
+			if (!length) return;
+			space.frame = this.#cycle(space.frame, direction, length);
 			this.sync(space);
 		}
 
 		layout(l, v) {
-			const { dataset } = pathless.el;
+			const { dataset } = this.el;
 			const layout = Number(dataset.layout);
+			const variant = Number(dataset.variant);
 			l ??= layout;
-			v ??= l === layout ? Number(dataset.variant) + 1 : 0;
-			if (l === 0) {
-				if (layout === 0) {
-					if (!this.#previous) return;
-					[l, v] = this.#previous;
-				} else {
-					this.#previous = [layout, Number(dataset.variant)];
-					v = 0;
-				}
+			v ??= l === layout ? variant + 1 : 0;
+			if (l === 0 && layout === 0) {
+				if (!this.#previous) return;
+				[l, v] = this.#previous;
+			} else if (l === 0) {
+				this.#previous = [layout, variant];
+				v = 0;
 			}
 			if (l) v = this.#cycle(v, 0, 2 ** l);
 			dataset.layout = l;
@@ -120,9 +140,7 @@
 		}
 
 		focus(direction = 1, space = this.space) {
-			const visible = this.visible.filter(
-				(space) => space !== this.panel,
-			);
+			const visible = this.visible.filter((item) => item !== this.panel);
 			const index = visible.indexOf(space);
 			this.focused =
 				index < 0
@@ -132,7 +150,7 @@
 
 		togglePanel() {
 			if (!pathless.panels.length) return;
-			pathless.el.classList.toggle('panel');
+			this.el.classList.toggle('panel');
 			this.#measure();
 			this.sync();
 		}
@@ -143,31 +161,24 @@
 
 		constructor(universe) {
 			this.universe = universe;
-			this.x = (first, second) => {
-				this.universe.space.bindings.x = [first, second];
-			};
-			this.y = (first, second) => {
-				this.universe.space.bindings.y = [first, second];
-			};
-			for (const [type, method] of [
-				['pointerdown', 'down'],
-				['pointerup', 'up'],
-				['pointercancel', 'cancel'],
-				['lostpointercapture', 'cancel'],
+			for (const [type, handler] of [
+				['pointerdown', this.down],
+				['pointerup', this.up],
+				['pointercancel', this.cancel],
+				['lostpointercapture', this.cancel],
 			]) {
-				pathless.el.addEventListener(type, (event) =>
-					this[method](event),
-				);
+				pathless.el.addEventListener(type, handler.bind(this));
 			}
 		}
 
 		down(event) {
 			if (!event.isPrimary || event.button !== 0 || this.state) return;
-			const visible = this.universe.visible;
-			const space = visible.find(({ el }) => el.contains(event.target));
+			const { universe } = this;
+			const space = universe.visible.find(({ el }) =>
+				el.contains(event.target),
+			);
 			if (!space) return;
-			if (visible.length > 1 && space !== this.universe.space)
-				this.universe.focused = space;
+			if (space !== universe.space) universe.focused = space;
 			pathless.el.setPointerCapture(event.pointerId);
 			this.state = {
 				id: event.pointerId,
@@ -182,12 +193,9 @@
 			if (
 				event.defaultPrevented ||
 				!this.universe.visible.includes(pointer.space)
-			) {
-				this.cancel(event);
-				return;
-			}
-			const end = this.coordinate(event);
-			this.output(pointer.start, end);
+			)
+				return this.cancel(event);
+			this.output(pointer.start, this.coordinate(event));
 		}
 
 		cancel(event) {
@@ -197,8 +205,8 @@
 		coordinate(point) {
 			const { width, height } = this.universe;
 			return {
-				x: point.clientX / (width / 2) - 1,
-				y: 1 - point.clientY / (height / 2),
+				x: Math.max(-1, Math.min(1, (2 * point.clientX) / width - 1)),
+				y: Math.max(-1, Math.min(1, 1 - (2 * point.clientY) / height)),
 			};
 		}
 
@@ -206,25 +214,29 @@
 			const deltaX = Math.abs(end.x - start.x);
 			const deltaY = Math.abs(end.y - start.y);
 			const { space } = this.state;
-			const { bindings, center } = space;
+			const { bindings, origin } = space;
 			this.state = null;
 			if (Math.max(deltaX, deltaY) >= 0.1) {
 				if (deltaX >= deltaY)
 					this.universe.navigate(end.x < start.x ? -1 : 1, space);
-			} else if (
-				Math.min(Math.abs(start.x), Math.abs(start.y)) <= 0.05 &&
-				Math.min(Math.abs(end.x), Math.abs(end.y)) <= 0.05
-			) {
-				this.universe.togglePanel();
-			} else {
-				const offsetX = end.x - center.x;
-				const offsetY = end.y - center.y;
-				const callback =
-					Math.abs(offsetX) >= Math.abs(offsetY)
-						? bindings.x?.[offsetX < 0 ? 0 : 1]
-						: bindings.y?.[offsetY < 0 ? 1 : 0];
-				callback?.(start, end, space);
+				return;
 			}
+			if (
+				Math.max(
+					Math.abs(start.x),
+					Math.abs(start.y),
+					Math.abs(end.x),
+					Math.abs(end.y),
+				) <= 0.05
+			)
+				return this.universe.togglePanel();
+			const offsetX = end.x - origin.x;
+			const offsetY = end.y - origin.y;
+			const callback =
+				Math.abs(offsetX) >= Math.abs(offsetY)
+					? bindings.x?.[offsetX < 0 ? 0 : 1]
+					: bindings.y?.[offsetY < 0 ? 1 : 0];
+			callback?.(start, end, space);
 		}
 	}
 	pathless.universe = new Universe();
