@@ -211,12 +211,12 @@
 					const [zero, frames, panels] = await this.source('');
 					this.frames = frames.ones;
 					this.panels = panels.ones;
-					this.exec(this.el, zero.data).sync();
+					this.exec(this.el, zero.data);
 				}
 			}
-			document.addEventListener('DOMContentLoaded', () => {
+			document.addEventListener('DOMContentLoaded', async () => {
 				window.pathless = new Pathless();
-				pathless.init();
+				await pathless.init();
 			});
 		</script>
 	</head>

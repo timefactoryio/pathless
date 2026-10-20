@@ -10,14 +10,13 @@
 
 		constructor() {
 			this.el = pathless.el;
-			const space = (id) => ({
+			this.spaces = ['zero', 'one', 'two', 'three'].map((id) => ({
 				el: document.getElementById(id),
 				frame: 0,
 				states: [],
 				bindings: {},
-			});
-			this.spaces = ['zero', 'one', 'two'].map(space);
-			this.panel = space('three');
+			}));
+			this.panel = this.spaces.pop();
 			new Pointer(this);
 			this.#measure();
 			new ResizeObserver(() => this.#measure()).observe(this.el, {
@@ -30,14 +29,15 @@
 				this.layout,
 				this.focus,
 				this.togglePanel,
-				this.sync,
 			]) {
-				pathless[method.name] = method.bind(this);
+				Object.defineProperty(pathless, method.name, {
+					value: method.bind(this),
+				});
 			}
 			Object.defineProperty(pathless, 'frame', {
 				get: () => this.frame,
-				configurable: true,
 			});
+			this.sync();
 		}
 		#measure() {
 			({ width: this.width, height: this.height } =
@@ -66,6 +66,7 @@
 		get space() {
 			return this.#rendering ?? this.spaces[this.el.dataset.focused];
 		}
+
 		get frame() {
 			const space = this.space;
 			return {
@@ -73,6 +74,7 @@
 				state: (space.states[space.frame] ??= new Map()),
 			};
 		}
+
 		get visible() {
 			const { layout, focused } = this.el.dataset;
 			const visible =
@@ -173,12 +175,11 @@
 
 		down(event) {
 			if (!event.isPrimary || event.button !== 0 || this.state) return;
-			const { universe } = this;
-			const space = universe.visible.find(({ el }) =>
+			const space = this.universe.visible.find(({ el }) =>
 				el.contains(event.target),
 			);
 			if (!space) return;
-			if (space !== universe.space) universe.focused = space;
+			if (space !== this.universe.space) this.universe.focused = space;
 			pathless.el.setPointerCapture(event.pointerId);
 			this.state = {
 				id: event.pointerId,
@@ -218,7 +219,7 @@
 			this.state = null;
 			if (Math.max(deltaX, deltaY) >= 0.1) {
 				if (deltaX >= deltaY)
-					this.universe.navigate(end.x < start.x ? -1 : 1, space);
+					pathless.navigate(end.x < start.x ? -1 : 1, space);
 				return;
 			}
 			if (
@@ -229,7 +230,7 @@
 					Math.abs(end.y),
 				) <= 0.05
 			)
-				return this.universe.togglePanel();
+				return pathless.togglePanel();
 			const offsetX = end.x - origin.x;
 			const offsetY = end.y - origin.y;
 			const callback =
@@ -239,5 +240,5 @@
 			callback?.(start, end, space);
 		}
 	}
-	pathless.universe = new Universe();
+	new Universe();
 </script>

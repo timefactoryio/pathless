@@ -13,7 +13,7 @@ application contracts.
 | Private `fx`       | Zero reference, frames/panels, routes, circuit mux, HTTP client          |
 | Browser `Pathless` | Root, resource/blob cache, decoded frames/panels, universe               |
 | Browser `Universe` | Space records, geometry, bindings, layout/focus, public API registration |
-| Browser `Pointer`  | Universe reference, active gesture, pointer-event dispatch               |
+| Browser `Pointer`  | Active gesture, pointer-event dispatch                                   |
 
 There is no separate Go `one` serving package: `fx.One` is the tree data type,
 and `fx` encodes and serves circuit payloads.
@@ -190,21 +190,35 @@ pathless.init();
 
 Construction captures `#universe`. The asynchronous `init` loads `source('')`,
 stores the two content collections, and calls
-`this.exec(this.el, zero.data).sync()`. Insertion adds four spaces,
+`this.exec(this.el, zero.data)`. Insertion adds four spaces,
 defines `Universe` and `Pointer`, and ends with:
 
 ```js
-pathless.universe = new Universe();
+new Universe();
 ```
 
-Universe's constructor installs the bound methods and live `pathless.frame`
-getter before returning. Inline insertion executes the assignment before
-`exec` returns the Pathless instance, so chained `sync()` can render frames
-with the API already installed. Sync skips empty collections without an outer
+Universe's constructor exposes the frame-facing controls and `frame` getter
+directly on `pathless`, then calls `this.sync()` before returning. The instance
+is not stored on `pathless`; Universe passes itself directly to Pointer.
+Inline insertion constructs Universe and syncs visible spaces before `exec`
+returns, with the API already installed. Sync skips empty collections without an outer
 frame-count guard. `Pathless` has no Universe-specific getter or binding list;
 there is no `pathless.input` object or stored ready promise.
 
 ### Pathless Private Components
+
+Pathless extends native `EventTarget`; the shared instance owns event listeners
+and dispatch for the whole system. Universe publishes completed status changes
+on it without a separate event target, subscription registry, or `onChange` wrapper.
+Frames do not register event listeners and need no listener cleanup. System-managed
+frame binding is outside the scope of these changes; the runtime does not depend
+on Keyboard or any other frame implementation.
+
+Pathless owns the `status` Map of field names to getter functions. `get(field)`
+evaluates only the requested getter, returning `undefined` for an unknown field.
+Without a field, `get()` builds a frozen snapshot from every registered getter.
+Pathless does not hardcode system field names; Universe registers its own live
+readers. The Map is system-managed, not a frame mutation API.
 
 `#cache` holds two kinds of entries: route strings map to fetch/decode promises;
 decoded node identities map to blob URL strings. `source` deletes rejected
@@ -233,31 +247,34 @@ bytes and relies on browser HTTP gzip decompression.
 ## Universe Private Components
 
 Construction creates three main space records and one panel record, each at
-frame zero with empty states/bindings. It creates `Pointer(this)`, measures,
-and observes the root border box with `ResizeObserver`.
+frame zero with empty states/bindings, then calls `#init()`. Initialization
+registers status fields and exposes the frame-facing API before creating
+`Pointer()`, measuring, and observing the root border box with `ResizeObserver`.
 
 The controller is retained by its bound event listeners, not a `universe.pointer`
 property. The observer is constructed and observed directly without a stored
 handle. There is no teardown API for either.
 
-The constructor registers an explicit array of references to `x`, `y`,
-`navigate`, `layout`, `focus`, `togglePanel`, and `sync`. Each becomes
-`pathless[method.name] = method.bind(this)`, preserving the Universe receiver
-even when called through Pathless or detached. This relies on method names
-remaining intact if a future build adds minification.
+`#init()` installs explicit bound references to `x`, `y`, `navigate`, `layout`,
+`focus`, and `togglePanel`, together with the live read-only `frame` getter, in
+one `Object.defineProperties` call. Pathless already provides `source` and `get`,
+completing the frame-facing core. Other Universe state and lifecycle methods
+are not exposed as flat Pathless members. Public names are explicit descriptor
+keys rather than inferred from function names.
 
-`Object.defineProperty` registers `pathless.frame` with `get: () => this.frame`.
-The arrow retains Universe as its receiver and delegates on every access,
-rather than capturing a frame snapshot. The property has no setter and is
-configurable so it can be registered again. This does not make initialization
-an idempotent reset: constructing another Universe still adds observers/listeners.
+The `frame` getter returns `{ el, state }`: the current space's first child
+element and its persistent frame-indexed map. It resolves the space on each
+access, so callers capture the context during synchronous initialization for later work.
+Constructing another Universe still adds observers/listeners and is not an
+idempotent reset.
 
-| Private member                     | Purpose                                                      |
-| ---------------------------------- | ------------------------------------------------------------ |
-| `#previous`                        | Last split layout/variant, used for single-space toggling.   |
-| `#rendering`                       | Temporary space context during synchronous script execution. |
-| `#cycle(index, direction, length)` | Positive modulo wrapping.                                    |
-| `#measure()`                       | Store root dimensions and normalize visible space origins.   |
+| Private member                     | Purpose                                                         |
+| ---------------------------------- | --------------------------------------------------------------- |
+| `#previous`                        | Last split layout/variant, used for single-space toggling.      |
+| `#rendering`                       | Temporary space context during synchronous script execution.    |
+| `#init()`                          | Register status, initialize input/geometry, and expose the API. |
+| `#cycle(index, direction, length)` | Positive modulo wrapping.                                       |
+| `#measure()`                       | Store root dimensions and normalize visible space origins.      |
 
 Each `space.origin` is its bounding rectangle's center in the shared plane,
 normalized using the root border-box dimensions, with positive Y upward.
@@ -267,9 +284,12 @@ Hidden spaces are measured only when visible.
 Resizes, focus/layout changes, and panel toggles trigger measurement. The
 observer has no disposal method.
 
-`space` chooses rendering context or focused main space. `frame` lazily creates
-its state map at `states[frame]`. `visible` derives main visibility from root
-dataset state and appends an open panel.
+`space` chooses rendering context or focused main space. The `frame` getter lazily
+creates its state map at `states[frame]`. Universe registers `layout`, `variant`,
+`focused`, `panelOpen`, and `visible` getters in `pathless.status` before measuring
+or executing frames. The registered `visible` getter computes frozen indexes
+from layout, focus, and panel visibility. Internal `visible` only maps those
+indexes to space records.
 
 `sync` fills visible empty spaces unless explicit records are supplied. It
 chooses `pathless.frames`/`pathless.panels`, skips empty collections, sets
@@ -279,7 +299,10 @@ DOM. Async work runs after the rendering context has ended.
 
 `navigate` wraps and rerenders. The `focused` setter, `layout`, and `togglePanel`
 update root state, measure, and sync missing content. `focus` computes a visible
-main target and delegates to the setter. Persistent state is per space/index;
+main target and delegates to the setter. Completed transitions dispatch a
+`change` CustomEvent on Pathless with the frozen `pathless.get()` snapshot as `detail`; no-op
+commands do not notify. `sync` itself does not publish. Status includes no
+navigation indexes or frame-owned Map contents. Persistent state is per space/index;
 bindings and DOM are rebuilt, not stored in that state automatically.
 
 ### CSS Components
@@ -297,9 +320,11 @@ touch actions, and overscroll.
 
 ## Pointer Private Machinery
 
-`Pointer` receives its Universe instance in the constructor and holds it with
-nullable `state`. Universe's regular `x(left, right)` and `y(up, down)` methods
-assign callback pairs to the current space; Pointer only reads the bindings.
+`Pointer` receives its Universe instance in the constructor and has nullable gesture `state`. It
+reads geometry and space context through its internal `this.universe`
+reference and dispatches navigation and panel toggling through bound Pathless methods.
+Universe's regular `x(left, right)` and `y(up, down)` methods assign callback
+pairs to the current space; Pointer only reads the bindings.
 Construction binds direct handler references to the controller and listens
 for root `pointerdown`, `pointerup`,
 `pointercancel`, and `lostpointercapture`. The last two delegate to `cancel`.
