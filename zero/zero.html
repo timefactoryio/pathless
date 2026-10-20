@@ -131,13 +131,10 @@
 				location.hostname,
 			);
 			class Pathless {
+				el = document.getElementById('universe');
 				#cache = new Map();
 				static #decoder = new TextDecoder();
 				static #range = new Range();
-
-				constructor() {
-					this.el = document.getElementById('universe');
-				}
 
 				static decode(bytes) {
 					let offset = 0;
@@ -214,9 +211,9 @@
 					this.exec(this.el, zero.data);
 				}
 			}
-			document.addEventListener('DOMContentLoaded', async () => {
+			document.addEventListener('DOMContentLoaded', () => {
 				window.pathless = new Pathless();
-				await pathless.init();
+				pathless.init();
 			});
 		</script>
 	</head>

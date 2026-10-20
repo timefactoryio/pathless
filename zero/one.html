@@ -35,7 +35,13 @@
 				});
 			}
 			Object.defineProperty(pathless, 'frame', {
-				get: () => this.frame,
+				get: () => {
+					const space = this.space;
+					return {
+						el: space.el.firstElementChild,
+						state: (space.states[space.frame] ??= new Map()),
+					};
+				},
 			});
 			this.sync();
 		}
@@ -65,14 +71,6 @@
 
 		get space() {
 			return this.#rendering ?? this.spaces[this.el.dataset.focused];
-		}
-
-		get frame() {
-			const space = this.space;
-			return {
-				el: space.el.firstElementChild,
-				state: (space.states[space.frame] ??= new Map()),
-			};
 		}
 
 		get visible() {
