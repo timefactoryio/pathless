@@ -1,0 +1,96 @@
+<div id="zero" class="space"></div>
+<div id="one" class="space"></div>
+<div id="two" class="space"></div>
+<div id="three" class="space" hidden></div>
+
+<script>
+	class Universe {
+		#visible;
+		#layouts = [[0], [0, 1], [0, 1, 2, 3]].map((variants, layout) => ({
+			layout,
+			variants,
+		}));
+		#restore = null;
+
+		#space(id) {
+			return {
+				el: document.getElementById(id),
+				frame: 0,
+				states: [],
+			};
+		}
+		constructor() {
+			this.el = pathless.el;
+			this.zero = this.#space('zero');
+			this.one = this.#space('one');
+			this.two = this.#space('two');
+			this.three = this.#space('three');
+			this.#visible = [this.zero];
+		}
+		get space() {
+			return this.#visible[0];
+		}
+		set space(space) {
+			this.#select(this.#visible, space);
+		}
+		get layout() {
+			const { layout, variants } = this.#layouts[0];
+			return { layout, variant: variants[0] };
+		}
+		set layout(layout) {
+			let target = this.#layouts.find((item) => item.layout === layout);
+			if (layout === 0 && this.#layouts[0].layout === 0)
+				target = this.#restore;
+			if (!target || target === this.#layouts[0]) return;
+			if (target.layout === 0) this.#restore = this.#layouts[0];
+			const focused = this.space;
+			const main = this.#visible.find((space) => space !== this.three);
+			this.#select(this.#layouts, target);
+			this.#visible = [this.zero, this.one, this.two, this.three].filter(
+				(space) =>
+					space === this.three
+						? this.#visible.includes(space)
+						: target.layout === 0
+							? space === main
+							: target.layout === 2 ||
+								space !==
+									(main === this.two ? this.one : this.two),
+			);
+			this.space = focused;
+		}
+		set variant(variant) {
+			this.#select(this.#layouts[0].variants, variant);
+		}
+		focus(direction) {
+			const index = this.#cycle(0, direction, this.#visible.length);
+			this.space = this.#visible[index];
+		}
+		togglePanel() {
+			const index = this.#visible.indexOf(this.three);
+			if (index < 0) {
+				const zero = this.#visible.indexOf(this.zero);
+				this.#visible.splice(
+					zero > 0 ? zero : this.#visible.length,
+					0,
+					this.three,
+				);
+			} else this.#visible.splice(index, 1);
+			this.three.el.hidden = index >= 0;
+		}
+		frames(space, direction) {
+			const { length } =
+				space === this.three ? pathless.panels : pathless.frames;
+			if (length)
+				space.frame = this.#cycle(space.frame, direction, length);
+		}
+		#select(items, item) {
+			const index = items.indexOf(item);
+			if (index > 0) items.push(...items.splice(0, index));
+			return items[0];
+		}
+		#cycle(index, direction, length) {
+			return (((index + direction) % length) + length) % length;
+		}
+	}
+	new Universe();
+</script>

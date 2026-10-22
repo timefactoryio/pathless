@@ -58,7 +58,7 @@
 				box-shadow: inset 0 0 0 1px blue;
 				pointer-events: none;
 			}
-			#universe.panel {
+			#universe:has(> #three:not([hidden])) {
 				--panel-row: 15dvh;
 			}
 			.space,
@@ -87,7 +87,6 @@
 			#three {
 				grid-area: three;
 			}
-			#universe:not(.panel) > #three,
 			#universe[data-layout='0'] > :not(#three),
 			#universe[data-layout='1']:not([data-focused='2']) #two,
 			#universe[data-layout='1'][data-focused='2'] #one {
