@@ -1,0 +1,126 @@
+<div id="zero" class="space"></div>
+<div id="one" class="space" hidden></div>
+<div id="two" class="space" hidden></div>
+<div id="three" class="space" hidden></div>
+
+<script>
+	class Universe {
+		#states = [[0], [0, 1], [0, 1, 2, 3]].map((variants, layout) => ({
+			variants,
+			spaces: Array.from({ length: layout + 1 }, (value, index) => index),
+			focused: 0,
+			panel: false,
+		}));
+		#layout = 0;
+		#restore = null;
+
+		constructor() {
+			this.el = pathless.el;
+			this.spaces = Array.from(
+				this.el.querySelectorAll(':scope > .space'),
+				(el) => ({
+					el,
+					frame: 0,
+					states: [],
+				}),
+			);
+			this.sync();
+		}
+		get space() {
+			return this.spaces[this.layout.focused];
+		}
+		set space(space) {
+			const index = this.spaces.indexOf(space);
+			if (this.layout.spaces.includes(index))
+				this.#states[this.#layout].focused = index;
+		}
+		get layout() {
+			const { variants, spaces, focused, panel } =
+				this.#states[this.#layout];
+			return {
+				layout: this.#layout,
+				variant: variants[0],
+				spaces: panel ? [...spaces, 3] : spaces,
+				focused,
+				panel,
+			};
+		}
+		layouts(layout = this.#layout, variant) {
+			if (layout === 0 && this.#layout === 0) layout = this.#restore;
+			const variants = this.#states[layout]?.variants;
+			if (!variants) return;
+			if (layout === 0) {
+				const { focused, spaces, panel } = this.layout;
+				this.#restore = this.#layout;
+				this.#states[0].spaces = [focused === 3 ? spaces[0] : focused];
+				this.#states[0].focused = focused;
+				this.#states[0].panel = panel;
+			}
+			variant ??= variants[0] + (layout === this.#layout ? 1 : 0);
+			this.#layout = layout;
+			this.#rotate(
+				variants,
+				variants.indexOf(this.#wrap(variant, variants.length)),
+			);
+			Object.assign(this.el.dataset, {
+				layout: this.#layout,
+				variant: variants[0],
+				spaces: this.layout.spaces,
+			});
+		}
+		sync(...spaces) {
+			const { spaces: visible, focused } = this.layout;
+			if (!visible.includes(focused))
+				this.space =
+					this.spaces[
+						visible.find((index) => index > focused) ?? visible[0]
+					];
+			for (const [index, space] of this.spaces.entries()) {
+				const area = visible.indexOf(index);
+				const shown = area >= 0;
+				if (shown && index !== 3)
+					space.el.style.gridArea = this.spaces[area].el.id;
+				if (
+					spaces.includes(space) ||
+					(shown && !space.el.firstElementChild)
+				)
+					this.exec(space);
+				space.el.hidden = !shown;
+			}
+		}
+		focus(direction) {
+			const { spaces, focused } = this.layout;
+			const next = this.#wrap(
+				spaces.indexOf(focused) + direction,
+				spaces.length,
+			);
+			this.space = this.spaces[spaces[next]];
+		}
+		togglePanel() {
+			const layout = this.#states[this.#layout];
+			layout.panel = !layout.panel;
+			this.sync();
+		}
+		frames(space, direction) {
+			const { length } = this.#source(space);
+			if (!length) return;
+			space.frame = this.#wrap(space.frame + direction, length);
+			this.sync(space);
+		}
+		exec(space) {
+			const one = this.#source(space)[space.frame];
+			if (!one) return;
+			pathless.exec(space.el, one.data);
+		}
+		#source(space) {
+			return space === this.spaces[3] ? pathless.panels : pathless.frames;
+		}
+		#rotate(items, offset) {
+			items.push(...items.splice(0, this.#wrap(offset, items.length)));
+		}
+		#wrap(value, length) {
+			return ((value % length) + length) % length;
+		}
+	}
+	new Universe();
+</script>

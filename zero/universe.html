@@ -1,115 +1,110 @@
-<div id="zero" class="space" hidden></div>
+<div id="zero" class="space"></div>
 <div id="one" class="space" hidden></div>
 <div id="two" class="space" hidden></div>
 <div id="three" class="space" hidden></div>
 
 <script>
 	class Universe {
-		#visible;
-		#layouts = [[0], [0, 1], [0, 1, 2, 3]];
-		#layout = 0;
-		#restore = null;
-
-		#space(id) {
-			return {
-				el: document.getElementById(id),
-				frame: 0,
-				states: [],
-			};
-		}
+		#layouts = [
+			{ variants: 1, spaces: 1 },
+			{ variants: 2, spaces: 2 },
+			{ variants: 4, spaces: 3 },
+		];
+		#state = {
+			layout: [0, 0],
+			spaces: [0],
+			focused: 0,
+			previousLayout: null,
+		};
 		constructor() {
-			this.el = pathless.el;
-			this.zero = this.#space('zero');
-			this.one = this.#space('one');
-			this.two = this.#space('two');
-			this.three = this.#space('three');
-			this.spaces = [this.zero, this.one, this.two, this.three];
-			this.#visible = [this.zero];
+			this.spaces = Array.from(
+				pathless.el.querySelectorAll(':scope > .space'),
+				(el, index) => ({
+					el,
+					frames: index === 3 ? pathless.panels : pathless.frames,
+					frame: 0,
+					states: [],
+				}),
+			);
 			this.sync();
 		}
-		get space() {
-			return this.#visible[0];
-		}
-		set space(space) {
-			this.#select(this.#visible, space);
-		}
-		get visible() {
-			return [...this.#visible];
-		}
-		set visible(spaces) {
-			const order = [...this.spaces];
-			this.#select(order, this.space);
-			const visible = order.filter((space) => spaces.includes(space));
-			if (visible.length) this.#visible = visible;
-		}
-		get layout() {
-			return {
-				layout: this.#layout,
-				variant: this.#layouts[this.#layout][0],
-			};
-		}
-		layouts(layout = this.#layout, variant) {
-			if (layout === 0 && this.#layout === 0) layout = this.#restore;
-			const variants = this.#layouts[layout];
-			if (!variants) return;
-			if (layout === 0) this.#restore = this.#layout;
-			variant ??= variants[0] + (layout === this.#layout ? 1 : 0);
-			this.#layout = layout;
-			this.#select(variants, this.#cycle(variant, 0, variants.length));
-			this.sync();
-		}
-		sync(changed) {
-			const main = this.#visible.find((space) => space !== this.three);
-			const mains = [
-				[main],
-				[this.zero, main === this.two ? this.two : this.one],
-				[this.zero, this.one, this.two],
-			][this.#layout];
-			this.visible = this.#visible.includes(this.three)
-				? [...mains, this.three]
-				: mains;
-			Object.assign(this.el.dataset, this.layout);
-			for (const space of this.spaces) {
-				const shown = this.#visible.includes(space);
-				const area = mains.indexOf(space);
-				if (area >= 0)
-					space.el.style.gridArea = this.spaces[area].el.id;
-				if (space === changed || (shown && !space.el.firstElementChild))
-					this.exec(space);
-				space.el.hidden = !shown;
+		layout(layout) {
+			const state = this.#state;
+			const { spaces, focused, layout: current } = state;
+			if (layout === current[0] && layout !== 0) {
+				state.layout = [
+					layout,
+					this.#wrap(current[1] + 1, this.#layouts[layout].variants),
+				];
+				this.sync();
+				return state;
 			}
-		}
-		focus(direction) {
-			const index = this.#cycle(0, direction, this.#visible.length);
-			this.space = this.#visible[index];
-		}
-		togglePanel() {
-			const visible = this.visible;
-			this.visible = visible.includes(this.three)
-				? visible.filter((space) => space !== this.three)
-				: [...visible, this.three];
+			const next =
+				layout === 0 && current[0] === 0
+					? state.previousLayout
+					: [layout, 0];
+			if (!next) return state;
+			if (next[0] === 0) state.previousLayout = [...current];
+			const main = focused === 3 ? spaces[0] : focused;
+			spaces.splice(0, this.#layouts[current[0]].spaces);
+			for (let index = 0; index < this.#layouts[next[0]].spaces; index++)
+				spaces.splice(index, 0, next[0] === 0 ? main : index);
+			state.layout = [...next];
+			if (!spaces.includes(focused)) state.focused = spaces[0];
 			this.sync();
+			return state;
 		}
-		frames(space, direction) {
-			const { length } = this.#source(space);
-			if (!length) return;
-			space.frame = this.#cycle(space.frame, direction, length);
-			this.sync(space);
+		focus(direction = 1) {
+			const state = this.#state;
+			const { spaces, focused } = state;
+			const index = this.#wrap(
+				spaces.indexOf(focused) + direction,
+				spaces.length,
+			);
+			state.focused = spaces[index];
+			return state;
 		}
-		exec(space) {
-			const one = this.#source(space)[space.frame];
-			if (!one) return;
-			pathless.exec(space.el, one.data);
+		frames(direction = 1) {
+			const state = this.#state;
+			const space = this.spaces[state.focused];
+			if (space.frames.length)
+				space.frame = this.#wrap(
+					space.frame + direction,
+					space.frames.length,
+				);
+			this.sync();
+			return state;
 		}
-		#source(space) {
-			return space === this.three ? pathless.panels : pathless.frames;
+		panel(visible = !this.#state.spaces.includes(3)) {
+			const state = this.#state;
+			const { spaces, focused } = state;
+			if (visible === spaces.includes(3)) return state;
+			if (visible) spaces.push(3);
+			else {
+				spaces.pop();
+				if (focused === 3) state.focused = spaces[0];
+			}
+			this.sync();
+			return state;
 		}
-		#select(items, item) {
-			const index = items.indexOf(item);
-			if (index > 0) items.push(...items.splice(0, index));
+		sync() {
+			const {
+				layout: [layout, variant],
+				spaces,
+			} = this.#state;
+			Object.assign(pathless.el.dataset, { layout, variant });
+			this.spaces.forEach((space, index) => {
+				space.el.hidden = !spaces.includes(index);
+				if (space.el.hidden || space.mounted === space.frame) return;
+				const frame = space.frames[space.frame];
+				if (!frame) return;
+				pathless.exec(space.el, frame.data);
+				space.mounted = space.frame;
+			});
+			return this.#state;
 		}
-		#cycle(index, direction, length) {
-			return (((index + direction) % length) + length) % length;
+		#wrap(value, length) {
+			return ((value % length) + length) % length;
 		}
 	}
 	new Universe();
