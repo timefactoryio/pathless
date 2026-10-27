@@ -1,110 +1,96 @@
-<div id="zero" class="space"></div>
+<div id="zero" class="space" hidden></div>
 <div id="one" class="space" hidden></div>
 <div id="two" class="space" hidden></div>
 <div id="three" class="space" hidden></div>
 
 <script>
 	class Universe {
-		#layouts = [
-			{ variants: 1, spaces: 1 },
-			{ variants: 2, spaces: 2 },
-			{ variants: 4, spaces: 3 },
-		];
-		#state = {
-			layout: [0, 0],
-			spaces: [0],
-			focused: 0,
-			previousLayout: null,
-		};
+		spaces = Array.from(pathless.el.querySelectorAll(':scope > .space'));
+		#layouts = [1, 2, 3].map((count) => this.spaces.slice(0, count));
+		#layout = [0, 0, null];
+		#visible = this.#layouts[0];
+		#focused = this.spaces[0];
+		#contexts = new Map(
+			this.spaces.map((space) => [
+				space,
+				{ index: 0, states: new Map() },
+			]),
+		);
+		#rendering = null;
+
 		constructor() {
-			this.spaces = Array.from(
-				pathless.el.querySelectorAll(':scope > .space'),
-				(el, index) => ({
-					el,
-					frames: index === 3 ? pathless.panels : pathless.frames,
-					frame: 0,
-					states: [],
-				}),
-			);
-			this.sync();
+			pathless.universe = this;
+			this.#focused.hidden = false;
+			this.#exec(this.#focused, pathless.frames[0].data);
 		}
-		layout(layout) {
-			const state = this.#state;
-			const { spaces, focused, layout: current } = state;
-			if (layout === current[0] && layout !== 0) {
-				state.layout = [
-					layout,
-					this.#wrap(current[1] + 1, this.#layouts[layout].variants),
-				];
-				this.sync();
-				return state;
+		get focused() {
+			return this.#focused;
+		}
+		frame(space = this.#rendering ?? this.#focused) {
+			const { index, states } = this.#contexts.get(space);
+			if (!states.has(index)) states.set(index, new Map());
+			return { el: space.firstElementChild, state: states.get(index) };
+		}
+		layout(layout, space) {
+			let [current, variant, previous] = this.#layout;
+			if (layout === 0 && current === 0 && space === undefined) {
+				if (!previous) return this;
+				[layout, variant] = previous;
+			} else {
+				if (layout === 0 && current !== 0)
+					previous = [current, variant];
+				variant = layout === current ? (variant + 1) % 2 ** layout : 0;
 			}
-			const next =
-				layout === 0 && current[0] === 0
-					? state.previousLayout
-					: [layout, 0];
-			if (!next) return state;
-			if (next[0] === 0) state.previousLayout = [...current];
-			const main = focused === 3 ? spaces[0] : focused;
-			spaces.splice(0, this.#layouts[current[0]].spaces);
-			for (let index = 0; index < this.#layouts[next[0]].spaces; index++)
-				spaces.splice(index, 0, next[0] === 0 ? main : index);
-			state.layout = [...next];
-			if (!spaces.includes(focused)) state.focused = spaces[0];
-			this.sync();
-			return state;
+			this.#layout = [layout, variant, previous];
+			Object.assign(pathless.el.dataset, { layout, variant });
+			if (layout === current && layout !== 0) return this;
+			return this.#show(
+				layout === 0 ? [space ?? this.#focused] : this.#layouts[layout],
+			);
 		}
 		focus(direction = 1) {
-			const state = this.#state;
-			const { spaces, focused } = state;
-			const index = this.#wrap(
-				spaces.indexOf(focused) + direction,
-				spaces.length,
-			);
-			state.focused = spaces[index];
-			return state;
+			const index = this.#visible.indexOf(this.#focused) + direction;
+			const length = this.#visible.length;
+			this.#focused = this.#visible[((index % length) + length) % length];
+			return this;
 		}
-		frames(direction = 1) {
-			const state = this.#state;
-			const space = this.spaces[state.focused];
-			if (space.frames.length)
-				space.frame = this.#wrap(
-					space.frame + direction,
-					space.frames.length,
-				);
-			this.sync();
-			return state;
+		panel(visible = this.spaces[3].hidden) {
+			const panel = this.spaces[3];
+			if (panel.hidden === !visible) return this;
+			panel.hidden = !visible;
+			return this.#show(this.#visible);
 		}
-		panel(visible = !this.#state.spaces.includes(3)) {
-			const state = this.#state;
-			const { spaces, focused } = state;
-			if (visible === spaces.includes(3)) return state;
-			if (visible) spaces.push(3);
-			else {
-				spaces.pop();
-				if (focused === 3) state.focused = spaces[0];
+		navigate(direction = 1, space = this.#focused) {
+			const frames =
+				space === this.spaces[3] ? pathless.panels : pathless.frames;
+			if (!frames.length) return this;
+			const context = this.#contexts.get(space);
+			const index = context.index + direction;
+			context.index =
+				((index % frames.length) + frames.length) % frames.length;
+			return this.#exec(space, frames[context.index].data);
+		}
+		#exec(space, data) {
+			const rendering = this.#rendering;
+			this.#rendering = space;
+			try {
+				pathless.exec(space, data);
+			} finally {
+				this.#rendering = rendering;
 			}
-			this.sync();
-			return state;
+			return this;
 		}
-		sync() {
-			const {
-				layout: [layout, variant],
-				spaces,
-			} = this.#state;
-			Object.assign(pathless.el.dataset, { layout, variant });
-			this.spaces.forEach((space, index) => {
-				space.el.hidden = !spaces.includes(index);
-				if (space.el.hidden || space.mounted === space.frame) return;
-				const frame = space.frames[space.frame];
-				if (!frame) return;
-				pathless.exec(space.el, frame.data);
-				space.mounted = space.frame;
+		#show(spaces) {
+			const panel = this.spaces[3];
+			spaces = spaces.filter((space) => space !== panel);
+			if (!panel.hidden) spaces.push(panel);
+			if (!spaces.length) spaces.push(this.spaces[0]);
+			this.#visible = spaces;
+			if (!spaces.includes(this.#focused)) this.#focused = spaces[0];
+			this.spaces.forEach((space) => {
+				space.hidden = !spaces.includes(space);
 			});
-			return this.#state;
-		}
-		#wrap(value, length) {
-			return ((value % length) + length) % length;
+			return this;
 		}
 	}
 	new Universe();

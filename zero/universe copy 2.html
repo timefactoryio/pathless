@@ -1,0 +1,113 @@
+<div id="zero" class="space"></div>
+<div id="one" class="space" hidden></div>
+<div id="two" class="space" hidden></div>
+<div id="three" class="space" hidden></div>
+
+<script>
+	class Universe {
+		#layouts = [
+			{ variants: 1, spaces: [0] },
+			{ variants: 2, spaces: [0, 1] },
+			{ variants: 4, spaces: [0, 1, 2] },
+		];
+		#layout = [0, 0, null];
+		#spaces = [0];
+		#focused = 0;
+		#selectedFrames = [0, 0, 0, 0];
+		#states = [[], [], [], []];
+		#frame = null;
+		constructor() {
+			this.spaces = Array.from(
+				pathless.el.querySelectorAll(':scope > .space'),
+			);
+			Object.defineProperty(pathless, 'frame', {
+				get: () => this.#frame,
+			});
+			this.sync();
+		}
+		layout(layout) {
+			let [current, variant, previous] = this.#layout;
+			if (layout === 0 && current === 0) {
+				if (!previous) return this;
+				[layout, variant] = previous;
+			} else {
+				if (layout === 0) previous = [current, variant];
+				variant =
+					layout === current
+						? this.#wrap(
+								variant + 1,
+								this.#layouts[layout].variants,
+							)
+						: 0;
+			}
+			this.#layout = [layout, variant, previous];
+			Object.assign(pathless.el.dataset, { layout, variant });
+			return this.sync();
+		}
+		focus(direction = 1) {
+			const index = this.#wrap(
+				this.#spaces.indexOf(this.#focused) + direction,
+				this.#spaces.length,
+			);
+			this.#focused = this.#spaces[index];
+			return this;
+		}
+		frames(direction = 1) {
+			const frames =
+				this.#focused === 3 ? pathless.panels : pathless.frames;
+			if (frames.length)
+				this.#selectedFrames[this.#focused] = this.#wrap(
+					this.#selectedFrames[this.#focused] + direction,
+					frames.length,
+				);
+			return this.#render(this.#focused);
+		}
+		panel(visible = !this.#spaces.includes(3)) {
+			if (visible === this.#spaces.includes(3)) return this;
+			if (visible) this.#spaces.push(3);
+			else this.#spaces.pop();
+			return this.sync();
+		}
+		sync(...spaces) {
+			if (!spaces.length) spaces = this.spaces;
+			spaces = spaces.filter((el) => el);
+			const [layout] = this.#layout;
+			const panel = this.#spaces.includes(3);
+			this.#spaces =
+				layout === 0
+					? [this.#focused === 3 ? this.#spaces[0] : this.#focused]
+					: [...this.#layouts[layout].spaces];
+			if (panel) this.#spaces.push(3);
+			if (!this.#spaces.includes(this.#focused))
+				this.#focused = this.#spaces[0];
+			for (const el of spaces) {
+				const index = this.spaces.indexOf(el);
+				el.hidden = !this.#spaces.includes(index);
+				if (!el.hidden) this.#render(index);
+			}
+			return this;
+		}
+		#render(index) {
+			const frames = index === 3 ? pathless.panels : pathless.frames;
+			const selectedFrame = this.#selectedFrames[index];
+			const frame = frames[selectedFrame];
+			if (!frame) return this;
+			const el = this.spaces[index];
+			const previous = this.#frame;
+			this.#frame = {
+				el,
+				state: (this.#states[index][selectedFrame] ??= new Map()),
+			};
+			try {
+				pathless.exec(el, frame.data);
+			} finally {
+				this.#frame = previous;
+			}
+			return this;
+		}
+		#wrap(value, length) {
+			return ((value % length) + length) % length;
+		}
+	}
+	new Universe();
+</script>
