@@ -19,12 +19,18 @@
 		#rendering = null;
 
 		constructor() {
-			pathless.universe = this;
+			for (const name of [
+				'frame',
+				'layout',
+				'focus',
+				'panel',
+				'navigate',
+			]) {
+				pathless[name] = this[name].bind(this);
+			}
+			pathless.spaces = this.spaces;
 			this.#focused.hidden = false;
 			this.#exec(this.#focused, pathless.frames[0].data);
-		}
-		get focused() {
-			return this.#focused;
 		}
 		frame(space = this.#rendering ?? this.#focused) {
 			const { index, states } = this.#contexts.get(space);
@@ -33,42 +39,47 @@
 		}
 		layout(layout, space) {
 			let [current, variant, previous] = this.#layout;
+			const cycling = layout === current && layout !== 0;
 			if (layout === 0 && current === 0 && space === undefined) {
-				if (!previous) return this;
+				if (!previous) return pathless;
 				[layout, variant] = previous;
 			} else {
 				if (layout === 0 && current !== 0)
 					previous = [current, variant];
-				variant = layout === current ? (variant + 1) % 2 ** layout : 0;
+				variant = cycling ? (variant + 1) % 2 ** layout : 0;
 			}
 			this.#layout = [layout, variant, previous];
 			Object.assign(pathless.el.dataset, { layout, variant });
-			if (layout === current && layout !== 0) return this;
+			if (cycling) return pathless;
 			return this.#show(
 				layout === 0 ? [space ?? this.#focused] : this.#layouts[layout],
 			);
 		}
-		focus(direction = 1) {
-			const index = this.#visible.indexOf(this.#focused) + direction;
+		focus(direction = 1, target = this.#focused) {
+			const index = this.#visible.indexOf(target);
+			if (index < 0) return pathless;
 			const length = this.#visible.length;
-			this.#focused = this.#visible[((index % length) + length) % length];
-			return this;
+			this.#focused =
+				this.#visible[
+					(((index + direction) % length) + length) % length
+				];
+			return pathless;
 		}
 		panel(visible = this.spaces[3].hidden) {
 			const panel = this.spaces[3];
-			if (panel.hidden === !visible) return this;
+			if (panel.hidden === !visible) return pathless;
 			panel.hidden = !visible;
 			return this.#show(this.#visible);
 		}
 		navigate(direction = 1, space = this.#focused) {
 			const frames =
 				space === this.spaces[3] ? pathless.panels : pathless.frames;
-			if (!frames.length) return this;
-			const context = this.#contexts.get(space);
-			const index = context.index + direction;
-			context.index =
-				((index % frames.length) + frames.length) % frames.length;
-			return this.#exec(space, frames[context.index].data);
+			const { length } = frames;
+			if (!length) return pathless;
+			const ctx = this.#contexts.get(space);
+			const index = ctx.index + direction;
+			ctx.index = ((index % length) + length) % length;
+			return this.#exec(space, frames[ctx.index].data);
 		}
 		#exec(space, data) {
 			const rendering = this.#rendering;
@@ -78,7 +89,7 @@
 			} finally {
 				this.#rendering = rendering;
 			}
-			return this;
+			return pathless;
 		}
 		#show(spaces) {
 			const panel = this.spaces[3];
@@ -86,12 +97,98 @@
 			if (!panel.hidden) spaces.push(panel);
 			if (!spaces.length) spaces.push(this.spaces[0]);
 			this.#visible = spaces;
-			if (!spaces.includes(this.#focused)) this.#focused = spaces[0];
 			this.spaces.forEach((space) => {
 				space.hidden = !spaces.includes(space);
 			});
-			return this;
+			if (this.#focused.hidden) this.#focused = spaces[0];
+			return pathless;
 		}
 	}
+
+	class Pointer {
+		#state = null;
+		#buttons = new WeakMap();
+
+		constructor() {
+			pathless.click = (el, handler) => {
+				this.#buttons.set(el, handler);
+				return pathless;
+			};
+			for (const [type, handler] of [
+				['click', this.click],
+				['pointerdown', this.down],
+				['pointerup', this.up],
+				['pointercancel', this.up],
+				['lostpointercapture', this.up],
+			]) {
+				pathless.el.addEventListener(type, handler.bind(this));
+			}
+		}
+
+		down(event) {
+			if (!event.isPrimary || event.button !== 0 || this.#state) return;
+			const space = pathless.spaces.find(
+				(space) => !space.hidden && space.contains(event.target),
+			);
+			if (!space) return;
+			pathless.focus(0, space);
+			if (this.#button(event.target)) return;
+			pathless.el.setPointerCapture(event.pointerId);
+			this.#state = {
+				id: event.pointerId,
+				start: this.#coordinate(event),
+				space,
+			};
+		}
+
+		up(event) {
+			const pointer = this.#state;
+			if (!pointer || pointer.id !== event.pointerId) return;
+			this.#state = null;
+			const { start, space } = pointer;
+			if (
+				event.type !== 'pointerup' ||
+				event.defaultPrevented ||
+				space.hidden
+			)
+				return;
+			const end = this.#coordinate(event);
+			const [deltaX, deltaY] = end.map((value, axis) =>
+				Math.abs(value - start[axis]),
+			);
+			if (Math.max(deltaX, deltaY) >= 0.1) {
+				if (deltaX >= deltaY)
+					pathless.navigate(end[0] < start[0] ? -1 : 1, space);
+				return;
+			}
+			if ([...start, ...end].every((value) => Math.abs(value) <= 0.05))
+				return pathless.panel();
+		}
+
+		click(event) {
+			if (event.defaultPrevented) return;
+			const el = this.#button(event.target);
+			if (el) this.#buttons.get(el).call(el, event);
+		}
+
+		#button(target) {
+			for (
+				let el = target;
+				el && el !== pathless.el;
+				el = el.parentElement
+			)
+				if (this.#buttons.has(el)) return el;
+		}
+
+		#coordinate(point) {
+			const { left, top, width, height } =
+				pathless.el.getBoundingClientRect();
+			return [
+				(2 * (point.clientX - left)) / width - 1,
+				1 - (2 * (point.clientY - top)) / height,
+			].map((value) => Math.max(-1, Math.min(1, value)));
+		}
+	}
+	new Pointer();
 	new Universe();
 </script>
