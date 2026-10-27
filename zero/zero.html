@@ -106,10 +106,20 @@
 				location.hostname,
 			);
 			class Pathless {
-				el = document.getElementById('universe');
 				#cache = new Map();
 				static #decoder = new TextDecoder();
 				static #range = new Range();
+
+				constructor() {
+					this.el = document.getElementById('universe');
+					this.#measure();
+					new ResizeObserver(() => this.#measure()).observe(this.el);
+				}
+
+				#measure() {
+					const { width, height } = this.el.getBoundingClientRect();
+					Object.assign(this.el, { width, height });
+				}
 
 				static decode(bytes) {
 					let offset = 0;
