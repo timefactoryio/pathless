@@ -12,6 +12,9 @@ import (
 //go:embed zero.html
 var pathlessHTML string
 
+//go:embed input.html
+var inputHTML []byte
+
 //go:embed universe.html
 var universeHTML []byte
 
@@ -24,7 +27,7 @@ type Zero struct {
 
 func NewZero(args ...string) *Zero {
 	z := &Zero{
-		UniverseHTML: universeHTML,
+		UniverseHTML: bytes.Join([][]byte{inputHTML, universeHTML}, nil),
 		mux:          http.NewServeMux(),
 	}
 

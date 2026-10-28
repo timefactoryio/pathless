@@ -1,11 +1,6 @@
-<div id="zero" class="space" hidden></div>
-<div id="one" class="space" hidden></div>
-<div id="two" class="space" hidden></div>
-<div id="three" class="space" hidden></div>
-
 <script>
 	class Universe {
-		spaces = Array.from(pathless.el.querySelectorAll(':scope > .space'));
+		spaces = pathless.spaces;
 		#layouts = [1, 2, 3].map((count) => this.spaces.slice(0, count));
 		#layout = [0, 0, null];
 		#visible = this.#layouts[0];
@@ -28,7 +23,6 @@
 			]) {
 				pathless[name] = this[name].bind(this);
 			}
-			pathless.spaces = this.spaces;
 			this.#focused.hidden = false;
 			this.#measure();
 			const observer = new ResizeObserver(() => this.#measure());
@@ -104,7 +98,7 @@
 			const rendering = this.#rendering;
 			this.#rendering = space;
 			try {
-				pathless.exec(space, data);
+				pathless.exec(data, space);
 			} finally {
 				this.#rendering = rendering;
 			}
@@ -126,105 +120,5 @@
 			return pathless;
 		}
 	}
-
-	class Pointer {
-		#state = null;
-		#bindings = new WeakMap();
-
-		constructor() {
-			for (const [type, handler] of [
-				['click', this.click],
-				['pointerdown', this.down],
-				['pointerup', this.up],
-				['pointercancel', this.up],
-				['lostpointercapture', this.up],
-			]) {
-				pathless.el.addEventListener(type, handler.bind(this));
-			}
-			pathless.click = (el, handler) => this.#bind(el, 'click', handler);
-			for (const axis of ['x', 'y']) {
-				pathless[axis] = (first, second) =>
-					this.#bind(pathless.frame().el, axis, [first, second]);
-			}
-		}
-
-		down(event) {
-			if (!event.isPrimary || event.button !== 0 || this.#state) return;
-			const space = pathless.spaces.find(
-				(space) => !space.hidden && space.contains(event.target),
-			);
-			if (!space) return;
-			pathless.focus(0, space);
-			if (this.#button(event.target)) return;
-			pathless.el.setPointerCapture(event.pointerId);
-			this.#state = {
-				id: event.pointerId,
-				start: this.#coordinate(event),
-				space,
-			};
-		}
-
-		up(event) {
-			const pointer = this.#state;
-			if (!pointer || pointer.id !== event.pointerId) return;
-			this.#state = null;
-			const { start, space } = pointer;
-			if (
-				event.type !== 'pointerup' ||
-				event.defaultPrevented ||
-				space.hidden
-			)
-				return;
-			const end = this.#coordinate(event);
-			const deltaX = Math.abs(end[0] - start[0]);
-			const deltaY = Math.abs(end[1] - start[1]);
-			if (Math.max(deltaX, deltaY) >= 0.1) {
-				if (deltaX >= deltaY)
-					pathless.navigate(end[0] < start[0] ? -1 : 1, space);
-				return;
-			}
-			if ([...start, ...end].every((value) => Math.abs(value) <= 0.05))
-				return pathless.panel();
-			const bindings = this.#bindings.get(space.firstElementChild);
-			if (!bindings) return;
-			const offsetX = end[0] - space.origin.x;
-			const offsetY = end[1] - space.origin.y;
-			const callback =
-				Math.abs(offsetX) >= Math.abs(offsetY)
-					? bindings.x?.[offsetX < 0 ? 0 : 1]
-					: bindings.y?.[offsetY < 0 ? 1 : 0];
-			callback?.(start, end, space);
-		}
-
-		click(event) {
-			if (event.defaultPrevented) return;
-			const el = this.#button(event.target);
-			if (el) this.#bindings.get(el).click.call(el, event);
-		}
-
-		#bind(el, type, handler) {
-			let bindings = this.#bindings.get(el);
-			if (!bindings) this.#bindings.set(el, (bindings = {}));
-			bindings[type] = handler;
-			return pathless;
-		}
-
-		#button(el) {
-			while (el && el !== pathless.el) {
-				const bindings = this.#bindings.get(el);
-				if (bindings && 'click' in bindings) return el;
-				el = el.parentElement;
-			}
-		}
-
-		#coordinate({ clientX, clientY }) {
-			const { width, height } = pathless.el;
-			return [
-				Math.max(-1, Math.min(1, (2 * clientX) / width - 1)),
-				Math.max(-1, Math.min(1, 1 - (2 * clientY) / height)),
-			];
-		}
-	}
-	new Pointer();
 	new Universe();
 </script>
