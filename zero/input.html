@@ -1,25 +1,21 @@
 <script>
 	class Input {
-		#state = null;
+		#pointer = null;
 		#triggers = new WeakMap();
-		#clicks = new WeakMap();
 
 		constructor() {
-			this.setTrigger(() => pathless.layout(0), ['1']);
-			this.setTrigger(() => pathless.layout(1), ['2']);
-			this.setTrigger(() => pathless.layout(2), ['3']);
-			this.setTrigger(() => pathless.focus(1), ['tab']);
-			this.setTrigger(
+			for (const key of ['1', '2', '3'])
+				this.#register(() => pathless.layout(Number(key) - 1), [key]);
+			this.#register(() => pathless.focus(1), ['tab']);
+			this.#register(
 				(start, end, space) => pathless.navigate(-1, space),
-				['q'],
-				['swipe left'],
+				['q', 'swipe left'],
 			);
-			this.setTrigger(
+			this.#register(
 				(start, end, space) => pathless.navigate(1, space),
-				['e'],
-				['swipe right'],
+				['e', 'swipe right'],
 			);
-			this.setTrigger(() => pathless.panel(), ['z'], ['origin']);
+			this.#register(() => pathless.panel(), ['z', 'origin']);
 			for (const [type, handler] of [
 				['click', this.click],
 				['pointerdown', this.down],
@@ -30,134 +26,108 @@
 				pathless.el.addEventListener(type, handler.bind(this));
 			}
 			document.addEventListener('keydown', this.keydown.bind(this));
-			pathless.click = (el, callback) => {
-				this.#clicks.set(el, callback);
-				return pathless;
-			};
+			pathless.click = (el, callback) =>
+				this.#register(callback, ['click'], el);
 			pathless.x = this.x.bind(this);
 			pathless.y = this.y.bind(this);
 		}
 
-		setTrigger(callback, keys = [], gestures = []) {
-			const el = pathless.frame?.().el ?? pathless.el;
-			let triggers = this.#triggers.get(el);
-			if (!triggers) {
-				triggers = { keys: new Map(), gestures: new Map() };
-				this.#triggers.set(el, triggers);
-			}
-			for (const key of keys)
-				triggers.keys.set(key.toLowerCase(), callback);
-			for (const gesture of gestures)
-				triggers.gestures.set(gesture, callback);
+		x(left, right) {
+			const { el } = pathless.frame();
+			this.#register(left, ['a', 'left'], el);
+			return this.#register(right, ['d', 'right'], el);
+		}
+		y(up, down) {
+			const { el } = pathless.frame();
+			this.#register(up, ['w', 'up'], el);
+			return this.#register(down, ['s', 'down'], el);
+		}
+
+		#register(callback, triggers = [], el = pathless.el) {
+			let callbacks = this.#triggers.get(el);
+			if (!callbacks) this.#triggers.set(el, (callbacks = new Map()));
+			for (const trigger of triggers)
+				callbacks.set(trigger.toLowerCase(), callback);
 			return pathless;
 		}
-
-		x(left, right) {
-			this.setTrigger(left, ['a'], ['-x']);
-			return this.setTrigger(right, ['d'], ['x']);
-		}
-
-		y(up, down) {
-			this.setTrigger(up, ['w'], ['-y']);
-			return this.setTrigger(down, ['s'], ['y']);
+		#callback(trigger, space) {
+			const el = space?.hidden ? null : space?.firstElementChild;
+			return (
+				this.#triggers.get(el)?.get(trigger) ??
+				this.#triggers.get(pathless.el)?.get(trigger)
+			);
 		}
 
 		down(event) {
-			if (!event.isPrimary || event.button !== 0 || this.#state) return;
+			if (this.#blocked(event) || !event.isPrimary) return;
+			if (event.button !== 0 || this.#pointer) return;
 			const space = pathless.spaces.find(
 				(space) => !space.hidden && space.contains(event.target),
 			);
 			if (!space) return;
 			pathless.focus(0, space);
 			if (this.#button(event.target)) return;
-			pathless.el.setPointerCapture(event.pointerId);
-			this.#state = {
+			this.#pointer = {
+				...pathless.frame(space),
 				id: event.pointerId,
 				start: this.#coordinate(event),
-				space,
 			};
+			pathless.el.setPointerCapture(event.pointerId);
 		}
-
 		up(event) {
-			const pointer = this.#state;
+			const pointer = this.#pointer;
 			if (!pointer || pointer.id !== event.pointerId) return;
-			this.#state = null;
-			const { start, space } = pointer;
-			if (
-				event.type !== 'pointerup' ||
-				event.defaultPrevented ||
-				space.hidden
-			)
-				return;
+			this.#pointer = null;
+			const { start, space, el } = pointer;
+			if (event.type !== 'pointerup' || this.#blocked(event)) return;
+			if (space.hidden || el !== space.firstElementChild) return;
 			const end = this.#coordinate(event);
-			const deltaX = Math.abs(end[0] - start[0]);
-			const deltaY = Math.abs(end[1] - start[1]);
-			let gesture;
-			if (Math.max(deltaX, deltaY) >= 0.1) {
-				if (deltaX < deltaY) return;
-				gesture = end[0] < start[0] ? 'swipe left' : 'swipe right';
-			} else if (
-				[...start, ...end].every((value) => Math.abs(value) <= 0.05)
-			) {
-				gesture = 'origin';
-			} else {
-				const offsetX = end[0] - space.origin.x;
-				const offsetY = end[1] - space.origin.y;
-				gesture =
-					Math.abs(offsetX) >= Math.abs(offsetY)
-						? offsetX < 0
-							? '-x'
-							: 'x'
-						: offsetY < 0
-							? 'y'
-							: '-y';
-			}
-			this.#callback('gestures', gesture, space)?.(start, end, space);
+			const gesture = this.#gesture(start, end, space.origin);
+			if (gesture) this.#callback(gesture, space)?.(start, end, space);
 		}
-
 		click(event) {
 			if (event.defaultPrevented) return;
 			const el = this.#button(event.target);
-			if (el) this.#clicks.get(el).call(el, event);
+			if (el) this.#triggers.get(el).get('click').call(el, event);
 		}
-
 		keydown(event) {
-			if (
-				event.defaultPrevented ||
-				event.isComposing ||
-				event.ctrlKey ||
-				event.metaKey ||
-				event.altKey ||
-				event.target.isContentEditable ||
-				event.target.closest?.('input, textarea, select')
-			)
-				return;
-			const space = pathless.frame().el?.parentElement;
-			const callback = this.#callback(
-				'keys',
-				event.key.toLowerCase(),
-				space,
-			);
+			if (this.#blocked(event) || event.isComposing) return;
+			if (event.ctrlKey || event.metaKey || event.altKey) return;
+			const { space } = pathless.frame();
+			const key = event.key.toLowerCase();
+			const callback = this.#callback(key, space);
 			if (!callback) return;
 			event.preventDefault();
 			callback(undefined, undefined, space);
 		}
 
-		#callback(type, trigger, space) {
-			const el = space?.hidden ? null : space?.firstElementChild;
+		#gesture(start, end, origin) {
+			const deltaX = Math.abs(end[0] - start[0]);
+			const deltaY = Math.abs(end[1] - start[1]);
+			if (deltaY >= 0.1 && deltaY > deltaX) return null;
+			if (deltaX >= 0.1)
+				return end[0] < start[0] ? 'swipe left' : 'swipe right';
+			if ([...start, ...end].every((value) => Math.abs(value) <= 0.05))
+				return 'origin';
+			const offsetX = end[0] - origin.x;
+			const offsetY = end[1] - origin.y;
+			if (Math.abs(offsetX) >= Math.abs(offsetY))
+				return offsetX < 0 ? 'left' : 'right';
+			return offsetY < 0 ? 'down' : 'up';
+		}
+		#blocked(event) {
 			return (
-				this.#triggers.get(el)?.[type].get(trigger) ??
-				this.#triggers.get(pathless.el)?.[type].get(trigger)
+				event.defaultPrevented ||
+				event.target.isContentEditable ||
+				event.target.closest?.('input, textarea, select')
 			);
 		}
-
 		#button(el) {
 			while (el && el !== pathless.el) {
-				if (this.#clicks.has(el)) return el;
+				if (this.#triggers.get(el)?.has('click')) return el;
 				el = el.parentElement;
 			}
 		}
-
 		#coordinate({ clientX, clientY }) {
 			const { width, height } = pathless.el;
 			return [

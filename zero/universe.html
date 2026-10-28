@@ -33,7 +33,11 @@
 		frame(space = this.#rendering ?? this.#focused) {
 			const { index, states } = this.#contexts.get(space);
 			if (!states.has(index)) states.set(index, new Map());
-			return { el: space.firstElementChild, state: states.get(index) };
+			return {
+				space,
+				el: space.firstElementChild,
+				state: states.get(index),
+			};
 		}
 		layout(layout, space) {
 			let [current, variant, previous] = this.#layout;
