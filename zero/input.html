@@ -4,18 +4,25 @@
 		#triggers = new WeakMap();
 
 		constructor() {
-			for (const key of ['1', '2', '3'])
-				this.#register(() => pathless.layout(Number(key) - 1), [key]);
-			this.#register(() => pathless.focus(1), ['tab']);
-			this.#register(
-				(start, end, space) => pathless.navigate(-1, space),
-				['q', 'swipe left'],
-			);
-			this.#register(
-				(start, end, space) => pathless.navigate(1, space),
-				['e', 'swipe right'],
-			);
-			this.#register(() => pathless.panel(), ['z', 'origin']);
+			const { el } = pathless;
+			for (const [callback, ...triggers] of [
+				[() => pathless.layout(0), '1', 'bottomCenter'],
+				[() => pathless.layout(1), '2'],
+				[() => pathless.layout(2), '3'],
+				[() => pathless.focus(1), 'tab'],
+				[() => pathless.navigate(-1), 'q', 'swipe left'],
+				[() => pathless.navigate(1), 'e', 'swipe right'],
+				[() => pathless.panel(), 'z'],
+				[
+					() => pathless.layout((Number(el.dataset.layout) + 1) % 3),
+					'bottomLeft',
+				],
+				[
+					() => pathless.layout(Number(el.dataset.layout)),
+					'bottomRight',
+				],
+			])
+				this.#register(callback, triggers);
 			for (const [type, handler] of [
 				['click', this.click],
 				['pointerdown', this.down],
@@ -23,24 +30,21 @@
 				['pointercancel', this.up],
 				['lostpointercapture', this.up],
 			]) {
-				pathless.el.addEventListener(type, handler.bind(this));
+				el.addEventListener(type, handler.bind(this));
 			}
 			document.addEventListener('keydown', this.keydown.bind(this));
 			pathless.click = (el, callback) =>
 				this.#register(callback, ['click'], el);
-			pathless.x = this.x.bind(this);
-			pathless.y = this.y.bind(this);
-		}
-
-		x(left, right) {
-			const { el } = pathless.frame();
-			this.#register(left, ['a', 'left'], el);
-			return this.#register(right, ['d', 'right'], el);
-		}
-		y(up, down) {
-			const { el } = pathless.frame();
-			this.#register(up, ['w', 'up'], el);
-			return this.#register(down, ['s', 'down'], el);
+			for (const [axis, first, second] of [
+				['x', ['a', 'left'], ['d', 'right']],
+				['y', ['w', 'up'], ['s', 'down']],
+			]) {
+				pathless[axis] = (before, after) => {
+					const { el } = pathless.frame();
+					this.#register(before, first, el);
+					return this.#register(after, second, el);
+				};
+			}
 		}
 
 		#register(callback, triggers = [], el = pathless.el) {
@@ -51,6 +55,7 @@
 			return pathless;
 		}
 		#callback(trigger, space) {
+			trigger = trigger.toLowerCase();
 			const el = space?.hidden ? null : space?.firstElementChild;
 			return (
 				this.#triggers.get(el)?.get(trigger) ??
@@ -65,12 +70,13 @@
 				(space) => !space.hidden && space.contains(event.target),
 			);
 			if (!space) return;
-			pathless.focus(0, space);
+			const start = this.#coordinate(event);
+			if (!this.#bottom(start)) pathless.focus(0, space);
 			if (this.#button(event.target)) return;
 			this.#pointer = {
 				...pathless.frame(space),
 				id: event.pointerId,
-				start: this.#coordinate(event),
+				start,
 			};
 			pathless.el.setPointerCapture(event.pointerId);
 		}
@@ -94,21 +100,26 @@
 			if (this.#blocked(event) || event.isComposing) return;
 			if (event.ctrlKey || event.metaKey || event.altKey) return;
 			const { space } = pathless.frame();
-			const key = event.key.toLowerCase();
-			const callback = this.#callback(key, space);
+			const callback = this.#callback(event.key, space);
 			if (!callback) return;
 			event.preventDefault();
 			callback(undefined, undefined, space);
 		}
 
+		#bottom([horizontal, vertical]) {
+			if (vertical > -0.8) return null;
+			const position = Math.round(horizontal);
+			if (Math.abs(horizontal - position) > 0.2) return null;
+			return ['bottomLeft', 'bottomCenter', 'bottomRight'][position + 1];
+		}
 		#gesture(start, end, origin) {
 			const deltaX = Math.abs(end[0] - start[0]);
 			const deltaY = Math.abs(end[1] - start[1]);
 			if (deltaY >= 0.1 && deltaY > deltaX) return null;
 			if (deltaX >= 0.1)
 				return end[0] < start[0] ? 'swipe left' : 'swipe right';
-			if ([...start, ...end].every((value) => Math.abs(value) <= 0.05))
-				return 'origin';
+			const bottom = this.#bottom(start);
+			if (bottom && bottom === this.#bottom(end)) return bottom;
 			const offsetX = end[0] - origin.x;
 			const offsetY = end[1] - origin.y;
 			if (Math.abs(offsetX) >= Math.abs(offsetY))

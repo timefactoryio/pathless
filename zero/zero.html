@@ -78,19 +78,20 @@
 				}
 			}
 			#universe[data-layout='1'] {
-				grid-template-areas: 'zero one';
+				grid-template-areas: 'zero' 'one';
+				grid-template-rows: repeat(2, minmax(0, 1fr));
 				&[data-variant='1'] {
-					grid-template-areas: 'zero' 'one';
-					grid-template-rows: repeat(2, minmax(0, 1fr));
+					grid-template-areas: 'zero one';
+					grid-template-rows: minmax(0, 1fr);
 				}
 			}
 			#universe[data-layout='2'] {
 				grid-template-rows: repeat(2, minmax(0, 1fr));
 				&[data-variant='0'] {
-					grid-template-areas: 'zero one' 'zero two';
+					grid-template-areas: 'zero zero' 'two one';
 				}
 				&[data-variant='1'] {
-					grid-template-areas: 'zero zero' 'two one';
+					grid-template-areas: 'zero one' 'zero two';
 				}
 				&[data-variant='2'] {
 					grid-template-areas: 'two zero' 'one zero';
@@ -193,10 +194,10 @@
 				}
 
 				async init() {
-					const [zero, frames, panels] = await this.source('');
+					const [universe, frames, panels] = await this.source('');
 					this.frames = frames.ones;
 					this.panels = panels.ones;
-					this.el.append(this.exec(zero.data));
+					this.el.append(this.exec(universe.data));
 				}
 			}
 			document.addEventListener('DOMContentLoaded', () => {
