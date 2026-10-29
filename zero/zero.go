@@ -3,14 +3,23 @@ package zero
 import (
 	"bytes"
 	"compress/gzip"
-	"embed"
+	_ "embed"
 	"fmt"
 	"html/template"
 	"net/http"
 )
 
-//go:embed zero.html universe.html input.html
-var pages embed.FS
+//go:embed zero.html
+var page string
+
+//go:embed pathless.js
+var pathlessScript string
+
+//go:embed universe.js
+var universeScript string
+
+//go:embed input.js
+var inputScript string
 
 type Zero struct {
 	PathlessURL string
@@ -47,11 +56,14 @@ func NewZero(args ...string) *Zero {
 }
 
 func (z *Zero) pathless() {
-	tmpl := template.Must(template.ParseFS(pages, "*.html"))
+	tmpl := template.Must(template.New("zero.html").Parse(page))
 
 	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "zero.html", map[string]string{
-		"CIRCUIT": z.circuitURL,
+	if err := tmpl.ExecuteTemplate(&buf, "zero.html", map[string]any{
+		"CIRCUIT":  z.circuitURL,
+		"PATHLESS": template.JS(pathlessScript),
+		"UNIVERSE": template.JS(universeScript),
+		"INPUT":    template.JS(inputScript),
 	}); err != nil {
 		panic(err)
 	}

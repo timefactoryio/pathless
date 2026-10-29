@@ -1,0 +1,146 @@
+class Input {
+	#pointer = null;
+	#bindings = new WeakMap();
+
+	constructor() {
+		const { el } = pathless;
+		this.#register(['1', 'bottomCenter'], () => pathless.layout(0));
+		this.#register(['2', 'bottomLeft'], () => pathless.layout(1));
+		this.#register(['3', 'bottomRight'], () => pathless.layout(2));
+		this.#register(['tab'], () => pathless.focus(1));
+		this.#register(['q', 'swipe left'], () => pathless.navigate(-1));
+		this.#register(['e', 'swipe right'], () => pathless.navigate(1));
+		this.#register(['z'], () => pathless.panel());
+
+		pathless.click = (el, callback) =>
+			this.#register(['click'], callback, el);
+		pathless.x = this.x.bind(this);
+		pathless.y = this.y.bind(this);
+
+		for (const [type, handler] of [
+			['click', this.click],
+			['pointerdown', this.down],
+			['pointerup', this.up],
+			['pointercancel', this.up],
+			['lostpointercapture', this.up],
+		]) {
+			el.addEventListener(type, handler.bind(this));
+		}
+		document.addEventListener('keydown', this.keydown.bind(this));
+	}
+
+	x(left, right) {
+		const { el } = pathless.frame();
+		this.#register(['a', 'left'], left, el);
+		return this.#register(['d', 'right'], right, el);
+	}
+	y(up, down) {
+		const { el } = pathless.frame();
+		this.#register(['w', 'up'], up, el);
+		return this.#register(['s', 'down'], down, el);
+	}
+
+	#register(triggers, callback, el = pathless.el) {
+		let callbacks = this.#bindings.get(el);
+		if (!callbacks) this.#bindings.set(el, (callbacks = new Map()));
+		for (const trigger of triggers)
+			callbacks.set(trigger.toLowerCase(), callback);
+		return pathless;
+	}
+	#callback(trigger, space) {
+		trigger = trigger.toLowerCase();
+		const el = space?.hidden ? null : space?.firstElementChild;
+		return (
+			this.#bindings.get(el)?.get(trigger) ??
+			this.#bindings.get(pathless.el)?.get(trigger)
+		);
+	}
+
+	down(event) {
+		if (this.#blocked(event) || !event.isPrimary) return;
+		if (event.button !== 0 || this.#pointer) return;
+		const space = pathless.spaces.find(
+			(space) => !space.hidden && space.contains(event.target),
+		);
+		if (!space) return;
+		const start = this.#coordinate(event);
+		if (!this.#bottom(start)) pathless.focus(0, space);
+		if (this.#button(event.target)) return;
+		this.#pointer = {
+			space,
+			el: space.firstElementChild,
+			id: event.pointerId,
+			start,
+		};
+		pathless.el.setPointerCapture(event.pointerId);
+	}
+	up(event) {
+		const pointer = this.#pointer;
+		if (!pointer || pointer.id !== event.pointerId) return;
+		this.#pointer = null;
+		const { start, space, el } = pointer;
+		if (event.type !== 'pointerup' || this.#blocked(event)) return;
+		if (space.hidden || el !== space.firstElementChild) return;
+		pointer.end = this.#coordinate(event);
+		const gesture = this.#gesture(pointer);
+		if (gesture)
+			this.#callback(gesture, space)?.(start, pointer.end, space);
+	}
+	click(event) {
+		if (event.defaultPrevented) return;
+		const el = this.#button(event.target);
+		if (el) this.#bindings.get(el).get('click').call(el, event);
+	}
+	keydown(event) {
+		if (this.#blocked(event) || event.isComposing) return;
+		if (event.ctrlKey || event.metaKey || event.altKey) return;
+		const { space } = pathless.frame();
+		const callback = this.#callback(event.key, space);
+		if (!callback) return;
+		event.preventDefault();
+		callback(undefined, undefined, space);
+	}
+
+	#bottom([horizontal, vertical]) {
+		if (vertical > -0.8) return null;
+		const position = Math.round(horizontal);
+		if (Math.abs(horizontal - position) > 0.2) return null;
+		return ['bottomLeft', 'bottomCenter', 'bottomRight'][position + 1];
+	}
+	#gesture(pointer) {
+		const { start, end, space } = pointer;
+		const deltaX = Math.abs(end[0] - start[0]);
+		const deltaY = Math.abs(end[1] - start[1]);
+		if (deltaY >= 0.1 && deltaY > deltaX) return null;
+		if (deltaX >= 0.1)
+			return end[0] < start[0] ? 'swipe left' : 'swipe right';
+		const bottom = this.#bottom(start);
+		if (bottom && bottom === this.#bottom(end)) return bottom;
+		const { origin } = space;
+		const offsetX = end[0] - origin.x;
+		const offsetY = end[1] - origin.y;
+		if (Math.abs(offsetX) >= Math.abs(offsetY))
+			return offsetX < 0 ? 'left' : 'right';
+		return offsetY < 0 ? 'down' : 'up';
+	}
+	#blocked(event) {
+		return (
+			event.defaultPrevented ||
+			event.target.isContentEditable ||
+			event.target.closest?.('input, textarea, select')
+		);
+	}
+	#button(el) {
+		while (el && el !== pathless.el) {
+			if (this.#bindings.get(el)?.has('click')) return el;
+			el = el.parentElement;
+		}
+	}
+	#coordinate({ clientX, clientY }) {
+		const { width, height } = pathless.el;
+		return [
+			Math.max(-1, Math.min(1, (2 * clientX) / width - 1)),
+			Math.max(-1, Math.min(1, 1 - (2 * clientY) / height)),
+		];
+	}
+}
