@@ -1,9 +1,24 @@
 <script>
 	class Universe {
 		spaces = pathless.spaces;
-		#layouts = [1, 2, 3].map((count) => this.spaces.slice(0, count));
+		#layouts = [
+			[[0, 0]],
+			[
+				[0, 0.5, 0, -0.5],
+				[-0.5, 0, 0.5, 0],
+			],
+			[
+				[0, 0.5, 0.5, -0.5, -0.5, -0.5],
+				[-0.5, 0, 0.5, 0.5, 0.5, -0.5],
+				[0.5, 0, -0.5, -0.5, -0.5, 0.5],
+				[0, -0.5, -0.5, 0.5, 0.5, 0.5],
+			],
+		].map((origins, index) => ({
+			spaces: this.spaces.slice(0, index + 1),
+			origins,
+		}));
 		#layout = [0, 0, null];
-		#visible = this.#layouts[0];
+		#visible = this.#layouts[0].spaces;
 		#focused = this.spaces[0];
 		#contexts = new Map(
 			this.spaces.map((space) => [
@@ -23,12 +38,12 @@
 			]) {
 				pathless[name] = this[name].bind(this);
 			}
-			this.#focused.hidden = false;
 			this.#measure();
-			const observer = new ResizeObserver(() => this.#measure());
-			for (const space of this.spaces)
-				observer.observe(space, { box: 'border-box' });
-			this.#exec(this.#focused, pathless.frames[0].data);
+			this.#origins();
+			new ResizeObserver(() => this.#measure()).observe(pathless.el, {
+				box: 'border-box',
+			});
+			this.navigate(0);
 		}
 		frame(space = this.#rendering ?? this.#focused) {
 			const { index, states } = this.#contexts.get(space);
@@ -48,16 +63,20 @@
 			} else {
 				if (layout === 0 && current !== 0)
 					previous = [current, variant];
-				variant = cycling ? (variant + 1) % 2 ** layout : 0;
+				variant = cycling
+					? (variant + 1) % this.#layouts[layout].origins.length
+					: 0;
 			}
 			this.#layout = [layout, variant, previous];
 			Object.assign(pathless.el.dataset, { layout, variant });
 			if (cycling) {
-				this.#measure();
+				this.#origins();
 				return pathless;
 			}
 			return this.#show(
-				layout === 0 ? [space ?? this.#focused] : this.#layouts[layout],
+				layout === 0
+					? [space ?? this.#focused]
+					: this.#layouts[layout].spaces,
 			);
 		}
 		focus(direction = 1, target = this.#focused) {
@@ -88,14 +107,21 @@
 			return this.#exec(space, frames[ctx.index].data);
 		}
 		#measure() {
-			const { width: universeWidth, height: universeHeight } =
-				pathless.el;
-			for (const space of this.#visible) {
-				const { left, top, width, height } =
-					space.getBoundingClientRect();
+			const { width, height } = pathless.el.getBoundingClientRect();
+			Object.assign(pathless.el, { width, height });
+		}
+		#origins() {
+			const [layout, variant] = this.#layout;
+			const origins = this.#layouts[layout].origins[variant];
+			const panel = this.spaces[3];
+			const inset = panel.hidden ? 0 : 0.15;
+			for (const [index, space] of this.#visible.entries()) {
 				const origin = (space.origin ??= {});
-				origin.x = (2 * (left + width / 2)) / universeWidth - 1;
-				origin.y = 1 - (2 * (top + height / 2)) / universeHeight;
+				origin.x = space === panel ? 0 : origins[index * 2];
+				origin.y =
+					space === panel
+						? -0.85
+						: inset + (1 - inset) * origins[index * 2 + 1];
 			}
 		}
 		#exec(space, data) {
@@ -118,11 +144,10 @@
 				space.hidden = !spaces.includes(space);
 			});
 			if (this.#focused.hidden) this.#focused = spaces[0];
-			this.#measure();
+			this.#origins();
 			for (const space of spaces)
 				if (!space.firstElementChild) this.navigate(0, space);
 			return pathless;
 		}
 	}
-	new Universe();
 </script>

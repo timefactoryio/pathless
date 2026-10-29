@@ -80,7 +80,10 @@ func (f *fx) Save(key string, binary ...bool) ([]byte, error) {
 }
 
 func (f *fx) Start() {
-	f.handle("/", encode(f.universe()))
+	f.handle("/", encode([]*One{
+		{Ones: f.frames},
+		{Ones: f.panels},
+	}))
 	for key, payload := range f.routes {
 		// log.Printf("route: %s", key)
 		f.handle("/"+key, encode(payload))
@@ -88,18 +91,6 @@ func (f *fx) Start() {
 
 	if err := http.ListenAndServe(":1001", f.cors(f.mux)); err != nil {
 		panic(err)
-	}
-}
-
-func (f *fx) universe() []*One {
-	return []*One{
-		{
-			Name: "universe",
-			Type: "text/html",
-			Data: f.z.UniverseHTML,
-		},
-		{Ones: f.frames},
-		{Ones: f.panels},
 	}
 }
 

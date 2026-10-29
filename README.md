@@ -4,11 +4,27 @@ Pathless serves a pathless browser shell and a circuit of typed content trees.
 Frames occupy up to three observable spaces; panels occupy a separate region.
 Templates and application-specific content live outside this module.
 
-This is the reference for the current Go and browser APIs. See
-[mechanics.md](mechanics.md) for the private implementation, wire protocol,
-and initialization sequence.
+This is the single reference for the backend Go API, frontend browser API,
+and their shared transport. Templates and applications are separate modules.
+
+- [Quick Start](#quick-start)
+- [Go API](#go-api)
+- [Browser API](#browser-api)
+- [Transport](#transport)
+- [Boundaries](#boundaries)
+
+## Model
+
+A universe contains three main spaces and one panel space. Each space owns its
+navigation index and persistent frame state. Frames supply executable HTML;
+layouts choose visible spaces and their geometry. Navigation replaces content,
+not the page URL. Focus selects the default target for navigation and keyboard
+commands; the panel is never included in the focus cycle.
 
 ## Quick Start
+
+Use the Go version declared in [go.mod](go.mod), currently `1.27.3`, and add
+the module with `go get github.com/timefactoryio/pathless`.
 
 ```go
 package main
@@ -30,7 +46,8 @@ func main() {
 
 Open `http://localhost:1000`. The circuit listens on `:1001`. Construction
 starts the shell server; `Start` starts the circuit and blocks. Register all
-content before calling `Start`.
+content before calling `Start`, including at least one main frame. The browser
+initializes by rendering the first main frame and does not guard an empty list.
 
 ## Go API
 
@@ -121,7 +138,7 @@ Remote responses must be `2xx`; their bytes are first tried as a gzip Pathless
 payload. Otherwise they become one node, using the final response URL for its
 name and extension/sniffed MIME type, not its `Content-Type` header. Route
 naming uses the original URL. An empty URL route name is an error even for
-nonpublic input. See the transport caveat in [mechanics.md](mechanics.md).
+nonpublic input. See the [remote import caveat](#remote-import-caveat).
 
 Within each directory, names lose their final extension only when the shortened
 name is unique among siblings. This also applies to directory node names.
@@ -199,8 +216,7 @@ Exported by `github.com/timefactoryio/pathless/zero`:
 
 ```go
 type Zero struct {
-        UniverseHTML []byte
-        PathlessURL  string
+        PathlessURL string
         // Unexported server configuration.
 }
 
@@ -208,262 +224,331 @@ func NewZero(args ...string) *Zero
 ```
 
 `NewZero` configures origins using the same constructor arguments, embeds the
-shell/universe, and starts the shell server. `UniverseHTML` supplies the
-bootstrap runtime. `PathlessURL` supplies circuit CORS; changing it does not
+shell, Universe, and Input templates into a single gzip HTML payload, and
+starts the shell server. Rebuild the Go application after editing templates.
+`PathlessURL` supplies circuit CORS; changing it does not
 rerender the already-built shell. Pass the instance to `fx.NewFx` for low-level
 composition. These are construction facilities, not extra registration APIs.
 
 ## Browser API
 
-### Lifecycle and Nodes
+Frame scripts use `window.pathless`. All input registration and control methods
+return that same object for chaining. `frame`, `source`, `exec`, and `init` have
+the distinct return values documented below.
 
-The shell in [zero/zero.html](zero/zero.html) creates `window.pathless` and calls
-its asynchronous `init()`. Initialization loads the bootstrap, stores frames
-and panels, executes [zero/one.html](zero/one.html), and syncs visible content.
-The payload constructs a Universe without storing it on `pathless`; its constructor exposes `frame`,
-`x`, `y`, `navigate`, `layout`, `focus`, and `togglePanel` directly on `pathless`
-before calling `sync()` to execute visible frame scripts.
-Together with Pathless's `source` and `get` methods, these form the frame-facing
-core API. Control methods are bound to Universe; `frame` is a live read-only
-getter. Pathless extends native `EventTarget`, so
-all components share its standard event methods. There is no separate ready
-event or public ready promise.
+### Lifecycle and Members
 
-Decoded nodes are `{ name, type, data, ones }`. Names/types are strings and
-`ones` is an array. Data is text when `type.startsWith('text/html')`, otherwise
-a `Uint8Array`. Other text formats require `TextDecoder`.
+The initial page includes [zero/zero.html](zero/zero.html),
+[zero/universe.html](zero/universe.html), and [zero/input.html](zero/input.html).
+On `DOMContentLoaded`, it creates `window.pathless` and calls `init()`. That
+fetches frames and panels, constructs Input, then constructs Universe. Input
+registration and controls are available before the first frame script runs.
+Applications should initialize inside frame scripts; there is no ready event
+or stored ready promise.
 
-### Pathless Members
+| Member             | Value                                                                           |
+| ------------------ | ------------------------------------------------------------------------------- |
+| `el`               | Root `#universe` element, with measured `width` and `height` in CSS pixels.     |
+| `spaces`           | Four DOM elements in `zero`, `one`, `two`, `three` order; `three` is the panel. |
+| `frames`, `panels` | Decoded node arrays in registration order, assigned by `init()`.                |
 
-| Member                                                     | Contract                                                        |
-| ---------------------------------------------------------- | --------------------------------------------------------------- |
-| `el`                                                       | Root `#universe` element.                                       |
-| `frames`, `panels`                                         | Decoded node arrays in registration order, assigned by `init`.  |
-| `universe`                                                 | Running `Universe` instance, retained as a compatibility alias. |
-| `frame`                                                    | Live getter returning `{ el, state }` for the current frame.    |
-| `status`                                                   | System-owned Map from field names to getter functions.          |
-| `get(field)`                                               | Reads one registered field; unknown fields return `undefined`.  |
-| `get()`                                                    | Frozen snapshot of all registered fields.                       |
-| `addEventListener`, `removeEventListener`, `dispatchEvent` | Native EventTarget methods on Pathless.                         |
-| `x(left, right)`                                           | Registers left/right tap callbacks in the current space.        |
-| `y(up, down)`                                              | Registers up/down tap callbacks in the current space.           |
-| `navigate`, `layout`, `focus`, `togglePanel`               | Frame controls bound to Universe; contracts below.              |
+Spaces expose their DOM `hidden` flag and a measured normalized `origin: { x, y }`
+when visible. Use controls rather than mutating visibility or root datasets.
+Collections are runtime state, not supported dynamic registration APIs; replacing
+them does not reset space indexes or stored state.
 
-`pathless` owns frames/panels; `Universe` reads them directly. They are mutable
-implementation state, not managed collections. Replacing/shrinking them does
-not reset existing space indexes.
-
-`el`, `frames`, `panels`, `universe`, `status`, `exec`, and `init` remain accessible for
-system bootstrap and internal collaboration, but are not part of the
-frame-facing core API. Universe's other state and `sync` are not exposed as
-flat Pathless members.
-
-#### source
+### Frame Context
 
 ```js
-await pathless.source(path, blobs = false)
+const { space, el, state } = pathless.frame();
+const context = pathless.frame(pathless.spaces[0]);
 ```
 
-Fetches `${circuit}/${path}` and resolves to decoded top-level nodes. Use `''`
-for bootstrap or a route key without a leading slash. Requests, including
-in-flight promises, are cached by path. Rejections remove that cache entry
-for retry. HTTP error statuses are not explicitly checked. No refresh or
-eviction API is provided.
+`frame(space)` returns `{ space, el, state }`. The optional space must be an
+element from `pathless.spaces`; it defaults to the synchronously rendering
+space, otherwise the focused main space. `el` is its first element child, or
+`null` before content exists. `state` is a lazily created `Map` retained per
+space and frame index, including panel frames.
 
-With true it returns object URL strings, cached by node identity, for each
-top-level node's data/type. It does not traverse children or revoke URLs.
-Use binary leaves rather than directories or already text-decoded HTML.
+Navigation replaces DOM, not the state Map. Hidden spaces retain their DOM;
+showing them again does not rerender populated content. Give each frame one
+root element and register bindings in its synchronous script. Capture context
+before an `await` or later callback: a fresh `frame()` call then follows focus,
+not the frame that started the asynchronous work.
+
+Save this example as a frame and register it with `Frame("./counter.html")`:
+
+```html
+<main>
+        <button type="button">Increment</button>
+        <output></output>
+</main>
+<script>
+        const { el, state } = pathless.frame();
+        const output = el.querySelector('output');
+        const show = () => {
+                output.textContent = state.get('count') ?? 0;
+        };
+        const change = (amount) => {
+                state.set('count', (state.get('count') ?? 0) + amount);
+                show();
+        };
+        pathless
+                .click(el.querySelector('button'), () => change(1))
+                .x(() => change(-1), () => change(1));
+        show();
+</script>
+```
+
+### Resources
 
 ```js
-const { el } = pathless.frame;
-const [imageURL] = await pathless.source('photo', true);
+const nodes = await pathless.source('photos');
+const { el } = pathless.frame();
+const [imageURL] = await pathless.source('photos', true);
 el.querySelector('img').src = imageURL;
 ```
 
-#### System Notifications
-
-Pathless owns `status`, a Map keyed by field name. Universe registers getter
-functions for numeric `layout`, `variant`, and `focused`, boolean `panelOpen`,
-and a frozen `visible` index array. `pathless.get(field)` evaluates only that
-field's getter; unknown fields return `undefined`. Getters read current system
-state rather than maintaining a second copy. The registry is internal system
-state; frames read fields through `get`, not by mutating the Map.
+`source(path, blobs = false)` fetches `${circuit}/${path}`. Use a public route
+key without a leading slash. It resolves to top-level nodes with this shape:
 
 ```js
-const layout = pathless.get('layout');
-const visible = pathless.get('visible');
+({ name: 'photo', type: 'image/png', data: new Uint8Array(), ones: [] })
 ```
 
-Indexes `0`, `1`, and `2` identify main spaces; `3` identifies the panel.
-Universe owns visibility selection. `pathless.get()` builds a frozen snapshot
-from all registered fields without a fixed status-object schema.
+Names and MIME types are strings. `ones` contains child nodes. Data is decoded
+to a string only when `type.startsWith('text/html')`; other data remains a
+`Uint8Array`. Use `TextDecoder` for other text formats.
 
-Universe dispatches native `CustomEvent('change', { detail: status })` events
-on Pathless after layout, focus, and panel transitions finish measuring and
-syncing. Unchanged commands do not notify. Navigation indexes and frame-owned
-Maps are not part of this status. Internal `sync()` does not publish events.
+With `blobs = true`, it instead resolves to object URL strings for top-level
+node data and MIME types. It does not recurse into directories. Use binary
+leaves for assets. Requests, including in-flight promises, are cached by path;
+rejections remove that cache entry for retry. HTTP status codes are not checked.
+Object URLs are cached by node identity, with no eviction or revocation API.
 
-The notification mechanism belongs to the system. Frames do not register their
-own event listeners and need no listener cleanup. System-managed frame binding
-is outside the scope of this API change. System listeners receive future events
-only; use `get(field)` or `get()` explicitly for initial state.
-Notifications are synchronous and do not wait for asynchronous frame resources.
-
-#### exec, init, and decode
+### Input Registration
 
 ```js
-pathless.exec(el, html)
-await pathless.init()
-Pathless.decode(bytes)
-```
-
-`exec` replaces the target's children with a contextual HTML fragment. Inline
-scripts execute on insertion. It returns the Pathless instance. It does not sanitize and
-does not await external scripts or asynchronous work. It does not dispose
-replaced frames' timers, listeners, or observers.
-
-`init` loads bootstrap, stores frames/panels, and executes universe HTML.
-Universe installs the browser API and then calls `sync()` at the end of its
-constructor to fill visible spaces, skipping empty collections.
-`init` is called once by the shell, not an
-idempotent reset.
-
-Static `Pathless.decode(bytes)` synchronously decodes a decompressed wire
-`Uint8Array` into nodes. It does not accept gzip directly and assumes trusted,
-valid input. Normal HTTP gzip decoding is performed by the browser before
-`source` reads `response.bytes()`.
-
-### Universe State
-
-The members below describe internal Universe state; the instance is not stored
-on `pathless`, but `frame` is exposed directly. Status fields live in Pathless's Map, not
-in a Universe status getter. Do not construct another `Universe`,
-which would install extra observers/listeners. The zero-argument constructor
-depends on `pathless` and the inserted space elements.
-
-| Member            | Meaning                                                  |
-| ----------------- | -------------------------------------------------------- |
-| `el`              | Root element shared with `pathless.el`.                  |
-| `spaces`          | Main records in `zero`, `one`, `two` order.              |
-| `panel`           | The `three` space record.                                |
-| `width`, `height` | Last measured root border-box dimensions in CSS pixels.  |
-| `space`           | Currently rendering space, otherwise focused main space. |
-| `frame`           | `{ el, state }`: rendered element and persistent Map.    |
-| `visible`         | Visible space records derived from keyed system fields.  |
-
-A space has `el`, zero-based `frame`, `states`, `bindings`, and measured
-`origin: { x, y }`, the space's center in the shared normalized plane.
-State maps are lazily allocated by the `frame` getter, persist per
-space/frame-index pair, and survive navigation/rerenders. DOM and bindings
-are replaced on rendering. Spaces and the panel navigate independently.
-
-During synchronous frame execution, `space` and `frame` resolve against that
-rendering space. After an `await` or in a later callback, they resolve against
-the focused main space instead. Capture `const { el, state } = pathless.frame`
-during synchronous initialization and retain those references for later callbacks.
-
-Universe passes itself to a new Pointer controller but does not retain it as a public
-property. Universe owns binding registration through its `x` and `y` methods;
-Pointer reads those bindings when dispatching gestures.
-
-### Rendering and Navigation
-
-```js
-pathless.navigate(direction)
-pathless.focus(direction = 1)
-pathless.togglePanel()
-```
-
-- Internal `universe.sync()` fills visible spaces lacking a first element child. Explicit records
-    force rerendering. It skips empty collections and resets bindings before
-    execution. Frames should have an element root for populated-space detection.
-- `navigate` adds an integer direction, wraps within the space's frame/panel
-    collection, and rerenders. Use `1`/`-1` for next/previous; empty collections
-    do nothing.
-- `focus` cycles visible main spaces, excluding the panel. If the starting
-    space is absent, it chooses the first/last according to direction.
-- The internal write-only `universe.focused` setter takes a member of `spaces`, not an index.
-    It ignores nonmembers, updates focus, measures, and syncs.
-- `togglePanel` changes visibility, measures, and syncs. No panels means no-op.
-    Reopening a rendered panel preserves its DOM.
-
-The public controls are bound to the Universe instance and return no result.
-They resolve the current space internally; system callers can supply a space
-record explicitly to `navigate` and `focus`. Arguments are not generally validated.
-
-### Layout
-
-```js
-pathless.layout(layout, variant)
-```
-
-| Layout | Variant | Main arrangement                        |
-| ------ | ------- | --------------------------------------- |
-| `0`    | `0`     | Focused space only                      |
-| `1`    | `0`     | `zero` left, secondary right            |
-| `1`    | `1`     | `zero` above, secondary below           |
-| `2`    | `0`     | `zero` left; `one` above `two` right    |
-| `2`    | `1`     | `zero` above; `two` left of `one` below |
-| `2`    | `2`     | `two` above `one` left; `zero` right    |
-| `2`    | `3`     | `one` left of `two` above; `zero` below |
-
-For layout one, secondary is `two` when focused, otherwise `one`. Nonzero
-variants wrap modulo `2 ** layout`. Omitting a variant advances it when
-remaining in a layout, or selects zero when changing layouts.
-
-`layout(0)` from a split layout saves the pair and enters single-space mode;
-calling again restores it. Without a saved split, layout zero from zero does
-nothing. `layout()` cycles a split layout's variants or attempts restore from
-single-space mode. Supported layout numbers are `0`, `1`, `2`.
-
-Root state uses string-valued `data-layout`, `data-variant`, `data-focused`,
-and class `panel`. An open panel occupies `15dvh` below main spaces. Use the
-methods rather than direct dataset mutations to keep geometry/rendering aligned.
-
-### Pointer Bindings and Gestures
-
-```js
+pathless.click(element, callback);
 pathless.x(onLeft, onRight);
 pathless.y(onUp, onDown);
 ```
 
-Each call replaces that axis's callbacks in the current space. Bindings reset
-on render, so register in the synchronous frame script. Missing callbacks
-are no-ops. Callbacks receive `(start, end, space)`; returns are ignored and
-promises are not awaited. The full Universe element defines the shared plane:
-left/right are `-1`/`1`, top/bottom are `1`/`-1`, and its center is `(0, 0)`.
-Coordinates are clamped to `[-1, 1]` on each axis, including captured events
-outside the element. Each axis is normalized independently, so equal coordinate
-distances need not represent equal pixel distances. The conversion assumes
-the root starts at viewport position `(0, 0)`, as the shell's fixed grid does.
+`click` registers a delegated click callback on an element. It receives the
+native event, with `this` set to the registered element for ordinary functions.
+Clicks on descendants select the nearest registered ancestor below the root.
+A later registration on the same element replaces the callback. Registered
+click targets do not start directional gestures; native click behavior is not
+automatically prevented. Default-prevented clicks are ignored.
 
-Only a primary pointer with button zero is accepted, one gesture at a time.
-Pressing a visible main space focuses it; the root captures the pointer.
-Default-prevented releases or releases after the pressed space becomes hidden
-cancel the gesture. Precedence is:
+`x` binds left/right taps and the `a`/`d` keys; `y` binds up/down taps and the
+`w`/`s` keys. Each pair is registered against the current frame's root element,
+as resolved by `frame()`. Register synchronously after that root exists.
+Later registration replaces that axis's bindings. Fresh DOM needs fresh
+registration; bindings on hidden, retained DOM remain available when shown.
 
-1. Movement at least `0.1` on either normalized axis is a swipe. Horizontal
-     dominance navigates: left is previous, right is next. Vertical dominance
-     does nothing.
-2. Otherwise, toggle the panel only when both endpoints have both coordinates
-        within `[-0.05, 0.05]`. This central square in normalized coordinates spans
-        5% of the root width and 5% of its height, or 0.25% of the plane's area.
-3. Other taps choose a callback by the dominant offset from the pressed space's
-     center. Ties select horizontal.
+Directional callbacks receive `(start, end, space)`. For a pointer gesture,
+`start` and `end` are `[x, y]` arrays; for a key they are `undefined`. `space` is
+the target DOM space element. Return values are ignored and promises are not
+awaited. Bindings do not automatically dispose custom listeners or timers.
 
-The controller has implementation members `state`, `universe`,
-`down(event)`, `up(event)`, `cancel(event)`, `coordinate(point)`, and
-`output(start, end)`. `coordinate` converts and clamps client coordinates with
-measured root dimensions. `cancel` clears a matching pointer ID; the other handlers
-implement the gesture state machine. `output` requires an active gesture.
-Applications use `pathless.x` and `pathless.y`, not these handlers.
+### Navigation and Focus
+
+```js
+pathless.navigate(direction = 1, space);
+pathless.focus(direction = 1, target);
+```
+
+`navigate` adds an integer direction to the target space's index, wraps within
+its collection, and rerenders. The default space is the focused main space,
+even during another space's rendering. The panel uses `panels`; main spaces
+use `frames`. Empty collections do nothing. Use `1` for next, `-1` for previous,
+or `0` to rerender the current index.
+
+`focus` cycles through visible main spaces, excluding the panel. The target
+defaults to the focused space. `focus(0, space)` focuses a specific visible
+main space; a hidden target or the panel is a no-op. Focus does not rerender.
+
+Capture a frame's space when later controls must address it rather than focus:
+
+```js
+const { space } = pathless.frame();
+const next = () => pathless.navigate(1, space);
+```
+
+### Layout
+
+```js
+pathless.layout(layout, space);
+```
+
+The required layout number is `0`, `1`, or `2`. The optional second argument is
+a DOM space, not a variant number; it selects the main space in layout zero.
+Main spaces below are named by their element IDs.
+
+| Layout | Variant | Arrangement                                                     |
+| ------ | ------- | --------------------------------------------------------------- |
+| `0`    | `0`     | Selected space, otherwise focused space, fills the main region. |
+| `1`    | `0`     | `zero` above `one`.                                             |
+| `1`    | `1`     | `zero` left of `one`.                                           |
+| `2`    | `0`     | `zero` above; `two` left of `one` below.                        |
+| `2`    | `1`     | `zero` left; `one` above `two` on the right.                    |
+| `2`    | `2`     | `two` above `one` on the left; `zero` right.                    |
+| `2`    | `3`     | `one` left of `two` above; `zero` below.                        |
+
+Entering a different split layout selects variant zero. Repeating the current
+split layout cycles its variants modulo `2 ** layout`. There is no direct
+variant parameter and no zero-argument layout command.
+
+`layout(0)` from a split remembers that layout and variant and shows the
+focused space. Calling `layout(0)` again without a space restores the remembered
+split; without a remembered split it does nothing. Supplying an explicit main
+space selects it without triggering restoration. If a change hides the focused
+space, focus moves to the first visible main space. Layout changes preserve
+populated DOM and initialize newly visible empty spaces.
+
+The root's `data-layout` and `data-variant` contain string-valued layout state.
+Use methods to keep visibility and geometry synchronized.
+
+### Panel
+
+```js
+pathless.panel();
+pathless.panel(true);
+pathless.panel(false);
+```
+
+Omitting the argument toggles visibility; a boolean explicitly shows or hides
+the fourth space. It occupies a bottom row sized to `15cqh` of the root.
+Showing it initializes its first panel if needed; hiding/reopening it preserves
+populated DOM and state. No registered panels still permits an empty panel
+region. To navigate panel content, pass `pathless.spaces[3]` to `navigate`.
+
+### Default Controls
+
+Keyboard matching is case-insensitive. Handled keys prevent their default
+action. Composition events, Ctrl/Meta/Alt combinations, default-prevented
+events, and targets inside editable content, inputs, textareas, or selects
+are ignored. Shift does not reverse Tab. Arrow keys are not aliases.
+
+| Key or gesture              | Action                                                                  |
+| --------------------------- | ----------------------------------------------------------------------- |
+| `1`, `2`, `3`               | Call `layout(0)`, `layout(1)`, `layout(2)`.                             |
+| Tab                         | Focus the next visible main space.                                      |
+| `q` / `e`                   | Navigate previous / next.                                               |
+| `z`                         | Toggle the panel.                                                       |
+| `a` / `d`, left / right tap | Invoke the frame's `x` bindings.                                        |
+| `w` / `s`, up / down tap    | Invoke the frame's `y` bindings.                                        |
+| Left / right swipe          | Navigate previous / next in the pressed space.                          |
+| Bottom-left tap region      | Advance layout number modulo three.                                     |
+| Bottom-center tap region    | Call `layout(0)` to enter single space or restore.                      |
+| Bottom-right tap region     | Repeat the current layout command, cycling split variants or restoring. |
+
+Keys target the focused main space. Gestures target the pressed visible space,
+including the panel. A non-bottom press focuses a visible main space before
+dispatch. A gesture is cancelled on pointer cancellation, lost capture,
+prevented/blocked release, hidden space, or replacement of its frame root.
+
+Coordinates use the whole root's normalized plane: left/right are `-1`/`1`,
+top/bottom are `1`/`-1`. Each axis is scaled independently and clamped. Only
+one primary, button-zero pointer is tracked. After excluding registered click
+targets and editable controls, gesture classification is:
+
+1. Vertical displacement at least `0.1` and greater than horizontal displacement
+   is ignored. Otherwise horizontal displacement at least `0.1` is a swipe.
+2. With smaller movement, matching start/end bottom regions invoke layout
+   commands. Regions require `y <= -0.8` and `x` within `0.2` of `-1`, `0`, or `1`.
+3. Other taps select direction from the endpoint's dominant offset relative
+   to the pressed space's center; ties select horizontal.
+
+### Runtime Helpers
+
+These are accessible for runtime integration, not additional frame controls:
+
+| API                          | Contract                                                                                                              |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `pathless.exec(data, space)` | Replace a space's children with an HTML contextual fragment; return `pathless`. Inline scripts run on insertion.      |
+| `pathless.exec(data)`        | Return a `DocumentFragment` without inserting it.                                                                     |
+| `await pathless.init()`      | Fetch bootstrap, assign collections, initialize Input and Universe; resolve to `undefined`. Called once by the shell. |
+| `Pathless.decode(bytes)`     | Synchronously decode a decompressed wire `Uint8Array` into nodes; no gzip handling.                                   |
+
+`exec` is HTML-first, not element-first. It does not sanitize, await frame
+scripts, or clean up replaced content's side effects. Calling `init()` again
+adds controllers/observers; it is not an idempotent reset.
+
+## Transport
+
+### Startup and Bootstrap
+
+Go renders the three embedded templates into one HTML response on `:1000`.
+There are no separate runtime-script requests. On initialization the browser
+fetches the circuit root on `:1001`, whose payload contains exactly two
+positional nodes:
+
+```text
+0: { Ones: frames }
+1: { Ones: panels }
+```
+
+Their other fields are empty. Runtime HTML is not in this bootstrap.
+`source('')` loads it; normal frame code uses named public resource routes.
+HTTP responses and saved payloads are gzip-compressed. Browser HTTP handling
+decompresses responses before `response.bytes()` and `Pathless.decode` run.
+Compression is unconditional, not negotiated per request.
+
+### Wire Format
+
+After gzip decompression, a node list is encoded recursively as:
+
+```text
+unsigned-varint node count
+for each node:
+        unsigned-varint name byte length + UTF-8 name
+        unsigned-varint type byte length + UTF-8 MIME type
+        unsigned-varint data byte length + raw data
+        child node list (same format)
+```
+
+Lengths count bytes. Leaves end with zero children. There is no version or
+magic prefix. The Go encoder/decoder are private; use `Input` and `Save` for
+application-level import/export. Trees must contain non-nil, acyclic nodes.
+
+### Remote Import Caveat
+
+Go URL input tries gzip decoding on response-body bytes. Go's default HTTP
+transport may already decompress a circuit response marked
+`Content-Encoding: gzip`; those bare wire bytes fail the gzip decoder and
+fall back to a raw resource. To import a saved payload reliably, serve its
+gzip bytes without an HTTP `Content-Encoding` header. Local file input never
+decodes saved payloads automatically.
 
 ## Boundaries
 
-- There is no `Text`, `Slides`, `Route`, or `pathless.input` API in this version.
-    Compose templates externally and register their HTML with `Frame`.
-- Frame scoping is not security isolation. HTML/scripts must be trusted.
-- Servers, cached object URLs, state maps, and observers have no coordinated
-    disposal API. Construction/startup are one-shot operations.
-- Go reads/decompression have no explicit size limits; the browser decoder
-    assumes valid payloads and performs fewer checks than the Go decoder.
+- Load trusted content only. Frame HTML/scripts share the shell document and
+  origin; block-scoped scripts are not sandboxing or sanitization.
+- There is no `Text`, `Slides`, `Route`, `get`, `status`, `togglePanel`,
+  `pathless.universe`, or `pathless.input` API. Pathless is not an EventTarget
+  and does not publish change notifications.
+- Supported space arguments are actual elements from `pathless.spaces`;
+  directions are integers and layouts are `0`, `1`, `2`. Arguments are not
+  generally validated. There is no direct layout-variant setter.
+- Servers, custom frame side effects, cached object URLs, state maps, and
+  observers have no coordinated disposal API. Construction/startup are one-shot.
+- Go reads/decompression have no explicit size limits. Its decoder checks
+  framing, depth, and trailing bytes; the browser decoder assumes valid input
+  and is not suitable for untrusted payloads.
+- Use a modern browser supporting `Response.bytes()`, `ResizeObserver`,
+  contextual HTML fragments, CSS nesting, and container query units.
+
+## Sources
+
+| Source                                   | Responsibility                                    |
+| ---------------------------------------- | ------------------------------------------------- |
+| [pathless.go](pathless.go)               | Public Go constructor and embedded `fx.Fx`.       |
+| [fx/fx.go](fx/fx.go)                     | Registration, HTML building, and circuit serving. |
+| [fx/input.go](fx/input.go)               | Local/remote input, naming, and sequencing.       |
+| [fx/output.go](fx/output.go)             | `One` and the private wire encoder/decoder.       |
+| [zero/zero.go](zero/zero.go)             | Template assembly, shell server, and origins.     |
+| [zero/zero.html](zero/zero.html)         | Shell CSS, resource loading, and HTML execution.  |
+| [zero/universe.html](zero/universe.html) | Space state, layout, focus, and navigation.       |
+| [zero/input.html](zero/input.html)       | Click, keyboard, and pointer dispatch.            |

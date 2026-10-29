@@ -116,13 +116,6 @@
 					this.spaces = Array.from(
 						this.el.querySelectorAll(':scope > .space'),
 					);
-					this.#measure();
-					new ResizeObserver(() => this.#measure()).observe(this.el);
-				}
-
-				#measure() {
-					const { width, height } = this.el.getBoundingClientRect();
-					Object.assign(this.el, { width, height });
 				}
 
 				static decode(bytes) {
@@ -158,7 +151,7 @@
 					return ones();
 				}
 
-				source(path, blobs = false) {
+				source(path = '', blobs = false) {
 					let request = this.#cache.get(path);
 					if (!request) {
 						request = fetch(`${circuit}/${path}`)
@@ -194,10 +187,11 @@
 				}
 
 				async init() {
-					const [universe, frames, panels] = await this.source('');
+					const [frames, panels] = await this.source();
 					this.frames = frames.ones;
 					this.panels = panels.ones;
-					this.el.append(this.exec(universe.data));
+					new Input();
+					new Universe();
 				}
 			}
 			document.addEventListener('DOMContentLoaded', () => {
@@ -205,10 +199,11 @@
 				pathless.init();
 			});
 		</script>
+		{{template "universe.html" .}} {{template "input.html" .}}
 	</head>
 	<body>
 		<div id="universe" data-layout="0" data-variant="0">
-			<div id="zero" class="space" hidden></div>
+			<div id="zero" class="space"></div>
 			<div id="one" class="space" hidden></div>
 			<div id="two" class="space" hidden></div>
 			<div id="three" class="space" hidden></div>

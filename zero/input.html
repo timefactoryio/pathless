@@ -1,28 +1,23 @@
 <script>
 	class Input {
 		#pointer = null;
-		#triggers = new WeakMap();
+		#bindings = new WeakMap();
 
 		constructor() {
 			const { el } = pathless;
-			for (const [callback, ...triggers] of [
-				[() => pathless.layout(0), '1', 'bottomCenter'],
-				[() => pathless.layout(1), '2'],
-				[() => pathless.layout(2), '3'],
-				[() => pathless.focus(1), 'tab'],
-				[() => pathless.navigate(-1), 'q', 'swipe left'],
-				[() => pathless.navigate(1), 'e', 'swipe right'],
-				[() => pathless.panel(), 'z'],
-				[
-					() => pathless.layout((Number(el.dataset.layout) + 1) % 3),
-					'bottomLeft',
-				],
-				[
-					() => pathless.layout(Number(el.dataset.layout)),
-					'bottomRight',
-				],
-			])
-				this.#register(callback, triggers);
+			this.#register(['1', 'bottomCenter'], () => pathless.layout(0));
+			this.#register(['2', 'bottomLeft'], () => pathless.layout(1));
+			this.#register(['3', 'bottomRight'], () => pathless.layout(2));
+			this.#register(['tab'], () => pathless.focus(1));
+			this.#register(['q', 'swipe left'], () => pathless.navigate(-1));
+			this.#register(['e', 'swipe right'], () => pathless.navigate(1));
+			this.#register(['z'], () => pathless.panel());
+
+			pathless.click = (el, callback) =>
+				this.#register(['click'], callback, el);
+			pathless.x = this.x.bind(this);
+			pathless.y = this.y.bind(this);
+
 			for (const [type, handler] of [
 				['click', this.click],
 				['pointerdown', this.down],
@@ -33,23 +28,22 @@
 				el.addEventListener(type, handler.bind(this));
 			}
 			document.addEventListener('keydown', this.keydown.bind(this));
-			pathless.click = (el, callback) =>
-				this.#register(callback, ['click'], el);
-			for (const [axis, first, second] of [
-				['x', ['a', 'left'], ['d', 'right']],
-				['y', ['w', 'up'], ['s', 'down']],
-			]) {
-				pathless[axis] = (before, after) => {
-					const { el } = pathless.frame();
-					this.#register(before, first, el);
-					return this.#register(after, second, el);
-				};
-			}
 		}
 
-		#register(callback, triggers = [], el = pathless.el) {
-			let callbacks = this.#triggers.get(el);
-			if (!callbacks) this.#triggers.set(el, (callbacks = new Map()));
+		x(left, right) {
+			const { el } = pathless.frame();
+			this.#register(['a', 'left'], left, el);
+			return this.#register(['d', 'right'], right, el);
+		}
+		y(up, down) {
+			const { el } = pathless.frame();
+			this.#register(['w', 'up'], up, el);
+			return this.#register(['s', 'down'], down, el);
+		}
+
+		#register(triggers, callback, el = pathless.el) {
+			let callbacks = this.#bindings.get(el);
+			if (!callbacks) this.#bindings.set(el, (callbacks = new Map()));
 			for (const trigger of triggers)
 				callbacks.set(trigger.toLowerCase(), callback);
 			return pathless;
@@ -58,8 +52,8 @@
 			trigger = trigger.toLowerCase();
 			const el = space?.hidden ? null : space?.firstElementChild;
 			return (
-				this.#triggers.get(el)?.get(trigger) ??
-				this.#triggers.get(pathless.el)?.get(trigger)
+				this.#bindings.get(el)?.get(trigger) ??
+				this.#bindings.get(pathless.el)?.get(trigger)
 			);
 		}
 
@@ -74,7 +68,8 @@
 			if (!this.#bottom(start)) pathless.focus(0, space);
 			if (this.#button(event.target)) return;
 			this.#pointer = {
-				...pathless.frame(space),
+				space,
+				el: space.firstElementChild,
 				id: event.pointerId,
 				start,
 			};
@@ -87,14 +82,15 @@
 			const { start, space, el } = pointer;
 			if (event.type !== 'pointerup' || this.#blocked(event)) return;
 			if (space.hidden || el !== space.firstElementChild) return;
-			const end = this.#coordinate(event);
-			const gesture = this.#gesture(start, end, space.origin);
-			if (gesture) this.#callback(gesture, space)?.(start, end, space);
+			pointer.end = this.#coordinate(event);
+			const gesture = this.#gesture(pointer);
+			if (gesture)
+				this.#callback(gesture, space)?.(start, pointer.end, space);
 		}
 		click(event) {
 			if (event.defaultPrevented) return;
 			const el = this.#button(event.target);
-			if (el) this.#triggers.get(el).get('click').call(el, event);
+			if (el) this.#bindings.get(el).get('click').call(el, event);
 		}
 		keydown(event) {
 			if (this.#blocked(event) || event.isComposing) return;
@@ -112,7 +108,8 @@
 			if (Math.abs(horizontal - position) > 0.2) return null;
 			return ['bottomLeft', 'bottomCenter', 'bottomRight'][position + 1];
 		}
-		#gesture(start, end, origin) {
+		#gesture(pointer) {
+			const { start, end, space } = pointer;
 			const deltaX = Math.abs(end[0] - start[0]);
 			const deltaY = Math.abs(end[1] - start[1]);
 			if (deltaY >= 0.1 && deltaY > deltaX) return null;
@@ -120,6 +117,7 @@
 				return end[0] < start[0] ? 'swipe left' : 'swipe right';
 			const bottom = this.#bottom(start);
 			if (bottom && bottom === this.#bottom(end)) return bottom;
+			const { origin } = space;
 			const offsetX = end[0] - origin.x;
 			const offsetY = end[1] - origin.y;
 			if (Math.abs(offsetX) >= Math.abs(offsetY))
@@ -135,7 +133,7 @@
 		}
 		#button(el) {
 			while (el && el !== pathless.el) {
-				if (this.#triggers.get(el)?.has('click')) return el;
+				if (this.#bindings.get(el)?.has('click')) return el;
 				el = el.parentElement;
 			}
 		}
@@ -147,5 +145,4 @@
 			];
 		}
 	}
-	const input = new Input();
 </script>

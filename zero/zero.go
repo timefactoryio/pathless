@@ -3,32 +3,24 @@ package zero
 import (
 	"bytes"
 	"compress/gzip"
-	_ "embed"
+	"embed"
 	"fmt"
 	"html/template"
 	"net/http"
 )
 
-//go:embed zero.html
-var pathlessHTML string
-
-//go:embed input.html
-var inputHTML []byte
-
-//go:embed universe.html
-var universeHTML []byte
+//go:embed zero.html universe.html input.html
+var pages embed.FS
 
 type Zero struct {
-	UniverseHTML []byte
-	PathlessURL  string
-	circuitURL   string
-	mux          *http.ServeMux
+	PathlessURL string
+	circuitURL  string
+	mux         *http.ServeMux
 }
 
 func NewZero(args ...string) *Zero {
 	z := &Zero{
-		UniverseHTML: bytes.Join([][]byte{inputHTML, universeHTML}, nil),
-		mux:          http.NewServeMux(),
+		mux: http.NewServeMux(),
 	}
 
 	switch len(args) {
@@ -55,10 +47,10 @@ func NewZero(args ...string) *Zero {
 }
 
 func (z *Zero) pathless() {
-	tmpl := template.Must(template.New("pathless").Parse(pathlessHTML))
+	tmpl := template.Must(template.ParseFS(pages, "*.html"))
 
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, map[string]string{
+	if err := tmpl.ExecuteTemplate(&buf, "zero.html", map[string]string{
 		"CIRCUIT": z.circuitURL,
 	}); err != nil {
 		panic(err)
