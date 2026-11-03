@@ -64,7 +64,7 @@ class Input {
 		);
 		if (!space) return;
 		const start = this.#coordinate(event);
-		if (!this.#bottom(start)) pathless.focus(0, space);
+		if (!this.#gesture({ start, space })) pathless.focus(0, space);
 		if (this.#button(event.target)) return;
 		this.#pointer = {
 			space,
@@ -101,24 +101,30 @@ class Input {
 		callback(undefined, undefined, space);
 	}
 
-	#bottom([horizontal, vertical]) {
-		if (vertical > -0.8) return null;
-		const position = Math.round(horizontal);
-		if (Math.abs(horizontal - position) > 0.2) return null;
-		return ['bottomLeft', 'bottomCenter', 'bottomRight'][position + 1];
-	}
-	#gesture(pointer) {
-		const { start, end, space } = pointer;
-		const deltaX = Math.abs(end[0] - start[0]);
-		const deltaY = Math.abs(end[1] - start[1]);
-		if (deltaY >= 0.1 && deltaY > deltaX) return null;
-		if (deltaX >= 0.1)
-			return end[0] < start[0] ? 'swipe left' : 'swipe right';
-		const bottom = this.#bottom(start);
-		if (bottom && bottom === this.#bottom(end)) return bottom;
-		const { origin } = space;
-		const offsetX = end[0] - origin.x;
-		const offsetY = end[1] - origin.y;
+	#gesture({ start, end, space }) {
+		const finish = end ?? start;
+		const deltaX = finish[0] - start[0];
+		const deltaY = Math.abs(finish[1] - start[1]);
+		const distanceX = Math.abs(deltaX);
+		const position = Math.round(start[0]);
+		const bottom = [start, finish].every(
+			([horizontal, vertical]) =>
+				vertical <= -0.8 && Math.abs(horizontal - position) <= 0.2,
+		);
+		const { visible, origins } = pathless.universe.universeState();
+		const spaces = pathless.spaces.filter(
+			(space) => !space.origin && visible.includes(space),
+		);
+		const [horizontal, vertical] =
+			space.origin ?? origins[spaces.indexOf(space)];
+		const offsetX = finish[0] - horizontal;
+		const offsetY = finish[1] - vertical;
+
+		if (deltaY >= 0.1 && deltaY > distanceX) return null;
+		if (distanceX >= 0.1) return deltaX < 0 ? 'swipe left' : 'swipe right';
+		if (bottom)
+			return ['bottomLeft', 'bottomCenter', 'bottomRight'][position + 1];
+		if (!end) return null;
 		if (Math.abs(offsetX) >= Math.abs(offsetY))
 			return offsetX < 0 ? 'left' : 'right';
 		return offsetY < 0 ? 'down' : 'up';

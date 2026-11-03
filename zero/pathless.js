@@ -14,6 +14,7 @@ class Pathless {
 				frames: index === 3 ? this.panels : this.frames,
 				index: 0,
 				states: new Map(),
+				origin: index === 3 ? [0, -0.85] : null,
 			}),
 		);
 	}

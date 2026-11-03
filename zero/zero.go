@@ -10,7 +10,7 @@ import (
 )
 
 //go:embed zero.html
-var page string
+var origin string
 
 //go:embed pathless.js
 var pathlessScript string
@@ -56,7 +56,7 @@ func NewZero(args ...string) *Zero {
 }
 
 func (z *Zero) pathless() {
-	tmpl := template.Must(template.New("zero.html").Parse(page))
+	tmpl := template.Must(template.New("zero.html").Parse(origin))
 
 	var buf bytes.Buffer
 	if err := tmpl.ExecuteTemplate(&buf, "zero.html", map[string]any{
