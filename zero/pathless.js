@@ -14,9 +14,12 @@ class Pathless {
 				frames: index === 3 ? this.panels : this.frames,
 				index: 0,
 				states: new Map(),
-				origin: index === 3 ? [0, -0.85] : null,
 			}),
 		);
+	}
+
+	get observable() {
+		return this.spaces.filter((space) => !space.hidden);
 	}
 
 	static decode(bytes) {
@@ -53,31 +56,25 @@ class Pathless {
 	}
 
 	source(path = '', blobs = false) {
-		let request = this.#cache.get(path);
-		if (!request) {
-			request = fetch(`${circuit}/${path}`)
-				.then((response) => response.bytes())
-				.then(Pathless.decode)
-				.catch((error) => {
-					this.#cache.delete(path);
-					throw error;
-				});
-			this.#cache.set(path, request);
-		}
-		if (!blobs) return request;
-		return request.then((ones) =>
-			ones.map((one) => {
-				let url = this.#cache.get(one);
-				if (!url) {
-					const blob = new Blob([one.data], {
-						type: one.type,
-					});
-					url = URL.createObjectURL(blob);
-					this.#cache.set(one, url);
-				}
-				return url;
-			}),
-		);
+		let source = this.#cache.get(path);
+		if (!source) this.#cache.set(path, (source = {}));
+		const key = blobs ? 'blobs' : 'data';
+		return (source[key] ??= (
+			blobs
+				? this.source(path).then((ones) =>
+						ones.map((one) =>
+							URL.createObjectURL(
+								new Blob([one.data], { type: one.type }),
+							),
+						),
+					)
+				: fetch(`${circuit}/${path}`)
+						.then((response) => response.bytes())
+						.then(Pathless.decode)
+		).catch((error) => {
+			if (this.#cache.get(path) === source) this.#cache.delete(path);
+			throw error;
+		}));
 	}
 
 	exec(data, space) {

@@ -35,10 +35,12 @@ class Universe {
 		],
 	];
 	#rendering = null;
+	#focused = null;
+	#mounted = new WeakMap();
 
 	constructor() {
 		this.currentLayout = [0, 0, null];
-		this.spaces = [pathless.spaces[0]];
+		this.#focused = pathless.spaces[0];
 		pathless.universe = this;
 		for (const name of [
 			'frame',
@@ -56,16 +58,11 @@ class Universe {
 		this.sync();
 	}
 
-	universeState() {
+	get origins() {
 		const [layout, variant] = this.currentLayout;
-		return {
-			layout: this.currentLayout,
-			focused: this.spaces[0],
-			visible: this.spaces,
-			origins: this.layouts[layout][variant],
-		};
+		return this.layouts[layout][variant];
 	}
-	frame(space = this.#rendering ?? this.spaces[0]) {
+	frame(space = this.#rendering ?? this.#focused) {
 		const { index, states } = space;
 		if (!states.has(index)) states.set(index, new Map());
 		return {
@@ -87,61 +84,58 @@ class Universe {
 					: 0;
 		}
 		this.currentLayout = [layout, variant, previous];
-		const focused =
-			layout === 0 ? (space ?? this.spaces[0]) : this.spaces[0];
-		const spaces =
-			layout === 0 ? [focused] : pathless.spaces.slice(0, layout + 1);
-		const anchored = this.spaces.filter(
-			(space) => space.origin && !spaces.includes(space),
-		);
-		this.spaces.splice(0, this.spaces.length, ...spaces, ...anchored);
-		this.focus(0, this.spaces.includes(focused) ? focused : this.spaces[0]);
+		const { dataset } = pathless.el;
+		if (dataset.layout !== String(layout)) dataset.layout = layout;
+		if (dataset.variant !== String(variant)) dataset.variant = variant;
+		const target = layout === 0 ? (space ?? this.#focused) : this.#focused;
+		pathless.spaces.slice(0, 3).forEach((space, index) => {
+			const hidden = layout === 0 ? space !== target : index > layout;
+			if (space.hidden !== hidden) space.hidden = hidden;
+		});
+		if (layout === 0 && target.hidden) target.hidden = false;
+		this.#focused = target.hidden ? pathless.observable[0] : target;
 		return this.sync();
 	}
-	focus(direction = 1, target = this.spaces[0]) {
-		const index = this.spaces.indexOf(target);
+	focus(direction = 1, target = this.#focused) {
+		const spaces = pathless.observable;
+		const index = spaces.indexOf(target);
 		if (index < 0) return pathless;
-		const length = this.spaces.length;
-		const offset = (((index + direction) % length) + length) % length;
-		this.spaces.push(...this.spaces.splice(0, offset));
+		this.#focused = spaces.at((index + direction) % spaces.length);
 		return pathless;
 	}
-	panel(visible = !this.spaces.includes(pathless.spaces[3])) {
+	panel(visible = pathless.spaces[3].hidden) {
 		const panel = pathless.spaces[3];
-		const index = this.spaces.indexOf(panel);
-		if (visible === index >= 0) return pathless;
-		if (visible) this.spaces.push(panel);
-		else this.spaces.splice(index, 1);
-		if (!this.spaces.length) this.spaces.push(pathless.spaces[0]);
+		if (panel.hidden === !visible) return pathless;
+		panel.hidden = !visible;
+		if (!pathless.observable.length) pathless.spaces[0].hidden = false;
+		if (this.#focused.hidden) this.#focused = pathless.observable[0];
 		return this.sync();
 	}
 	#measure() {
 		const { width, height } = pathless.el.getBoundingClientRect();
 		Object.assign(pathless.el, { width, height });
 	}
-	navigate(direction = 1, space = this.spaces[0]) {
+	navigate(direction = 1, space = this.#focused) {
 		space.index += direction;
-		return this.sync();
+		return this.sync(space);
 	}
-	sync() {
-		const {
-			layout: [layout, variant],
-			visible,
-		} = this.universeState();
-		Object.assign(pathless.el.dataset, { layout, variant });
-		pathless.spaces.forEach((space) => {
-			space.hidden = !visible.includes(space);
-		});
-		for (const space of visible) {
+	sync(target) {
+		for (const space of target ? [target] : pathless.observable) {
+			if (space.hidden) continue;
 			const { frames } = space;
 			const { length } = frames;
 			if (!length) continue;
 			space.index = ((space.index % length) + length) % length;
-			const { data } = frames[space.index];
+			const frame = frames[space.index];
+			const { data } = frame;
+			const mounted = this.#mounted.get(space.firstElementChild);
+			if (mounted?.frame === frame && mounted.data === data) continue;
 			const rendering = this.#rendering;
 			this.#rendering = space;
 			try {
 				pathless.exec(data, space);
+				if (space.firstElementChild)
+					this.#mounted.set(space.firstElementChild, { frame, data });
 			} finally {
 				this.#rendering = rendering;
 			}

@@ -4,27 +4,28 @@ class Input {
 
 	constructor() {
 		const { el } = pathless;
-		this.#register(['1', 'bottomCenter'], () => pathless.layout(0));
-		this.#register(['2', 'bottomLeft'], () => pathless.layout(1));
-		this.#register(['3', 'bottomRight'], () => pathless.layout(2));
+		this.#register(['1'], () => pathless.layout(0));
+		this.#register(['2'], () => pathless.layout(1));
+		this.#register(['3'], () => pathless.layout(2));
 		this.#register(['tab'], () => pathless.focus(1));
 		this.#register(['q', 'swipe left'], () => pathless.navigate(-1));
 		this.#register(['e', 'swipe right'], () => pathless.navigate(1));
-		this.#register(['z'], () => pathless.panel());
+		this.#register(['z', 'bottomCorner'], () => pathless.panel());
 
 		pathless.click = (el, callback) =>
 			this.#register(['click'], callback, el);
 		pathless.x = this.x.bind(this);
 		pathless.y = this.y.bind(this);
 
+		const up = this.up.bind(this);
 		for (const [type, handler] of [
-			['click', this.click],
-			['pointerdown', this.down],
-			['pointerup', this.up],
-			['pointercancel', this.up],
-			['lostpointercapture', this.up],
+			['click', this.click.bind(this)],
+			['pointerdown', this.down.bind(this)],
+			['pointerup', up],
+			['pointercancel', up],
+			['lostpointercapture', up],
 		]) {
-			el.addEventListener(type, handler.bind(this));
+			el.addEventListener(type, handler);
 		}
 		document.addEventListener('keydown', this.keydown.bind(this));
 	}
@@ -64,7 +65,7 @@ class Input {
 		);
 		if (!space) return;
 		const start = this.#coordinate(event);
-		if (!this.#gesture({ start, space })) pathless.focus(0, space);
+		if (!this.#corner(start)) pathless.focus(0, space);
 		if (this.#button(event.target)) return;
 		this.#pointer = {
 			space,
@@ -102,32 +103,24 @@ class Input {
 	}
 
 	#gesture({ start, end, space }) {
-		const finish = end ?? start;
-		const deltaX = finish[0] - start[0];
-		const deltaY = Math.abs(finish[1] - start[1]);
-		const distanceX = Math.abs(deltaX);
-		const position = Math.round(start[0]);
-		const bottom = [start, finish].every(
-			([horizontal, vertical]) =>
-				vertical <= -0.8 && Math.abs(horizontal - position) <= 0.2,
-		);
-		const { visible, origins } = pathless.universe.universeState();
-		const spaces = pathless.spaces.filter(
-			(space) => !space.origin && visible.includes(space),
-		);
-		const [horizontal, vertical] =
-			space.origin ?? origins[spaces.indexOf(space)];
-		const offsetX = finish[0] - horizontal;
-		const offsetY = finish[1] - vertical;
+		const deltaX = Math.abs(end[0] - start[0]);
+		const deltaY = Math.abs(end[1] - start[1]);
+		if (deltaY >= 0.1 && deltaY > deltaX) return null;
+		if (deltaX >= 0.1)
+			return end[0] < start[0] ? 'swipe left' : 'swipe right';
+		if (this.#corner(start) && this.#corner(end)) return 'bottomCorner';
 
-		if (deltaY >= 0.1 && deltaY > distanceX) return null;
-		if (distanceX >= 0.1) return deltaX < 0 ? 'swipe left' : 'swipe right';
-		if (bottom)
-			return ['bottomLeft', 'bottomCenter', 'bottomRight'][position + 1];
-		if (!end) return null;
+		const { origins } = pathless.universe;
+		const [horizontal, vertical] =
+			origins[pathless.spaces.indexOf(space)] ?? origins[0];
+		const offsetX = end[0] - horizontal;
+		const offsetY = end[1] - vertical;
 		if (Math.abs(offsetX) >= Math.abs(offsetY))
 			return offsetX < 0 ? 'left' : 'right';
 		return offsetY < 0 ? 'down' : 'up';
+	}
+	#corner([horizontal, vertical]) {
+		return vertical <= -0.8 && Math.abs(horizontal) >= 0.8;
 	}
 	#blocked(event) {
 		return (
