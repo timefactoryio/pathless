@@ -50,7 +50,7 @@ class Input {
 	}
 	#callback(trigger, space) {
 		trigger = trigger.toLowerCase();
-		const el = space?.hidden ? null : space?.firstElementChild;
+		const el = space?.checkVisibility() ? space.firstElementChild : null;
 		return (
 			this.#bindings.get(el)?.get(trigger) ??
 			this.#bindings.get(pathless.el)?.get(trigger)
@@ -61,7 +61,7 @@ class Input {
 		if (this.#blocked(event) || !event.isPrimary) return;
 		if (event.button !== 0 || this.#pointer) return;
 		const space = pathless.spaces.find(
-			(space) => !space.hidden && space.contains(event.target),
+			(space) => space.checkVisibility() && space.contains(event.target),
 		);
 		if (!space) return;
 		const start = this.#coordinate(event);
@@ -81,7 +81,7 @@ class Input {
 		this.#pointer = null;
 		const { start, space, el } = pointer;
 		if (event.type !== 'pointerup' || this.#blocked(event)) return;
-		if (space.hidden || el !== space.firstElementChild) return;
+		if (!space.checkVisibility() || el !== space.firstElementChild) return;
 		pointer.end = this.#coordinate(event);
 		const gesture = this.#gesture(pointer);
 		if (gesture)

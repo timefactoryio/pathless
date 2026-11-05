@@ -26,12 +26,13 @@
 				position: fixed;
 				inset: 0;
 				display: grid;
-				grid-auto-columns: minmax(0, 1fr);
-				grid-template: 'zero' minmax(0, 1fr);
-				border-radius: 1cqmin;
+				grid-template-columns: repeat(2, minmax(0, 1fr));
+				grid-template-rows: repeat(2, minmax(0, 1fr));
+				grid-template-areas: 'zero zero' 'zero zero';
+				border-radius: 1svmin;
 				outline: 1px solid blue;
 				outline-offset: -1px;
-				overflow: hidden;
+				overflow: clip;
 				container: universe / size;
 				user-select: none;
 				-webkit-user-select: none;
@@ -78,15 +79,15 @@
 				}
 			}
 			#universe[data-layout='1'] {
-				grid-template-areas: 'zero' 'one';
-				grid-template-rows: repeat(2, minmax(0, 1fr));
+				grid-template-areas: 'zero zero' 'one one';
+				& > #two {
+					display: none;
+				}
 				&[data-variant='1'] {
-					grid-template-areas: 'zero one';
-					grid-template-rows: minmax(0, 1fr);
+					grid-template-areas: 'zero one' 'zero one';
 				}
 			}
 			#universe[data-layout='2'] {
-				grid-template-rows: repeat(2, minmax(0, 1fr));
 				&[data-variant='0'] {
 					grid-template-areas: 'zero zero' 'two one';
 				}
@@ -118,10 +119,10 @@
 	</head>
 	<body>
 		<div id="universe" data-layout="0" data-variant="0">
-			<div id="zero" class="space"></div>
-			<div id="one" class="space" hidden></div>
-			<div id="two" class="space" hidden></div>
-			<div id="three" class="space" hidden></div>
+			<div id="zero" class="space" tabindex="-1"></div>
+			<div id="one" class="space" tabindex="-1" hidden></div>
+			<div id="two" class="space" tabindex="-1" hidden></div>
+			<div id="three" class="space" tabindex="-1" hidden></div>
 		</div>
 	</body>
 </html>

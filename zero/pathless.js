@@ -1,5 +1,6 @@
 class Pathless {
 	#cache = new Map();
+	#focused = null;
 	static #decoder = new TextDecoder();
 	static #range = new Range();
 
@@ -7,19 +8,35 @@ class Pathless {
 		this.el = document.getElementById('universe');
 		this.frames = [];
 		this.panels = [];
-		this.spaces = Array.from(
-			this.el.querySelectorAll(':scope > .space'),
-		).map((space, index) =>
+		this.spaces = Array.from(this.el.children, (space, index) =>
 			Object.assign(space, {
 				frames: index === 3 ? this.panels : this.frames,
 				index: 0,
+				mounted: null,
 				states: new Map(),
 			}),
 		);
+		this.#focused = this.spaces[0];
 	}
 
 	get observable() {
 		return this.spaces.filter((space) => !space.hidden);
+	}
+	set observable(spaces) {
+		for (const space of this.spaces)
+			space.toggleAttribute('hidden', !spaces.includes(space));
+		if (!this.#focused?.checkVisibility())
+			this.focused = this.spaces.find((space) => space.checkVisibility());
+	}
+	get focused() {
+		return this.#focused;
+	}
+	set focused(space) {
+		if (space && (!this.spaces.includes(space) || !space.checkVisibility()))
+			return;
+		this.#focused = space ?? null;
+		if (space && !space.contains(document.activeElement))
+			space.focus({ preventScroll: true });
 	}
 
 	static decode(bytes) {
@@ -77,17 +94,25 @@ class Pathless {
 		}));
 	}
 
-	exec(data, space) {
-		const fragment = Pathless.#range.createContextualFragment(data);
-		space?.replaceChildren(fragment);
-		return space ? this : fragment;
+	exec(space = this.focused) {
+		const frame = space.frames[space.index];
+		if (!frame || space.mounted === frame) return this;
+		space.replaceChildren(frame.cloneNode(true));
+		space.mounted = frame;
+		return this;
 	}
 
 	async init() {
 		const [frames, panels] = await this.source();
-		this.frames.splice(0, this.frames.length, ...frames.ones);
-		this.panels.splice(0, this.panels.length, ...panels.ones);
-		new Input();
-		new Universe();
+		for (const [pool, group] of [
+			[this.frames, frames],
+			[this.panels, panels],
+		]) {
+			pool.length = 0;
+			for (const { data } of group.ones)
+				pool.push(Pathless.#range.createContextualFragment(data));
+		}
+		this.#cache.delete('');
+		for (const space of this.spaces) this.exec(space);
 	}
 }
