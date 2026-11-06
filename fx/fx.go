@@ -1,6 +1,9 @@
 package fx
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -20,8 +23,8 @@ type Fx interface {
 
 type fx struct {
 	z      *zero.Zero
-	frames []*One
-	panels []*One
+	frames []string
+	panels []string
 	routes map[string][]*One
 	mux    *http.ServeMux
 	client *http.Client
@@ -30,6 +33,8 @@ type fx struct {
 func NewFx(z *zero.Zero) Fx {
 	return &fx{
 		z:      z,
+		frames: []string{},
+		panels: []string{},
 		routes: make(map[string][]*One),
 		mux:    http.NewServeMux(),
 		client: &http.Client{Timeout: 10 * time.Second},
@@ -37,15 +42,8 @@ func NewFx(z *zero.Zero) Fx {
 }
 
 func (f *fx) Frame(source string, panel ...bool) error {
-	var entry *One
-
-	if strings.HasPrefix(strings.TrimSpace(source), "<") {
-		entry = &One{
-			Name: "frame",
-			Type: "text/html; charset=utf-8",
-			Data: []byte(source),
-		}
-	} else {
+	html := source
+	if !strings.HasPrefix(strings.TrimSpace(source), "<") {
 		entries, err := f.Input(source)
 		if err != nil {
 			return err
@@ -53,14 +51,14 @@ func (f *fx) Frame(source string, panel ...bool) error {
 		if len(entries) != 1 {
 			return fmt.Errorf("%q: expected one entry, got %d", source, len(entries))
 		}
-		entry = entries[0]
+		html = string(entries[0].Data)
 	}
 
 	target := &f.frames
 	if len(panel) > 0 && panel[0] {
 		target = &f.panels
 	}
-	*target = append(*target, f.build(entry))
+	*target = append(*target, f.build(html))
 	return nil
 }
 
@@ -80,13 +78,18 @@ func (f *fx) Save(key string, binary ...bool) ([]byte, error) {
 }
 
 func (f *fx) Start() {
-	f.handle("/", encode([]*One{
-		{Ones: f.frames},
-		{Ones: f.panels},
-	}))
+	var root bytes.Buffer
+	writer, _ := gzip.NewWriterLevel(&root, gzip.BestCompression)
+	if err := json.NewEncoder(writer).Encode([2][]string{f.frames, f.panels}); err != nil {
+		panic(err)
+	}
+	if err := writer.Close(); err != nil {
+		panic(err)
+	}
+	f.handle("/", "application/json", root.Bytes())
 	for key, payload := range f.routes {
 		// log.Printf("route: %s", key)
-		f.handle("/"+key, encode(payload))
+		f.handle("/"+key, "application/octet-stream", encode(payload))
 	}
 
 	if err := http.ListenAndServe(":1001", f.cors(f.mux)); err != nil {
@@ -94,9 +97,8 @@ func (f *fx) Start() {
 	}
 }
 
-// build merges any inline style/script blocks in html into a single entry.
-func (f *fx) build(entry *One) *One {
-	html := string(entry.Data)
+// build merges inline style/script blocks in HTML.
+func (f *fx) build(html string) string {
 	if styles := styleTag.FindAllStringSubmatch(html, -1); len(styles) > 1 {
 		var merged strings.Builder
 		for _, match := range styles {
@@ -119,10 +121,7 @@ func (f *fx) build(entry *One) *One {
 		html = scriptTag.ReplaceAllString(html, "") +
 			"<script>{" + merged.String() + "}</script>"
 	}
-	result := *entry
-	result.Type = "text/html"
-	result.Data = []byte(html)
-	return &result
+	return html
 }
 
 var (
@@ -131,9 +130,9 @@ var (
 )
 
 // handle registers an encoded wire payload and writes it from memory on every request.
-func (f *fx) handle(path string, data []byte) {
+func (f *fx) handle(path, contentType string, data []byte) {
 	f.mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Write(data)
 	})
