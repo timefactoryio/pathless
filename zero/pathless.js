@@ -1,114 +1,49 @@
 class Pathless {
 	#cache = new Map();
 	#rendering = null;
-	#view = { selection: [0, 0] };
 	static #decoder = new TextDecoder();
 	static #range = new Range();
-	static #areas = { full: [1, 1, 3, 3], dock: [3, 1, 4, 3] };
-	static #layouts = {
-		'0,0': [Pathless.#areas.full],
-		'1,0': [
-			[1, 1, 2, 3],
-			[2, 1, 3, 3],
-		],
-		'1,1': [
-			[1, 1, 3, 2],
-			[1, 2, 3, 3],
-		],
-		'2,0': [
-			[1, 1, 2, 3],
-			[2, 2, 3, 3],
-			[2, 1, 3, 2],
-		],
-		'2,1': [
-			[1, 1, 3, 2],
-			[1, 2, 2, 3],
-			[2, 2, 3, 3],
-		],
-		'2,2': [
-			[1, 2, 3, 3],
-			[2, 1, 3, 2],
-			[1, 1, 2, 2],
-		],
-		'2,3': [
-			[2, 1, 3, 3],
-			[1, 1, 2, 2],
-			[1, 2, 2, 3],
-		],
-	};
 
 	constructor() {
-		const view = this.#view;
 		this.el = document.getElementById('universe');
-		view.panel = this.el.querySelector('#panel');
-		this.frames = [];
-		this.panels = [];
-		this.spaces = Array.from(this.el.children, (space) =>
-			Object.assign(space, {
-				frames: space === view.panel ? this.panels : this.frames,
-				index: 0,
-				mounted: null,
-				states: new Map(),
-			}),
-		);
-		view.main = this.spaces.filter((space) => space !== view.panel);
-		view.focused = view.main[0];
-		this.#solo(view.focused);
-		this.#measure();
-		new ResizeObserver(() => this.#measure()).observe(this.el, {
-			box: 'border-box',
-		});
-	}
-	#measure() {
-		const { width, height } = this.el.getBoundingClientRect();
-		Object.assign(this.el, { width, height });
+		this.spaces = Array.from(this.el.children, (el) => ({
+			el,
+			index: 0,
+			states: new Map(),
+		}));
+		this.focused = this.spaces[0];
+		this.observable = [this.focused];
 	}
 
 	async init() {
-		const groups = await fetch(circuit).then((response) => response.json());
-		for (const [index, pool] of [this.frames, this.panels].entries()) {
-			pool.length = 0;
-			for (const html of groups[index])
-				pool.push(Pathless.#range.createContextualFragment(html));
-		}
-		for (const space of this.spaces) this.#mount(space);
+		const [frames, panels] = await fetch(circuit).then((response) =>
+			response.json(),
+		);
+		const fragment = (html) =>
+			Pathless.#range.createContextualFragment(html);
+		this.frames = frames.map(fragment);
+		this.panels = panels.map(fragment);
+		for (const space of this.spaces)
+			space.frames = space === this.spaces[3] ? this.panels : this.frames;
+		this.#mount(this.spaces);
 		return this;
 	}
 
-	get observable() {
-		return this.spaces.filter((space) => !space.hidden);
+	set show(spaces) {
+		for (const space of [spaces].flat()) {
+			if (!this.observable.includes(space)) this.observable.push(space);
+			space.el.hidden = false;
+		}
 	}
-	get focused() {
-		return this.#view.focused;
-	}
-	set focused(space) {
-		if (this.spaces.includes(space) && !space.hidden)
-			this.#view.focused = space;
+	set hide(spaces) {
+		for (const space of [spaces].flat()) {
+			if (space === this.focused) continue;
+			const index = this.observable.indexOf(space);
+			if (index >= 0) this.observable.splice(index, 1);
+			space.el.hidden = true;
+		}
 	}
 
-	layout(layout, variant = 0) {
-		if (!Pathless.#layouts[`${layout},${variant}`]) return this;
-		const view = this.#view;
-		if (layout === 0) {
-			const current = view.selection;
-			if (current[0] !== 0) view.previous = current;
-			else if (view.previous) [layout, variant] = view.previous;
-			else return this;
-		}
-		view.selection = [layout, variant];
-		if (layout === 0) this.#solo(view.focused);
-		else {
-			const areas = Pathless.#layouts[`${layout},${variant}`];
-			for (const [index, space] of view.main.entries())
-				this.#place(space, areas[index]);
-			if (view.focused.hidden) view.focused = view.main[0];
-			this.#place(
-				view.panel,
-				view.panel.hidden ? undefined : Pathless.#areas.dock,
-			);
-		}
-		return this;
-	}
 	focus(direction = 1, space = this.focused) {
 		const spaces = this.observable;
 		const index = spaces.indexOf(space);
@@ -116,33 +51,28 @@ class Pathless {
 			this.focused = spaces.at((index + direction) % spaces.length);
 		return this;
 	}
-	panel(visible = this.#view.panel.hidden) {
-		const view = this.#view;
-		const active = view.focused === view.panel;
-		const solo = view.selection[0] === 0;
-		if (active && !visible) view.focused = view.main[0];
-		if (active && solo) this.#solo(view.focused, visible);
-		else
-			this.#place(view.panel, visible ? Pathless.#areas.dock : undefined);
+	panel(visible) {
+		const space = this.spaces[3];
+		if (visible === undefined ? space.el.hidden : visible)
+			this.show = space;
+		else this.hide = space;
 		return this;
 	}
 	navigate(direction = 1, space = this.focused) {
-		if (this.#rendering)
-			throw new Error('Cannot navigate during frame initialization');
-		if (!this.spaces.includes(space) || !space.frames.length) return this;
 		const { length } = space.frames;
-		space.index = (((space.index + direction) % length) + length) % length;
+		if (!length) return this;
+		const index = (((space.index + direction) % length) + length) % length;
+		if (index === space.index) return this;
+		space.index = index;
 		this.#mount(space);
 		return this;
 	}
-
 	frame(space = this.#rendering ?? this.focused) {
 		const { index, states } = space;
 		let state = states.get(index);
 		if (!state) states.set(index, (state = new Map()));
-		return { space, el: space.firstElementChild, state };
+		return { space, el: space.el.firstElementChild, state };
 	}
-
 	source(path, bytes = false) {
 		if (!path) throw new TypeError('source() requires a path');
 		const cached = !bytes && this.#cache.get(path);
@@ -159,38 +89,17 @@ class Pathless {
 		return source;
 	}
 
-	#solo(target, panelVisible = !this.#view.panel.hidden) {
-		const { full, dock } = Pathless.#areas;
-		for (const space of this.spaces) {
-			let area;
-			if (space === target) area = full;
-			else if (space === this.#view.panel && panelVisible) area = dock;
-			this.#place(space, area);
-		}
-	}
-
-	#place(space, area) {
-		space.hidden = !area;
-		space.style.gridArea = area?.join(' / ') ?? '';
-		if (space !== this.#view.panel) return;
-		const size = area === Pathless.#areas.dock ? '15%' : '0px';
-		this.el.style.setProperty('--dock-size', size);
-	}
-
-	#mount(space) {
-		const frame = space.frames[space.index];
-		if (!frame || space.mounted === frame) return;
-		const fragment = frame.cloneNode(true);
-		const rendering = this.#rendering;
-		this.#rendering = space;
-		space.mounted = frame;
-		try {
-			space.replaceChildren(fragment);
-		} catch (error) {
-			space.mounted = null;
-			throw error;
-		} finally {
-			this.#rendering = rendering;
+	#mount(spaces) {
+		for (const space of [spaces].flat()) {
+			const frame = space.frames[space.index];
+			if (!frame) continue;
+			const rendering = this.#rendering;
+			this.#rendering = space;
+			try {
+				space.el.replaceChildren(frame.cloneNode(true));
+			} finally {
+				this.#rendering = rendering;
+			}
 		}
 	}
 

@@ -4,9 +4,6 @@ class Input {
 
 	constructor() {
 		const { el } = pathless;
-		this.#register(['1'], () => pathless.layout(0));
-		this.#register(['2'], () => pathless.layout(1));
-		this.#register(['3'], () => pathless.layout(2));
 		this.#register(['tab'], () => pathless.focus(1));
 		this.#register(['q', 'swipe left'], () => pathless.navigate(-1));
 		this.#register(['e', 'swipe right'], () => pathless.navigate(1));
@@ -28,6 +25,14 @@ class Input {
 			el.addEventListener(type, handler);
 		}
 		document.addEventListener('keydown', this.keydown.bind(this));
+		new ResizeObserver(() => this.#measure()).observe(this.el, {
+			box: 'border-box',
+		});
+	}
+
+	#measure() {
+		const { width, height } = this.el.getBoundingClientRect();
+		Object.assign(this.el, { width, height });
 	}
 
 	x(left, right) {
@@ -110,9 +115,11 @@ class Input {
 			return end[0] < start[0] ? 'swipe left' : 'swipe right';
 		if (this.#corner(start) && this.#corner(end)) return 'bottomCorner';
 
-		const { origins } = pathless.universe;
-		const [horizontal, vertical] =
-			origins[pathless.spaces.indexOf(space)] ?? origins[0];
+		const { left, top, width, height } = space.getBoundingClientRect();
+		const [horizontal, vertical] = this.#coordinate({
+			clientX: left + width / 2,
+			clientY: top + height / 2,
+		});
 		const offsetX = end[0] - horizontal;
 		const offsetY = end[1] - vertical;
 		if (Math.abs(offsetX) >= Math.abs(offsetY))
