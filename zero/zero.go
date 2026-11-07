@@ -15,9 +15,6 @@ var origin string
 //go:embed pathless.js
 var pathlessScript string
 
-//go:embed universe.js
-var universeScript string
-
 //go:embed input.js
 var inputScript string
 
@@ -62,7 +59,6 @@ func (z *Zero) pathless() {
 	if err := tmpl.ExecuteTemplate(&buf, "zero.html", map[string]any{
 		"CIRCUIT":  z.circuitURL,
 		"PATHLESS": template.JS(pathlessScript),
-		"UNIVERSE": template.JS(universeScript),
 		"INPUT":    template.JS(inputScript),
 	}); err != nil {
 		panic(err)

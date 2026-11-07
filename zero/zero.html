@@ -27,8 +27,10 @@
 				inset: 0;
 				display: grid;
 				grid-template-columns: repeat(2, minmax(0, 1fr));
-				grid-template-rows: repeat(2, minmax(0, 1fr));
-				grid-template-areas: 'zero zero' 'zero zero';
+				grid-template-rows: repeat(2, minmax(0, 1fr)) var(
+						--dock-size,
+						0px
+					);
 				border-radius: 1svmin;
 				outline: 1px solid blue;
 				outline-offset: -1px;
@@ -44,58 +46,15 @@
 			}
 			.space {
 				display: flex;
+				min-width: 0;
+				min-height: 0;
 				padding: 1cqmin;
 				overflow: hidden;
 				container-type: size;
-				&#zero {
-					grid-area: zero;
-				}
-				&#one {
-					grid-area: one;
-				}
-				&#two {
-					grid-area: two;
-				}
-				&#three {
-					grid-column: 1 / -1;
-					grid-row: -1;
-					block-size: 15cqh;
-				}
 				& > :first-child {
 					flex: 1;
 					min-width: 0;
 					min-height: 0;
-				}
-			}
-			#universe[data-layout='0'] {
-				& > .space:not(#three) {
-					grid-area: zero;
-				}
-				&:not(:has(> .space:not(#three):not([hidden]))) {
-					& > #three {
-						grid-area: zero;
-						block-size: auto;
-					}
-				}
-			}
-			#universe[data-layout='1'] {
-				grid-template-areas: 'zero zero' 'one one';
-				&[data-variant='1'] {
-					grid-template-areas: 'zero one' 'zero one';
-				}
-			}
-			#universe[data-layout='2'] {
-				&[data-variant='0'] {
-					grid-template-areas: 'zero zero' 'two one';
-				}
-				&[data-variant='1'] {
-					grid-template-areas: 'zero one' 'zero two';
-				}
-				&[data-variant='2'] {
-					grid-template-areas: 'two zero' 'one zero';
-				}
-				&[data-variant='3'] {
-					grid-template-areas: 'one two' 'zero zero';
 				}
 			}
 		</style>
@@ -105,7 +64,6 @@
 				location.hostname,
 			);
 			{{.PATHLESS}}
-			{{.UNIVERSE}}
 			{{.INPUT}}
 
 			document.addEventListener('DOMContentLoaded', () => {
@@ -115,11 +73,11 @@
 		</script>
 	</head>
 	<body>
-		<div id="universe" data-layout="0" data-variant="0">
+		<div id="universe">
 			<div id="zero" class="space" tabindex="-1"></div>
 			<div id="one" class="space" tabindex="-1" hidden></div>
 			<div id="two" class="space" tabindex="-1" hidden></div>
-			<div id="three" class="space" tabindex="-1" hidden></div>
+			<div id="panel" class="space" tabindex="-1" hidden></div>
 		</div>
 	</body>
 </html>
