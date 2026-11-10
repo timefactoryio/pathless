@@ -41,9 +41,10 @@ class Pathless {
 
 	focus(direction = 1, space = this.focused) {
 		const spaces = this.observable;
-		const index = spaces.indexOf(space);
-		if (index >= 0)
-			this.focused = spaces.at((index + direction) % spaces.length);
+		if (spaces.includes(space))
+			this.focused = spaces.at(
+				(spaces.indexOf(space) + direction) % spaces.length,
+			);
 		return this;
 	}
 	panel(visible = this.spaces[3].el.hidden) {
@@ -54,18 +55,16 @@ class Pathless {
 	}
 	navigate(direction = 1, space = this.focused) {
 		const { length } = space.frames;
-		if (!length) return this;
-		const index = (((space.index + direction) % length) + length) % length;
-		if (index === space.index) return this;
-		space.index = index;
+		const step = direction % length;
+		if (!step) return this;
+		space.index = (space.index + step + length) % length;
 		this.#mount(space);
 		return this;
 	}
 	frame(space = this.#rendering ?? this.focused) {
-		const { index, states } = space;
-		let state = states.get(index);
-		if (!state) states.set(index, (state = new Map()));
-		return { space, el: space.el.firstElementChild, state };
+		const { el, index, states } = space;
+		if (!states.has(index)) states.set(index, new Map());
+		return { space, el: el.firstElementChild, state: states.get(index) };
 	}
 	source(path, raw = false) {
 		if (!path) throw new TypeError('source() requires a path');
@@ -83,29 +82,29 @@ class Pathless {
 		if (!raw) this.#cache.set(path, request);
 		return request;
 	}
-	layoutZero(space = this.focused) {
+	one(space = this.focused) {
 		this.focused = space;
 		return this.#layout(this.layout[0] === null ? this.layout[1] : null);
 	}
-	layoutOne() {
+	two() {
 		return this.#layout(this.layout[0] === 0 ? 1 : 0);
 	}
-	layoutTwo() {
+	three() {
 		const layout = this.layout[0];
 		return this.#layout(layout >= 2 ? ((layout - 1) % 4) + 2 : 2);
 	}
 
 	#mount(spaces) {
-		for (const space of Array.isArray(spaces) ? spaces : [spaces]) {
-			const frame = space.frames[space.index];
-			if (!frame) continue;
-			const rendering = this.#rendering;
-			this.#rendering = space;
-			try {
+		const rendering = this.#rendering;
+		try {
+			for (const space of Array.isArray(spaces) ? spaces : [spaces]) {
+				const frame = space.frames[space.index];
+				if (!frame) continue;
+				this.#rendering = space;
 				space.el.replaceChildren(frame.cloneNode(true));
-			} finally {
-				this.#rendering = rendering;
 			}
+		} finally {
+			this.#rendering = rendering;
 		}
 	}
 	#layout(layout) {

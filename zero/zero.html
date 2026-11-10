@@ -94,6 +94,14 @@
 			{{.INPUT}}
 			document.addEventListener('DOMContentLoaded', () => {
 				window.pathless = new Pathless();
+				new Input();
+				pathless.register(['tab'], () => pathless.focus());
+				pathless.register(['q', 'swipe left'], () => pathless.navigate(-1));
+				pathless.register(['e', 'swipe right'], () => pathless.navigate(1));
+				pathless.register(['z', 'bottomcorner'], () => pathless.panel());
+				pathless.register(['1'], () => pathless.one());
+				pathless.register(['2'], () => pathless.two());
+				pathless.register(['3'], () => pathless.three());
 				pathless.init();
 			});
 		</script>

@@ -2,38 +2,52 @@ This is a **spatial, stateful runtime**: content changes within independently na
 
 **Core Model**
 - **Universe:** the whole application surface.
-- **Space:** a persistent DOM container with its own navigation index and frame states. There are three main spaces and one panel space.
+- **Space:** a record containing a persistent DOM element, navigation index, frame collection, and per-index state maps. There are three main spaces and one panel space.
 - **Frame:** executable HTML mounted into a space.
 - **Panel:** a frame from a separate collection, displayed in the fourth space.
-- **Focus:** the visible main space that receives keyboard input and navigation commands when no target is specified. The panel is excluded from the focus cycle.
+- **Focus:** the space that receives keyboard input and navigation commands when no target is specified. The focus cycle includes every visible space, including the panel.
 - **Layout:** the arrangement of visible spaces, independent of their content.
 
 **Browser Layers**
-1. **Pathless loads and executes content.** It owns the root and space elements, fetches and caches typed content trees, decodes HTML, exposes assets as blob URLs, and inserts executable HTML fragments. Defined in [zero/zero.html](zero/zero.html).
+1. **Pathless owns content, composition, and state.** [zero/pathless.js](zero/pathless.js) discovers the space elements, fetches frame and panel HTML, converts it into reusable fragments, and mounts clones. It also controls visibility, focus, layouts, circular navigation, and per-frame state. There is no separate Universe class.
 
-2. **Universe manages composition and state.** It controls visibility, focus, layouts, and circular navigation. Each space retains a `Map` for every frame index it visits. Navigation reconstructs frame DOM while preserving that state; hiding a populated space retains its DOM. Defined in [zero/universe.html](zero/universe.html).
+2. **Input recognizes and dispatches interactions.** [zero/input.js](zero/input.js) installs delegated pointer, click, and keyboard listeners and exposes `register`, `x`, `y`, and `click` on the shared `pathless` instance. Bindings belong to DOM elements; an active pointer interaction retains its originating space and mounted frame identity.
 
-3. **Input translates clicks, keys, and pointer gestures into commands.** A non-bottom press focuses a visible main space; horizontal swipes navigate the pressed space; bottom-edge taps control layouts. Other taps invoke directional bindings relative to the space's center. Registered click targets receive delegated clicks without starting gestures. Defined in [zero/input.html](zero/input.html).
+3. **The shell supplies geometry and default controls.** [zero/zero.html](zero/zero.html) defines the four space containers, flex layouts, bottom panel region, and startup sequence. Application-wide input bindings are registered here rather than inside Input.
 
 **Serving and Startup**
 - The Go entry point, [pathless.go](pathless.go), embeds `fx.Fx`, exposing `Input`, `Frame`, `Save`, and `Start` on `Pathless`.
-- [zero/zero.go](zero/zero.go) renders the three browser templates into one compressed HTML payload and starts the shell server on `:1000` during construction.
-- [fx/fx.go](fx/fx.go) registers frames, panels, and public resource routes. `Start` serves the circuit on `:1001`; its bootstrap contains frame and panel collections, not runtime HTML.
-- The browser creates `window.pathless`, loads those collections, initializes Input, then initializes Universe and renders the first main frame. At least one main frame is required.
+- [zero/zero.go](zero/zero.go) embeds the HTML shell and both JavaScript files, renders them into one gzip-compressed HTML payload, and starts the shell server on `:1000` during construction.
+- With no arguments, `NewZero` selects `http://localhost:1001` as the circuit and `*` as the allowed shell origin. Two arguments specify shell and circuit hosts, each prefixed with `https://`. The browser replaces `localhost` in the circuit URL with its current hostname.
+- [fx/fx.go](fx/fx.go) registers frames, panels, and public resource routes. `Start` serves the circuit on `:1001`; its root response is JSON containing `[frames, panels]`, where each collection contains HTML strings.
+- On `DOMContentLoaded`, the browser creates `window.pathless`, constructs Input, registers default controls, then calls `pathless.init()`. Helpers are therefore available before any frame scripts execute.
+- Initialization assigns the main collection to the first three spaces and the panel collection to the fourth, then mounts index zero in every space with available content, including hidden spaces. Initially only the first main space is visible. Empty collections are left unmounted.
 
 **Composition Rules**
-- Layout `0`: one selected main space. Calling `layout(0)` without a space toggles between single-space mode and the remembered split layout, when one exists.
-- Layout `1`: the first two main spaces, with stacked and side-by-side variants.
-- Layout `2`: all three main spaces, with four arrangements.
-- Repeating the current split-layout command cycles its variants. The second argument to `layout` selects a space in layout zero, not a variant.
-- `panel()` toggles the fourth space as a separate bottom region; `panel(true)` and `panel(false)` set its visibility explicitly. It does not replace the main spaces or become focused.
-- Each space navigates independently, wrapping within the main frame or panel collection as appropriate.
+- `one(space = pathless.focused)` selects a space and toggles between single-space mode and the previous split arrangement, when one exists.
+- `two()` shows the first two main spaces and alternates between side-by-side (`x`) and stacked (`y`) arrangements. If the third main space was focused, focus moves to the first.
+- `three()` shows all three main spaces and cycles the `up`, `right`, `down`, and `left` arrangements.
+- `pathless.layout` stores `[current, previous]`. The current value is `null` for single-space mode, `0` or `1` for the two-space arrangements, and `2` through `5` for the three-space arrangements. There is no public `layout()` method.
+- `pathless.observable` returns all non-hidden spaces. The `show` and `hide` setters accept a space or array of spaces; `hide` never hides the focused space.
+- `panel()` toggles the fourth space; `panel(true)` shows it and `panel(false)` requests hiding it. The panel occupies a separate bottom region. Because it can receive focus, a focused panel cannot be hidden until focus moves elsewhere.
+- `focus(direction = 1, space = pathless.focused)` advances through observable spaces; `focus(0, space)` selects a visible space. `navigate(direction = 1, space = pathless.focused)` wraps within that space's collection and remounts only when its index changes.
+- Navigation reconstructs frame DOM while retaining state for each space/frame-index pair. Hiding a populated space retains its DOM.
+
+**Input Rules**
+- `pathless.register(triggers, callback, el = pathless.el)` registers case-insensitive trigger aliases. Frame bindings take precedence over universe bindings; explicit click targets resolve their own binding. Registration returns `pathless` for chaining.
+- `x(left, right)` optionally binds `a`/`left` and `d`/`right` to the current frame element. `y(up, down)` optionally binds `w`/`up` and `s`/`down`. Frames may use either helper, both, or neither.
+- `click(el, callback)` registers delegated activation on an element. The nearest registered ancestor owns the click; these targets do not start pointer gestures.
+- Default controls are Tab for focus, `q`/`e` and horizontal swipes for navigation, `z` and bottom-corner taps for the panel, and `1`/`2`/`3` for `one()`/`two()`/`three()`.
+- Pointer gestures operate on their originating visible space. Successful non-corner recognition focuses that space at completion, not at pointer-down. Bottom-corner activation preserves the existing focus. Other taps invoke directional bindings relative to the space's center; dominant vertical movement is ignored.
+- Input accepts one primary pointer interaction at a time and uses pointer capture. Cancellation, capture loss, a replaced frame, a hidden originating space, or changed universe geometry discards the gesture. Internal space movement is not separately checked.
+- Prevented events and editable controls are ignored. Keyboard handling also ignores composition and Ctrl/Meta/Alt shortcuts. Matched callbacks prevent the browser default before invocation.
 
 **Frame Contract**
-- `pathless.frame()` returns `{ space, el, state }` for the synchronously rendering space, otherwise the focused main space. State belongs to a space/frame-index pair, not to the frame globally.
+- `pathless.frame(space)` returns `{ space, el, state }`, where `el` is the space's first element child and `state` is a lazily created `Map` for its current frame index. Without an explicit space, it uses the synchronously rendering space, otherwise the focused space.
 - Capture that context during synchronous initialization for use after an `await` or in later callbacks. Navigation defaults to focus unless a space is passed explicitly.
-- Give each frame an element root. Register delegated clicks with `click`, left/right taps and `a`/`d` keys with `x`, and up/down taps and `w`/`s` keys with `y`. New frame DOM needs new registrations.
-- `1`/`2`/`3` select layouts, Tab cycles focus, `q`/`e` navigate, and `z` toggles the panel. Bottom-left advances the layout number, bottom-center calls `layout(0)`, and bottom-right repeats the current layout command.
+- Give each frame an element root. New frame DOM needs new input registrations; element-keyed bindings are held in a `WeakMap`, not in persistent frame state.
+- Input callbacks receive `{ trigger, space, el, start, end }`. The trigger is lowercase, `el` is the resolved binding owner, and normal functions receive that element as `this`. Gestures supply universe-normalized coordinate pairs; keyboard and click callbacks receive `null` for `start` and `end`.
+- `pathless.source(path, raw = false)` returns a `Promise<ArrayBuffer>` for a circuit resource. By default it caches the request by path and removes failed requests from the cache; `raw = true` bypasses caching. It does not decode content trees or create blob URLs.
 - Frames execute trusted code in the shared document. Rendering does not automatically clean up custom listeners, timers, or observers.
 
-The central distinction is: **spaces own navigation and state; frames supply content and behavior; layouts supply geometry; Input supplies dispatch.** The shared `pathless` object connects them through chainable controls and input registration, with separate context and resource-loading methods. See [README.md](README.md) for the API reference.
+The central distinction is: **spaces own navigation and state; frames supply content and behavior; layouts supply geometry; Input supplies dispatch.** Pathless manages the spatial runtime, and the shared `pathless` object connects it to frames through chainable controls, input registration, frame context, and resource requests.
