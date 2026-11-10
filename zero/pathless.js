@@ -1,24 +1,22 @@
 class Pathless {
 	#cache = new Map();
 	#rendering = null;
-	static #decoder = new TextDecoder();
 	static #range = new Range();
+	static #layouts = ['x', 'y', 'up', 'right', 'down', 'left'];
 
 	constructor() {
 		this.el = document.getElementById('universe');
+		this.layout = [null, null];
 		this.spaces = Array.from(this.el.children, (el) => ({
 			el,
 			index: 0,
 			states: new Map(),
 		}));
 		this.focused = this.spaces[0];
-		this.observable = [this.focused];
 	}
 
 	async init() {
-		const [frames, panels] = await fetch(circuit).then((response) =>
-			response.json(),
-		);
+		const [frames, panels] = await (await fetch(circuit)).json();
 		const fragment = (html) =>
 			Pathless.#range.createContextualFragment(html);
 		this.frames = frames.map(fragment);
@@ -29,19 +27,16 @@ class Pathless {
 		return this;
 	}
 
+	get observable() {
+		return this.spaces.filter((space) => !space.el.hidden);
+	}
 	set show(spaces) {
-		for (const space of [spaces].flat()) {
-			if (!this.observable.includes(space)) this.observable.push(space);
+		for (const space of Array.isArray(spaces) ? spaces : [spaces])
 			space.el.hidden = false;
-		}
 	}
 	set hide(spaces) {
-		for (const space of [spaces].flat()) {
-			if (space === this.focused) continue;
-			const index = this.observable.indexOf(space);
-			if (index >= 0) this.observable.splice(index, 1);
-			space.el.hidden = true;
-		}
+		for (const space of Array.isArray(spaces) ? spaces : [spaces])
+			if (space !== this.focused) space.el.hidden = true;
 	}
 
 	focus(direction = 1, space = this.focused) {
@@ -51,10 +46,9 @@ class Pathless {
 			this.focused = spaces.at((index + direction) % spaces.length);
 		return this;
 	}
-	panel(visible) {
+	panel(visible = this.spaces[3].el.hidden) {
 		const space = this.spaces[3];
-		if (visible === undefined ? space.el.hidden : visible)
-			this.show = space;
+		if (visible) this.show = space;
 		else this.hide = space;
 		return this;
 	}
@@ -73,24 +67,36 @@ class Pathless {
 		if (!state) states.set(index, (state = new Map()));
 		return { space, el: space.el.firstElementChild, state };
 	}
-	source(path, bytes = false) {
+	source(path, raw = false) {
 		if (!path) throw new TypeError('source() requires a path');
-		const cached = !bytes && this.#cache.get(path);
-		if (cached) return cached;
+		if (!raw && this.#cache.has(path)) return this.#cache.get(path);
 		const request = fetch(`${circuit}/${path}`)
-			.then((response) => response.bytes())
-			.then((data) => this.#decode(data, bytes));
-		if (bytes) return request;
-		const source = request.catch((error) => {
-			this.#cache.delete(path);
-			throw error;
-		});
-		this.#cache.set(path, source);
-		return source;
+			.then((response) => {
+				if (!response.ok)
+					throw new Error(`HTTP ${response.status}: ${response.url}`);
+				return response.arrayBuffer();
+			})
+			.catch((error) => {
+				if (!raw) this.#cache.delete(path);
+				throw error;
+			});
+		if (!raw) this.#cache.set(path, request);
+		return request;
+	}
+	layoutZero(space = this.focused) {
+		this.focused = space;
+		return this.#layout(this.layout[0] === null ? this.layout[1] : null);
+	}
+	layoutOne() {
+		return this.#layout(this.layout[0] === 0 ? 1 : 0);
+	}
+	layoutTwo() {
+		const layout = this.layout[0];
+		return this.#layout(layout >= 2 ? ((layout - 1) % 4) + 2 : 2);
 	}
 
 	#mount(spaces) {
-		for (const space of [spaces].flat()) {
+		for (const space of Array.isArray(spaces) ? spaces : [spaces]) {
 			const frame = space.frames[space.index];
 			if (!frame) continue;
 			const rendering = this.#rendering;
@@ -102,38 +108,14 @@ class Pathless {
 			}
 		}
 	}
-
-	#decode(bytes, raw = true) {
-		let offset = 0;
-		const key = raw ? 'data' : 'url';
-		const uvarint = () => {
-			let value = 0;
-			for (let shift = 0; ; shift += 7) {
-				const byte = bytes[offset++];
-				value += (byte & 0x7f) * 2 ** shift;
-				if (!(byte & 0x80)) return value >>> 0;
-			}
-		};
-		const field = () => {
-			const length = uvarint();
-			offset += length;
-			return bytes.subarray(offset - length, offset);
-		};
-		const ones = () => {
-			const nodes = new Array(uvarint());
-			for (let index = 0; index < nodes.length; index++) {
-				const name = Pathless.#decoder.decode(field());
-				const type = Pathless.#decoder.decode(field());
-				let data = field();
-				if (!raw)
-					data =
-						type || data.length
-							? URL.createObjectURL(new Blob([data], { type }))
-							: null;
-				nodes[index] = { name, type, [key]: data, ones: ones() };
-			}
-			return nodes;
-		};
-		return ones();
+	#layout(layout) {
+		const count = layout === null ? 0 : layout < 2 ? 2 : 3;
+		if (count === 2 && this.focused === this.spaces[2])
+			this.focused = this.spaces[0];
+		this.show = count ? this.spaces.slice(0, count) : this.focused;
+		this.hide = count ? this.spaces.slice(count, 3) : this.spaces;
+		this.layout = [layout, this.layout[0]];
+		this.el.className = Pathless.#layouts[layout] ?? '';
+		return this;
 	}
 }
