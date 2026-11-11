@@ -10,33 +10,27 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"github.com/timefactoryio/pathless/zero"
 )
 
 type Fx interface {
-	Input(string, ...bool) ([]*One, error)
+	Input(string) ([]*One, error)
 	Frame(string, ...bool) error
 	Save(string, ...bool) ([]byte, error)
-	Start()
+	Circuit() map[string][]byte
 }
 
 type fx struct {
-	z      *zero.Zero
 	frames []string
 	panels []string
 	routes map[string][]*One
-	mux    *http.ServeMux
 	client *http.Client
 }
 
-func NewFx(z *zero.Zero) Fx {
+func NewFx() Fx {
 	return &fx{
-		z:      z,
 		frames: []string{},
 		panels: []string{},
 		routes: make(map[string][]*One),
-		mux:    http.NewServeMux(),
 		client: &http.Client{Timeout: 10 * time.Second},
 	}
 }
@@ -77,7 +71,7 @@ func (f *fx) Save(key string, binary ...bool) ([]byte, error) {
 	return data, nil
 }
 
-func (f *fx) Start() {
+func (f *fx) Circuit() map[string][]byte {
 	var root bytes.Buffer
 	writer, _ := gzip.NewWriterLevel(&root, gzip.BestCompression)
 	if err := json.NewEncoder(writer).Encode([2][]string{f.frames, f.panels}); err != nil {
@@ -86,15 +80,12 @@ func (f *fx) Start() {
 	if err := writer.Close(); err != nil {
 		panic(err)
 	}
-	f.handle("/", "application/json", root.Bytes())
+	payloads := make(map[string][]byte, len(f.routes)+1)
+	payloads[""] = root.Bytes()
 	for key, payload := range f.routes {
-		// log.Printf("route: %s", key)
-		f.handle("/"+key, "application/octet-stream", encode(payload))
+		payloads[key] = encode(payload)
 	}
-
-	if err := http.ListenAndServe(":1001", f.cors(f.mux)); err != nil {
-		panic(err)
-	}
+	return payloads
 }
 
 // build merges inline style/script blocks in HTML.
@@ -128,24 +119,3 @@ var (
 	styleTag  = regexp.MustCompile(`(?s)<style>(.*?)</style>`)
 	scriptTag = regexp.MustCompile(`(?s)<script>(.*?)</script>`)
 )
-
-// handle registers an encoded wire payload and writes it from memory on every request.
-func (f *fx) handle(path, contentType string, data []byte) {
-	f.mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", contentType)
-		w.Header().Set("Content-Encoding", "gzip")
-		w.Write(data)
-	})
-}
-
-func (f *fx) cors(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", f.z.PathlessURL)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}

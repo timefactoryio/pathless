@@ -11,47 +11,24 @@ import (
 	"strings"
 )
 
-func (f *fx) Input(path string, public ...bool) ([]*One, error) {
-	var (
-		entries []*One
-		name    string
-	)
-
+func (f *fx) Input(path string) ([]*One, error) {
 	if strings.HasPrefix(path, "http://") ||
 		strings.HasPrefix(path, "https://") {
-		var err error
-		entries, err = f.url(path)
-		if err != nil {
-			return nil, err
-		}
-		name = baseName(path)
-		if name == "" {
-			return nil, fmt.Errorf("URL %q has no route name", path)
-		}
-	} else {
-		info, err := os.Stat(path)
-		if err != nil {
-			return nil, fmt.Errorf("stat %q: %w", path, err)
-		}
-
-		if info.IsDir() {
-			entries, err = readDir(path)
-			name = filepath.Base(path)
-		} else {
-			entry, readErr := readFile(path, baseName(path))
-			err = readErr
-			entries = []*One{entry}
-			name = entry.Name
-		}
-		if err != nil {
-			return nil, err
-		}
+		return f.url(path)
 	}
 
-	if len(public) > 0 && public[0] {
-		f.routes[name] = entries
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat %q: %w", path, err)
 	}
-	return entries, nil
+	if info.IsDir() {
+		return readDir(path)
+	}
+	entry, err := readFile(path, baseName(path))
+	if err != nil {
+		return nil, err
+	}
+	return []*One{entry}, nil
 }
 
 // detectType resolves an extension-based MIME type first, falling back to content

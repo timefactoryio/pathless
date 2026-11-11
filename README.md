@@ -45,7 +45,7 @@ func main() {
 ```
 
 Open `http://localhost:1000`. The circuit listens on `:1001`. Construction
-starts the shell server; `Start` starts the circuit and blocks. Register all
+renders the shell; `Start` starts both servers and blocks. Register all
 content before calling `Start`, including at least one main frame. The browser
 initializes by rendering the first main frame and does not guard an empty list.
 
@@ -61,8 +61,8 @@ type Pathless struct {
 func NewPathless(args ...string) *Pathless
 ```
 
-The embedded `fx.Fx` interface promotes `Input`, `Frame`, `Save`, and `Start`
-onto `*Pathless`. Use the constructor: a zero-value `Pathless` has no method
+The embedded `fx.Fx` interface promotes `Input`, `Frame`, `Save`, and `Circuit`
+onto `*Pathless`; `Pathless` defines `Start` itself. Use the constructor: a zero-value `Pathless` has no method
 implementation.
 
 | Arguments                              | Shell origin / circuit CORS | Circuit URL                   |
@@ -76,8 +76,8 @@ HTTP on ports `1000` and `1001`. Supply HTTPS through external infrastructure.
 In local mode, the browser substitutes its current hostname for `localhost`
 in the circuit URL.
 
-Construction renders and compresses the shell and starts its server in a
-goroutine. Non-root shell paths and nonempty queries receive a `303` redirect
+Construction renders the uncompressed shell without starting a server.
+`Start` delegates both servers to `one`. Non-root shell paths and nonempty queries receive a `303` redirect
 to `/`. Server errors panic. There is no shutdown, context, listener, port,
 or HTTP-client configuration API.
 
@@ -87,13 +87,13 @@ Exported by `github.com/timefactoryio/pathless/fx`:
 
 ```go
 type Fx interface {
-        Input(string, ...bool) ([]*One, error)
+        Input(string) ([]*One, error)
         Frame(string, ...bool) error
         Save(string, ...bool) ([]byte, error)
-        Start()
+        Circuit() map[string][]byte
 }
 
-func NewFx(z *zero.Zero) Fx
+func NewFx() Fx
 
 type One struct {
         Name string
@@ -103,8 +103,9 @@ type One struct {
 }
 ```
 
-`NewFx` wraps a constructed `Zero`, initializes collections/routing, and uses
-an HTTP client with a ten-second timeout. Normally use `NewPathless` instead.
+`NewFx` initializes content collections and uses an HTTP client with a
+ten-second timeout. It creates no mux, registers no HTTP handlers, and starts
+no servers. Normally use `NewPathless` instead.
 
 `One` represents a content node: sibling name, MIME type, bytes, and child
 nodes. A file is normally a leaf; a directory has children and empty type/data.
@@ -116,29 +117,27 @@ additional values are ignored.
 ### Input
 
 ```go
-Input(path string, public ...bool) ([]*fx.One, error)
+Input(path string) ([]*fx.One, error)
 ```
 
 Reads a local file, a directory recursively, or a URL starting with `http://`
 or `https://`.
 
-| Input     | Returned nodes                             | Public route key                                       |
-| --------- | ------------------------------------------ | ------------------------------------------------------ |
-| File      | One leaf                                   | Filename without its final extension                   |
-| Directory | Its children, including directory subtrees | Directory basename                                     |
-| URL       | Decoded payload, or one raw resource       | Original URL path basename without its final extension |
+| Input     | Returned nodes                             |
+| --------- | ------------------------------------------ |
+| File      | One leaf                                   |
+| Directory | Its children, including directory subtrees |
+| URL       | Decoded payload, or one raw resource       |
 
-`p.Input("./images", true)` retains a route named `images`, available as
-`pathless.source('images')`. Without true it only reads. Reusing a route key
-replaces its retained slice. Returned nodes and retained nodes are shared,
-not deep copies. Registration/mutation is not synchronized for concurrent use.
+`p.Input("./images")` only reads and returns content. It does not retain nodes
+or register routes. Publishing imported assets through `one` is a separate
+operation; local logo and slide helpers no longer publish their inputs implicitly.
 
 Local MIME types use the file extension with content sniffing as fallback.
 Remote responses must be `2xx`; their bytes are first tried as a gzip Pathless
 payload. Otherwise they become one node, using the final response URL for its
-name and extension/sniffed MIME type, not its `Content-Type` header. Route
-naming uses the original URL. An empty URL route name is an error even for
-nonpublic input. See the [remote import caveat](#remote-import-caveat).
+name and extension/sniffed MIME type, not its `Content-Type` header. URL inputs
+do not require a route name. See the [remote import caveat](#remote-import-caveat).
 
 Within each directory, names lose their final extension only when the shortened
 name is unique among siblings. This also applies to directory node names.
@@ -150,9 +149,7 @@ sibling names. Matching entries come first in listed order, duplicate/unknown
 names are ignored, and unlisted entries retain their relative order afterward.
 The sequence entry is consumed. Each directory is processed independently.
 
-Failures generally return errors with source context. Current exception: if
-a single-file read fails after a successful `os.Stat`, `Input` can panic by
-accessing the failed read's nil result before checking the error.
+Read failures return errors with source context.
 
 ### Frame
 
@@ -185,7 +182,8 @@ document and origin; only load trusted code.
 Save(key string, binary ...bool) ([]byte, error)
 ```
 
-Returns gzip wire bytes for a route previously registered by `Input(..., true)`.
+Returns gzip wire bytes for a key in the retained route store. `Input` no longer
+populates that store; explicit resource publication still needs separate wiring.
 Use the route key without a leading slash. Unknown keys return an error.
 With true it also writes a file named exactly `key`, creating it with mode
 `0644` or overwriting it. Parent directories are not created; write errors
@@ -194,17 +192,30 @@ are returned. It does not export the whole application or its frame collection.
 Saved payloads can be hosted remotely for another instance's `Input`. Local
 file input does not attempt payload decoding.
 
+### Circuit
+
+```go
+Circuit() map[string][]byte
+```
+
+Returns a snapshot of gzip-encoded payloads. The empty key contains JSON
+`[frames, panels]`; other keys contain public resource payloads in the binary
+wire format. Keys are content names, not URL paths. `one` adds leading slashes
+when registering HTTP handlers.
+
 ### Start
 
 ```go
 Start()
 ```
 
-Encodes the bootstrap and all public routes, registers handlers, and serves
-the circuit on `:1001`. It blocks and panics on server failure. Call once,
-after registration. Served bytes are startup snapshots, not live resources.
+`Pathless.Start` passes the rendered shell and `Circuit()` snapshot to `one`,
+which registers handlers and serves the shell on `:1000` and circuit on `:1001`.
+It blocks and panics on server failure. Call once, after content registration.
+Served bytes are startup snapshots, not live resources.
 
-Responses use `application/octet-stream` and `Content-Encoding: gzip`.
+The circuit root uses `application/json`; public resources use
+`application/octet-stream`. Both use `Content-Encoding: gzip`.
 CORS advertises `GET, OPTIONS`, allows the configured shell origin (or `*`
 locally), and answers `OPTIONS` with `204`. Other methods are not rejected.
 CORS is not authentication. `http.ServeMux` root catch-all semantics apply:
@@ -215,20 +226,36 @@ unknown paths can return the bootstrap instead of `404`.
 Exported by `github.com/timefactoryio/pathless/zero`:
 
 ```go
-type Zero struct {
-        PathlessURL string
-        // Unexported server configuration.
-}
-
-func NewZero(args ...string) *Zero
+func Origin(circuitURL string) []byte
 ```
 
-`NewZero` configures origins using the same constructor arguments, embeds the
-shell, Universe, and Input templates into a single gzip HTML payload, and
-starts the shell server. Rebuild the Go application after editing templates.
-`PathlessURL` supplies circuit CORS; changing it does not
-rerender the already-built shell. Pass the instance to `fx.NewFx` for low-level
-composition. These are construction facilities, not extra registration APIs.
+`Origin` renders the supplied circuit URL, shell, Pathless script, and Input
+script into uncompressed HTML bytes. It owns no HTTP behavior. Rebuild the Go
+application after editing embedded assets.
+
+### One
+
+Exported by `github.com/timefactoryio/pathless/one`:
+
+```go
+type One struct {
+        Pathless *http.ServeMux
+        Circuit  *http.ServeMux
+}
+
+func NewOne(origin []byte, circuit map[string][]byte, pathlessURL string) *One
+```
+
+`NewOne` registers shell redirects, content types, circuit gzip headers, and
+CORS on its two muxes. Construction starts no listeners. Use the muxes with
+your own HTTP servers, or call `Start` to listen on `:1000` and `:1001`.
+
+```go
+content := fx.NewFx()
+content.Frame("<main>Hello</main>")
+server := one.NewOne(zero.Origin("http://localhost:1001"), content.Circuit(), "*")
+server.Start()
+```
 
 ## Browser API
 
@@ -492,7 +519,8 @@ positional nodes:
 
 Their other fields are empty. Runtime HTML is not in this bootstrap.
 `source('')` loads it; normal frame code uses named public resource routes.
-HTTP responses and saved payloads are gzip-compressed. Browser HTTP handling
+Circuit HTTP responses and saved payloads are gzip-compressed; the shell is
+plain HTML. Browser HTTP handling
 decompresses responses before `response.bytes()` and `Pathless.decode` run.
 Compression is unconditional, not negotiated per request.
 
@@ -542,13 +570,16 @@ decodes saved payloads automatically.
 
 ## Sources
 
-| Source                                   | Responsibility                                    |
-| ---------------------------------------- | ------------------------------------------------- |
-| [pathless.go](pathless.go)               | Public Go constructor and embedded `fx.Fx`.       |
-| [fx/fx.go](fx/fx.go)                     | Registration, HTML building, and circuit serving. |
-| [fx/input.go](fx/input.go)               | Local/remote input, naming, and sequencing.       |
-| [fx/output.go](fx/output.go)             | `One` and the private wire encoder/decoder.       |
-| [zero/zero.go](zero/zero.go)             | Template assembly, shell server, and origins.     |
-| [zero/zero.html](zero/zero.html)         | Shell CSS, resource loading, and HTML execution.  |
-| [zero/universe.html](zero/universe.html) | Space state, layout, focus, and navigation.       |
-| [zero/input.html](zero/input.html)       | Click, keyboard, and pointer dispatch.            |
+| Source                                   | Responsibility                                        |
+| ---------------------------------------- | ----------------------------------------------------- |
+| [pathless.go](pathless.go)               | Public Go constructor and embedded `fx.Fx`.           |
+| [fx/fx.go](fx/fx.go)                     | Content collections, HTML building, circuit payloads. |
+| [fx/input.go](fx/input.go)               | Local/remote input, naming, and sequencing.           |
+| [fx/output.go](fx/output.go)             | `One` and the private wire encoder/decoder.           |
+| [zero/zero.go](zero/zero.go)             | Embedded asset assembly and HTML rendering.           |
+| [one/one.go](one/one.go)                 | Mux construction and server startup.                  |
+| [one/zero.go](one/zero.go)               | Shell handler and redirects.                          |
+| [one/fx.go](one/fx.go)                   | Circuit HTTP registration, headers, and CORS.         |
+| [zero/zero.html](zero/zero.html)         | Shell CSS, resource loading, and HTML execution.      |
+| [zero/universe.html](zero/universe.html) | Space state, layout, focus, and navigation.           |
+| [zero/input.html](zero/input.html)       | Click, keyboard, and pointer dispatch.                |

@@ -16,10 +16,11 @@ This is a **spatial, stateful runtime**: content changes within independently na
 3. **The shell supplies geometry and default controls.** [zero/zero.html](zero/zero.html) defines the four space containers, flex layouts, bottom panel region, and startup sequence. Application-wide input bindings are registered here rather than inside Input.
 
 **Serving and Startup**
-- The Go entry point, [pathless.go](pathless.go), embeds `fx.Fx`, exposing `Input`, `Frame`, `Save`, and `Start` on `Pathless`.
-- [zero/zero.go](zero/zero.go) embeds the HTML shell and both JavaScript files, renders them into one gzip-compressed HTML payload, and starts the shell server on `:1000` during construction.
-- With no arguments, `NewZero` selects `http://localhost:1001` as the circuit and `*` as the allowed shell origin. Two arguments specify shell and circuit hosts, each prefixed with `https://`. The browser replaces `localhost` in the circuit URL with its current hostname.
-- [fx/fx.go](fx/fx.go) registers frames, panels, and public resource routes. `Start` serves the circuit on `:1001`; its root response is JSON containing `[frames, panels]`, where each collection contains HTML strings.
+- The Go entry point, [pathless.go](pathless.go), embeds `fx.Fx`, exposing `Input`, `Frame`, `Save`, and `Circuit` on `Pathless`. Its own `Start` method assembles the HTTP layer after content registration.
+- [zero/zero.go](zero/zero.go) embeds the HTML shell and both JavaScript files. `Origin(circuitURL string)` renders the supplied circuit URL into the shell and returns uncompressed HTML bytes. Zero does not create an HTTP handler or open a network listener.
+- `NewPathless` selects `http://localhost:1001` as the circuit and `*` as the allowed shell origin with no arguments. Two arguments specify shell and circuit hosts, each prefixed with `https://`; the allowed origin is passed to `one` for CORS. The browser replaces `localhost` in the circuit URL with its current hostname.
+- [fx/fx.go](fx/fx.go) owns content import, frame/panel collections, and serialization. `Circuit()` returns a snapshot of gzip-encoded payloads: the empty key contains JSON `[frames, panels]`, and the remaining keys contain public resource payloads. It owns no mux, HTTP registration, or server.
+- [one/one.go](one/one.go) owns the shell and circuit muxes. `NewOne(origin, circuit, pathlessURL)` registers the supplied payloads and HTTP behavior; `Start` serves the shell on `:1000` and blocks serving the circuit on `:1001`. The shell redirects non-root paths and nonempty queries to `/`; circuit responses retain gzip headers and CORS.
 - On `DOMContentLoaded`, the browser creates `window.pathless`, constructs Input, registers default controls, then calls `pathless.init()`. Helpers are therefore available before any frame scripts execute.
 - Initialization assigns the main collection to the first three spaces and the panel collection to the fourth, then mounts index zero in every space with available content, including hidden spaces. Initially only the first main space is visible. Empty collections are left unmounted.
 
