@@ -12,12 +12,12 @@ import (
 var origin string
 
 //go:embed pathless.js
-var pathlessScript template.JS
+var pathless template.JS
 
 //go:embed input.js
-var inputScript template.JS
+var input template.JS
 
-var originTemplate = template.Must(template.New("").Parse(origin))
+var zero = template.Must(template.New("").Parse(origin))
 
 type Zero struct {
 	Origin []byte
@@ -33,13 +33,13 @@ func NewZero(circuitURL string, compressed ...bool) *Zero {
 			panic(err)
 		}
 	} else {
-		buf.Grow(len(origin) + len(pathlessScript) + len(inputScript) + len(circuitURL))
+		buf.Grow(len(origin) + len(pathless) + len(input) + len(circuitURL))
 	}
-	if err := originTemplate.Execute(writer, struct {
+	if err := zero.Execute(writer, struct {
 		CIRCUIT  string
 		PATHLESS template.JS
 		INPUT    template.JS
-	}{circuitURL, pathlessScript, inputScript}); err != nil {
+	}{circuitURL, pathless, input}); err != nil {
 		panic(err)
 	}
 	if compressor, ok := writer.(*gzip.Writer); ok {

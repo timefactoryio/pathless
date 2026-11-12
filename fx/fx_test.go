@@ -30,6 +30,7 @@ func TestInput(t *testing.T) {
 	root := writeFiles(t, map[string]string{
 		"sequence":          "slides\nintro\nslides\nunknown\n",
 		"intro.txt":         "intro",
+		".hidden.txt":       "hidden",
 		"pair.md":           "markdown",
 		"pair.txt":          "text",
 		"slides/sequence":   "second\nfirst\n",
@@ -45,12 +46,12 @@ func TestInput(t *testing.T) {
 	for _, entry := range entries {
 		names = append(names, entry.Name)
 	}
-	want := []string{"slides/second", "slides/first", "intro", "pair.md", "pair.txt"}
+	want := []string{"slides/second", "slides/first", "intro", ".hidden.txt", "pair.md", "pair.txt"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("names = %v, want %v", names, want)
 	}
 	single, err := content.Input(filepath.Join(root, "intro.txt"))
-	expected := N{{Name: "intro", Type: mime.TypeByExtension(".txt"), Data: []byte("intro")}}
+	expected := N{{Name: "intro.txt", Type: mime.TypeByExtension(".txt"), Data: []byte("intro")}}
 	if err != nil || !reflect.DeepEqual(single, expected) {
 		t.Fatalf("file = %#v, error = %v", single, err)
 	}
@@ -71,7 +72,46 @@ func TestInput(t *testing.T) {
 	}
 }
 
-func TestInputAndLoadHTTP(t *testing.T) {
+func TestInputNames(t *testing.T) {
+	files := map[string]string{
+		"photo.png":      "data",
+		"archive.tar.gz": "data",
+		".hidden.txt":    "data",
+		"README":         "data",
+	}
+	root := writeFiles(t, files)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("data"))
+	}))
+	defer server.Close()
+	content := NewFx()
+	for source := range files {
+		t.Run(source, func(t *testing.T) {
+			sourceURL := server.URL + "/" + source + "?version=1"
+			for _, test := range []struct {
+				input  func(string) (N, error)
+				source string
+				want   string
+			}{
+				{content.Input, filepath.Join(root, source), source},
+				{content.InputURL, sourceURL, sourceURL},
+			} {
+				got, err := test.input(test.source)
+				if err != nil || len(got) != 1 || got[0].Name != test.want {
+					t.Fatalf("%q: resources = %#v, error = %v; want name %q", test.source, got, err, test.want)
+				}
+				if source == "README" && got[0].Type != "text/plain; charset=utf-8" {
+					t.Fatalf("extensionless resource type = %q", got[0].Type)
+				}
+			}
+		})
+	}
+	if got, err := content.InputURL(server.URL); err != nil || len(got) != 1 || got[0].Name != server.URL {
+		t.Fatalf("root URL: resources = %#v, error = %v", got, err)
+	}
+}
+
+func TestInputURLAndLoad(t *testing.T) {
 	content := NewFx()
 	entries := N{{Name: "one", Type: "text/plain", Data: []byte("first")}, {Name: "two", Data: []byte{0, 255}}}
 	payload := content.Encode(entries[:1], N{}, entries[1:])
@@ -83,6 +123,18 @@ func TestInputAndLoadHTTP(t *testing.T) {
 			http.Redirect(w, r, "/payload.txt", http.StatusFound)
 		case "/raw.txt":
 			w.Write([]byte("raw"))
+		case "/typed.txt", "/typed":
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Write([]byte("raw"))
+		case "/no-header.txt":
+			w.Header()["Content-Type"] = nil
+			w.Write([]byte("raw"))
+		case "/bad-header.txt":
+			w.Header().Set("Content-Type", "text/html; invalid")
+			w.Write([]byte("raw"))
+		case "/sniff":
+			w.Header()["Content-Type"] = nil
+			w.Write([]byte("<html></html>"))
 		case "/empty":
 			w.Write([]byte{0})
 		case "/invalid":
@@ -95,7 +147,7 @@ func TestInputAndLoadHTTP(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	rawPayload := N{{Name: "payload", Type: mime.TypeByExtension(".txt"), Data: payload}}
+	rawPayload := N{{Name: server.URL + "/payload.txt", Type: "application/octet-stream", Data: payload}}
 	for _, test := range []struct {
 		name    string
 		fetch   func(string) (N, error)
@@ -103,9 +155,15 @@ func TestInputAndLoadHTTP(t *testing.T) {
 		want    N
 		wantErr bool
 	}{
-		{"input/raw", content.Input, "/raw.txt", N{{Name: "raw", Type: mime.TypeByExtension(".txt"), Data: []byte("raw")}}, false},
-		{"input/encoded", content.Input, "/payload.txt", rawPayload, false},
-		{"input/redirect", content.Input, "/redirect", rawPayload, false},
+		{"input-url/raw", content.InputURL, "/raw.txt", N{{Name: server.URL + "/raw.txt", Type: mime.TypeByExtension(".txt"), Data: []byte("raw")}}, false},
+		{"input-url/header", content.InputURL, "/typed.txt", N{{Name: server.URL + "/typed.txt", Type: "application/json; charset=utf-8", Data: []byte("raw")}}, false},
+		{"input-url/extensionless", content.InputURL, "/typed", N{{Name: server.URL + "/typed", Type: "application/json; charset=utf-8", Data: []byte("raw")}}, false},
+		{"input-url/no-header", content.InputURL, "/no-header.txt", N{{Name: server.URL + "/no-header.txt", Type: mime.TypeByExtension(".txt"), Data: []byte("raw")}}, false},
+		{"input-url/bad-header", content.InputURL, "/bad-header.txt", N{{Name: server.URL + "/bad-header.txt", Type: mime.TypeByExtension(".txt"), Data: []byte("raw")}}, false},
+		{"input-url/sniff", content.InputURL, "/sniff", N{{Name: server.URL + "/sniff", Type: "text/html; charset=utf-8", Data: []byte("<html></html>")}}, false},
+		{"input-url/encoded", content.InputURL, "/payload.txt", rawPayload, false},
+		{"input-url/redirect", content.InputURL, "/redirect", N{{Name: server.URL + "/redirect", Type: "application/octet-stream", Data: payload}}, false},
+		{"input/local-only", content.Input, "/payload.txt", nil, true},
 		{"load/encoded", content.Load, "/payload.txt", entries, false},
 		{"load/redirect", content.Load, "/redirect", entries, false},
 		{"load/empty", content.Load, "/empty", N{}, false},
@@ -113,8 +171,8 @@ func TestInputAndLoadHTTP(t *testing.T) {
 		{"load/invalid", content.Load, "/invalid", nil, true},
 		{"load/status", content.Load, "/missing", nil, true},
 		{"load/read", content.Load, "/short", nil, true},
-		{"input/status", content.Input, "/missing", nil, true},
-		{"input/read", content.Input, "/short", nil, true},
+		{"input-url/status", content.InputURL, "/missing", nil, true},
+		{"input-url/read", content.InputURL, "/short", nil, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := test.fetch(server.URL + test.path)

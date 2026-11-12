@@ -68,20 +68,34 @@ node, replacing type/data but sharing children. Mutations are not synchronized.
 
 ### Input Helpers
 
+The private `dir` helper stores a manifest such as
+`[[null,"index.html"],["assets","logo.svg"],["assets/icons","close.svg"]]`
+in the first resource's data. Each record starts with its directory's
+root-relative, slash-separated path; `null` identifies the root. The remaining
+elements are immediate filenames. The manifest is built directly from
+`fs.WalkDir` entries, then files are loaded in manifest order. Records and file
+resources remain root-first, with files and child directories each visited in
+alphabetical order.
+Empty directories retain a path-only record; an empty root produces `[[null]]`.
+The following file resources keep their extensions and use root-relative names,
+such as `assets/logo.svg`. The legacy `InputDir` pipeline remains separate.
+
 | Helper                              | Role                                                                                                            |
 | ----------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `(*fx).url(source)`                 | GET, reject non-2xx, read bytes, try `decode`, otherwise return a raw leaf.                                     |
 | `detectType(path, data)`            | Extension-based MIME resolution, then content sniffing.                                                         |
 | `(*fx).InputDir(path)`              | Read a directory listing and call `processFiles`; separate from file/URL `Input`.                               |
+| `(*fx).dir(path)`                   | Return a root `dir` resource containing a JSON manifest, followed by recursively loaded files with root-relative names. |
 | `(*fx).processFiles(path, entries)` | Recurse through `InputDir`, read files, normalize and sequence siblings, then flatten.                          |
-| `readFile(path, name)`              | Read bytes and construct a typed leaf with the supplied name.                                                   |
+| `(*fx).file(path)`                  | Read bytes and construct a typed resource using the filename, including its extension.                         |
 | `stripExtensions(entries)`          | Count shortened candidates, mutate only unique candidates.                                                      |
 | `sequence(entries)`                 | Consume the normalized `sequence` node and order siblings.                                                      |
-| `baseName(source)`                  | Extract URL path if applicable, take basename, preserve dot-prefixed names, otherwise drop the final extension. |
 
-`baseName` returns empty for `.` or `/`. Sibling normalization includes
+`Input` preserves the filename and extension. `InputURL` preserves the exact
+supplied URL as its name, including host and query, even after redirects.
+Sibling normalization includes
 directories, is local to each directory, and starts from `os.ReadDir` order.
-A direct file input instead gets its name from `baseName` immediately.
+A direct file input preserves its original filename.
 
 `sequence` trims overall data and individual lines, ignores unknown names,
 and tracks node identity to suppress duplicate listed entries. Unlisted nodes

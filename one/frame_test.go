@@ -3,6 +3,8 @@ package one
 import (
 	"bytes"
 	"mime"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +15,15 @@ import (
 
 func TestRegistration(t *testing.T) {
 	root := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		typ := mime.TypeByExtension(".html")
+		if r.URL.Path == "/invalid" {
+			typ = "text/plain"
+		}
+		w.Header().Set("Content-Type", typ)
+		w.Write([]byte("<main>Remote</main>"))
+	}))
+	defer server.Close()
 	for name, data := range map[string]string{
 		"first.html":  "<main>First</main>",
 		"second.html": "<aside>Second</aside>",
@@ -29,20 +40,21 @@ func TestRegistration(t *testing.T) {
 			if method == "Panel" {
 				register, target, other = content.Panel, &content.panels, &content.frames
 			}
-			for _, name := range []string{"second.html", "first.html"} {
-				if err := register(filepath.Join(root, name)); err != nil {
+			for _, source := range []string{filepath.Join(root, "second.html"), filepath.Join(root, "first.html"), server.URL + "/remote"} {
+				if err := register(source); err != nil {
 					t.Fatal(err)
 				}
 			}
 			typ := mime.TypeByExtension(".html")
 			want := fx.N{
-				{Name: "second", Type: typ, Data: []byte("<aside>Second</aside>")},
-				{Name: "first", Type: typ, Data: []byte("<main>First</main>")},
+				{Name: "second.html", Type: typ, Data: []byte("<aside>Second</aside>")},
+				{Name: "first.html", Type: typ, Data: []byte("<main>First</main>")},
+				{Name: server.URL + "/remote", Type: typ, Data: []byte("<main>Remote</main>")},
 			}
 			if !reflect.DeepEqual(*target, want) || len(*other) != 0 {
 				t.Fatalf("registration routed or ordered entries incorrectly: %#v", *target)
 			}
-			for _, source := range []string{root, filepath.Join(root, "invalid.txt")} {
+			for _, source := range []string{root, filepath.Join(root, "invalid.txt"), server.URL + "/invalid"} {
 				if err := register(source); err == nil {
 					t.Fatalf("accepted invalid input %q", source)
 				}

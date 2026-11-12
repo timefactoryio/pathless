@@ -1,11 +1,15 @@
 package fx
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+type Manifest [][]*string
 
 func (f *fx) InputDir(path string) (N, error) {
 	entries, err := os.ReadDir(path)
@@ -14,6 +18,60 @@ func (f *fx) InputDir(path string) (N, error) {
 	}
 
 	return f.processFiles(path, entries)
+}
+
+func (f *fx) dir(path string) (N, error) {
+	manifest := Manifest{}
+	directories := make(map[string]int)
+	err := fs.WalkDir(os.DirFS(path), ".", func(relative string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return fmt.Errorf("walk dir %q: %w", filepath.Join(path, filepath.FromSlash(relative)), err)
+		}
+		if entry.IsDir() {
+			record := []*string{nil}
+			if relative != "." {
+				record[0] = &relative
+			}
+			directories[relative] = len(manifest)
+			manifest = append(manifest, record)
+			return nil
+		}
+		if relative == "." {
+			return fmt.Errorf("read dir %q: not a directory", path)
+		}
+		index := directories[filepath.ToSlash(filepath.Dir(relative))]
+		name := entry.Name()
+		manifest[index] = append(manifest[index], &name)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		return nil, fmt.Errorf("marshal dir %q: %w", path, err)
+	}
+	results := N{{
+		Name: filepath.Base(path),
+		Type: "dir",
+		Data: data,
+	}}
+	for _, record := range manifest {
+		var prefix string
+		if record[0] != nil {
+			prefix = filepath.FromSlash(*record[0])
+		}
+		for _, name := range record[1:] {
+			relative := filepath.Join(prefix, *name)
+			file, err := f.file(filepath.Join(path, relative))
+			if err != nil {
+				return nil, err
+			}
+			file.Name = filepath.ToSlash(relative)
+			results = append(results, file)
+		}
+	}
+	return results, nil
 }
 
 // processFiles normalizes and orders siblings before flattening their contents.
@@ -32,7 +90,7 @@ func (f *fx) processFiles(path string, entries []os.DirEntry) (N, error) {
 			results = append(results, directory)
 			continue
 		}
-		file, err := readFile(filepath.Join(path, name), name)
+		file, err := f.file(filepath.Join(path, name))
 		if err != nil {
 			return nil, err
 		}
@@ -52,15 +110,21 @@ func (f *fx) processFiles(path string, entries []os.DirEntry) (N, error) {
 	return flat, nil
 }
 
-// stripExtensions shortens each entry's Name to its baseName, except where that would
+// stripExtensions removes the final extension except on dot-prefixed names or where that would
 // collide with another entry's shortened name — those entries keep their full name.
 func stripExtensions(entries N) N {
 	counts := make(map[string]int, len(entries))
-	for _, entry := range entries {
-		counts[baseName(entry.Name)]++
+	candidates := make([]string, len(entries))
+	for i, entry := range entries {
+		name := entry.Name
+		if !strings.HasPrefix(name, ".") {
+			name = strings.TrimSuffix(name, filepath.Ext(name))
+		}
+		candidates[i] = name
+		counts[name]++
 	}
-	for _, entry := range entries {
-		if candidate := baseName(entry.Name); counts[candidate] == 1 {
+	for i, entry := range entries {
+		if candidate := candidates[i]; counts[candidate] == 1 {
 			entry.Name = candidate
 		}
 	}

@@ -62,7 +62,7 @@ func NewPathless(args ...string) *Pathless
 ```
 
 The embedded `*one.One` promotes `Frame`, `Panel`, and `Frames`, along with
-`Input`, `InputDir`, `Load`, `Encode`, and `Decode` through its embedded `fx.Fx`.
+`Input`, `InputURL`, `InputDir`, `Load`, `Encode`, and `Decode` through its embedded `fx.Fx`.
 `Pathless` defines `Start` itself and starts that same `One` instance.
 Use the constructor: a zero-value `Pathless` has no method
 implementation.
@@ -90,6 +90,7 @@ Exported by `github.com/timefactoryio/pathless/fx`:
 ```go
 type Fx interface {
         Input(string) (N, error)
+        InputURL(string) (N, error)
         InputDir(string) (N, error)
         Load(string) (N, error)
         Encode(...N) []byte
@@ -129,22 +130,28 @@ additional values are ignored.
 Input(path string) (fx.N, error)
 ```
 
-Reads a local file or a URL starting with `http://`
-or `https://`.
-
-| Input     | Returned resources                           |
-| --------- | -------------------------------------------- |
-| File      | One resource                                 |
-| URL       | One raw resource                            |
+Reads one local file into one resource. URLs are not fetched; use `InputURL`.
+The resource name preserves the filename, including its extension.
 
 `p.Input("./logo.png")` only reads and returns content. It does not retain resources
 or register routes. Publishing imported assets through `one` is a separate
 operation; local logo and slide helpers no longer publish their inputs implicitly.
 
 Local MIME types use the file extension with content sniffing as fallback.
-Remote responses must be `2xx`; their bytes become one raw resource, using the final response URL for its
-name and extension/sniffed MIME type, not its `Content-Type` header. URL inputs
-do not require a route name. `Input` never decodes payloads; use `Load` for encoded resources.
+
+### InputURL
+
+```go
+InputURL(source string) (N, error)
+```
+
+Fetches an HTTP(S) URL into one raw resource without decoding its bytes.
+Remote responses must be `2xx`; their bytes become one raw resource whose name
+is the exact supplied URL, including host and query, even after redirects.
+A valid response `Content-Type` supplies the MIME type, including parameters;
+missing or malformed headers fall back to the final URL's extension and then content sniffing. URL inputs
+do not require a route name. Use `Load` to fetch and decode encoded resources;
+it reuses `InputURL` for the HTTP request.
 
 ### InputDir
 
@@ -189,7 +196,7 @@ Frame(source string) error
 Panel(source string) error
 ```
 
-Registers a local file or raw URL resource returned by `Input(source)` as a frame
+Registers a local file from `Input(source)` or raw URL resource from `InputURL(source)` as a frame
 or panel, in registration order. Directory paths are not accepted.
 These methods belong to `one.One`, which owns the frame and panel collections;
 they are also promoted onto `Pathless`. The `fx` package only sources and encodes resources.
@@ -597,7 +604,7 @@ reading consecutive counted sequences until all bytes are consumed and
 aggregating their resources in order. Sequence boundaries are not retained in
 the result; empty bytes and empty sequences contribute no resources. Malformed input,
 including an incomplete later collection, returns an error without partial results.
-`Load` fetches a URL and returns the decoded `N` directly; `Input` sources raw content.
+`Load` fetches a URL and returns the decoded `N` directly; `Input` and `InputURL` source raw content.
 Decoding returns an error for malformed input and copies fields independently of
 the input buffer. Collections passed to `Encode` must contain non-nil resource pointers.
 This replaces the previous recursive format: saved payloads must be regenerated
@@ -608,7 +615,7 @@ and external decoders updated before exchanging the new records.
 `Load` decodes the fetched response-body bytes. Go's default HTTP
 transport automatically decompresses responses marked `Content-Encoding: gzip`.
 Serve raw wire bytes, or mark gzip-compressed responses with that header;
-unmarked gzip bytes fail decoding. `Input` never decodes
+unmarked gzip bytes fail decoding. `Input` and `InputURL` never decode
 saved payloads automatically.
 
 ## Boundaries
