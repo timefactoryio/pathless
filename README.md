@@ -1,6 +1,6 @@
 # pathless
 
-Pathless serves a pathless browser shell and a circuit of typed content trees.
+Pathless serves a pathless browser shell and a circuit of typed resources.
 Frames occupy up to three observable spaces; panels occupy a separate region.
 Templates and application-specific content live outside this module.
 
@@ -55,14 +55,16 @@ initializes by rendering the first main frame and does not guard an empty list.
 
 ```go
 type Pathless struct {
-        fx.Fx
+        *one.One
 }
 
 func NewPathless(args ...string) *Pathless
 ```
 
-The embedded `fx.Fx` interface promotes `Input`, `Frame`, `Save`, and `Circuit`
-onto `*Pathless`; `Pathless` defines `Start` itself. Use the constructor: a zero-value `Pathless` has no method
+The embedded `*one.One` promotes `Frame`, `Panel`, and `Frames`, along with
+`Input`, `InputDir`, `Load`, `Encode`, and `Decode` through its embedded `fx.Fx`.
+`Pathless` defines `Start` itself and starts that same `One` instance.
+Use the constructor: a zero-value `Pathless` has no method
 implementation.
 
 | Arguments                              | Shell origin / circuit CORS | Circuit URL                   |
@@ -87,10 +89,11 @@ Exported by `github.com/timefactoryio/pathless/fx`:
 
 ```go
 type Fx interface {
-        Input(string) ([]*One, error)
-        Frame(string, ...bool) error
-        Save(string, ...bool) ([]byte, error)
-        Circuit() map[string][]byte
+        Input(string) (N, error)
+        InputDir(string) (N, error)
+        Load(string) (N, error)
+        Encode(...N) []byte
+        Decode([]byte) (N, error)
 }
 
 func NewFx() Fx
@@ -99,17 +102,23 @@ type One struct {
         Name string
         Type string
         Data []byte
-        Ones []*One
 }
+
+type N []*One
+
 ```
 
-`NewFx` initializes content collections and uses an HTTP client with a
+`NewFx` initializes an HTTP client with a
 ten-second timeout. It creates no mux, registers no HTTP handlers, and starts
 no servers. Normally use `NewPathless` instead.
 
-`One` represents a content node: sibling name, MIME type, bytes, and child
-nodes. A file is normally a leaf; a directory has children and empty type/data.
-The representation allows both data and children. Payloads are slices of nodes.
+`One` represents one resource: name, MIME type, and bytes. `N` is a flat
+collection of resource pointers. Directories are not emitted as records;
+nested resources use relative names such as `slides/first`.
+
+`one.One.Frames()` returns `Encode(frames, panels)`: two consecutive collections, frames
+first and panels second. Each has its own entry count, including zero for an
+empty collection, preserving the boundary without modifying either collection.
 
 Each variadic boolean below defaults to false. Only its first value is used;
 additional values are ignored.
@@ -117,56 +126,82 @@ additional values are ignored.
 ### Input
 
 ```go
-Input(path string) ([]*fx.One, error)
+Input(path string) (fx.N, error)
 ```
 
-Reads a local file, a directory recursively, or a URL starting with `http://`
+Reads a local file or a URL starting with `http://`
 or `https://`.
 
-| Input     | Returned nodes                             |
-| --------- | ------------------------------------------ |
-| File      | One leaf                                   |
-| Directory | Its children, including directory subtrees |
-| URL       | Decoded payload, or one raw resource       |
+| Input     | Returned resources                           |
+| --------- | -------------------------------------------- |
+| File      | One resource                                 |
+| URL       | One raw resource                            |
 
-`p.Input("./images")` only reads and returns content. It does not retain nodes
+`p.Input("./logo.png")` only reads and returns content. It does not retain resources
 or register routes. Publishing imported assets through `one` is a separate
 operation; local logo and slide helpers no longer publish their inputs implicitly.
 
 Local MIME types use the file extension with content sniffing as fallback.
-Remote responses must be `2xx`; their bytes are first tried as a gzip Pathless
-payload. Otherwise they become one node, using the final response URL for its
+Remote responses must be `2xx`; their bytes become one raw resource, using the final response URL for its
 name and extension/sniffed MIME type, not its `Content-Type` header. URL inputs
-do not require a route name. See the [remote import caveat](#remote-import-caveat).
+do not require a route name. `Input` never decodes payloads; use `Load` for encoded resources.
+
+### InputDir
+
+```go
+InputDir(path string) (N, error)
+```
+
+Reads a local directory recursively into a flat collection with relative names.
+Directory traversal is explicit: `Input` rejects directories, and `InputDir`
+rejects files. It does not retain resources or register routes.
 
 Within each directory, names lose their final extension only when the shortened
-name is unique among siblings. This also applies to directory node names.
+name is unique among siblings. This also applies to directory path segments.
 Dot-prefixed names retain their extensions; dotfiles are not filtered.
 Entries initially follow `os.ReadDir` filename order.
 
 A normalized entry named `sequence` supplies newline-separated normalized
 sibling names. Matching entries come first in listed order, duplicate/unknown
 names are ignored, and unlisted entries retain their relative order afterward.
-The sequence entry is consumed. Each directory is processed independently.
+The sequence entry is consumed. Each directory is processed independently
+before its contents are flattened. Sequencing a directory moves its files as
+a group; empty directories produce no resources.
 
 Read failures return errors with source context.
+
+### Load
+
+```go
+Load(url string) (N, error)
+```
+
+Fetches an encoded payload from an HTTP(S) URL and returns its decoded resources
+in order. Works with public or presigned S3 URLs and other HTTP object stores;
+no AWS-specific configuration is required. HTTP, read, and decoding failures
+return errors with URL context, without falling back to a raw resource.
+It does not register or retain the loaded resources.
 
 ### Frame
 
 ```go
-Frame(source string, panel ...bool) error
+Frame(source string) error
+Panel(source string) error
 ```
 
-Registers a frame, or a panel when true, in registration order. Trimmed source
-starting with `<` is literal HTML; otherwise `Input(source)` must return
-exactly one node. Zero/multiple nodes return an error. Data is processed as
-HTML and the output type becomes `text/html`, without MIME validation.
+Registers a local file or raw URL resource returned by `Input(source)` as a frame
+or panel, in registration order. Directory paths are not accepted.
+These methods belong to `one.One`, which owns the frame and panel collections;
+they are also promoted onto `Pathless`. The `fx` package only sources and encodes resources.
+Every entry's MIME type must be
+`text/html` (parameters such as `charset=utf-8` are allowed); other or malformed
+types return an error without registering any entries from that call.
 
 ```go
 if err := p.Frame("./home.html"); err != nil {
         log.Fatal(err)
 }
-if err := p.Frame(`<nav>Controls</nav>`, true); err != nil {
+if err := p.Panel("./controls.html"); err != nil {
         log.Fatal(err)
 }
 ```
@@ -189,7 +224,7 @@ With true it also writes a file named exactly `key`, creating it with mode
 `0644` or overwriting it. Parent directories are not created; write errors
 are returned. It does not export the whole application or its frame collection.
 
-Saved payloads can be hosted remotely for another instance's `Input`. Local
+Saved payloads can be hosted remotely for another instance's `Load`. Local
 file input does not attempt payload decoding.
 
 ### Circuit
@@ -226,11 +261,21 @@ unknown paths can return the bootstrap instead of `404`.
 Exported by `github.com/timefactoryio/pathless/zero`:
 
 ```go
-func Origin(circuitURL string) []byte
+type Zero struct {
+        Origin []byte
+}
+
+func NewZero(circuitURL string, compressed ...bool) *Zero
 ```
 
-`Origin` renders the supplied circuit URL, shell, Pathless script, and Input
-script into uncompressed HTML bytes. It owns no HTTP behavior. Rebuild the Go
+`NewZero` uses a shared, pre-parsed template to
+render the supplied circuit URL, shell, Pathless script, and Input script once
+into the exported `Origin` bytes. Passing `true` gzip-compresses those bytes at
+`gzip.BestCompression`;
+omitting the flag or passing `false` keeps raw HTML. Only the first flag is used.
+When serving compressed bytes, the HTTP layer must set `Content-Encoding: gzip`.
+It provides no HTTP handling and starts no
+server or listener. Rebuild the Go
 application after editing embedded assets.
 
 ### One
@@ -239,22 +284,29 @@ Exported by `github.com/timefactoryio/pathless/one`:
 
 ```go
 type One struct {
+        fx.Fx
         Pathless *http.ServeMux
         Circuit  *http.ServeMux
 }
 
-func NewOne(origin []byte, circuit map[string][]byte, pathlessURL string) *One
+func NewOne() *One
+
+func (*One) Frame(string) error
+func (*One) Panel(string) error
+func (*One) Frames() []byte
 ```
 
-`NewOne` registers shell redirects, content types, circuit gzip headers, and
-CORS on its two muxes. Construction starts no listeners. Use the muxes with
+`NewOne` initializes `fx.Fx`, empty frame/panel collections, and two muxes.
+Construction starts no listeners and registers no handlers. Use the muxes with
 your own HTTP servers, or call `Start` to listen on `:1000` and `:1001`.
 
 ```go
-content := fx.NewFx()
-content.Frame("<main>Hello</main>")
-server := one.NewOne(zero.Origin("http://localhost:1001"), content.Circuit(), "*")
-server.Start()
+server := one.NewOne()
+if err := server.Frame("./home.html"); err != nil {
+        log.Fatal(err)
+}
+payload := server.Frames()
+// Publish payload separately; frame registration does not register routes.
 ```
 
 ## Browser API
@@ -509,16 +561,14 @@ adds controllers/observers; it is not an idempotent reset.
 
 Go renders the three embedded templates into one HTML response on `:1000`.
 There are no separate runtime-script requests. On initialization the browser
-fetches the circuit root on `:1001`, whose payload contains exactly two
-positional nodes:
+fetches the circuit root on `:1001`, whose payload is gzip-compressed JSON:
 
 ```text
-0: { Ones: frames }
-1: { Ones: panels }
+[frames, panels]
 ```
 
-Their other fields are empty. Runtime HTML is not in this bootstrap.
-`source('')` loads it; normal frame code uses named public resource routes.
+Each collection contains HTML strings. Named resource routes use the binary
+format below instead of the bootstrap JSON.
 Circuit HTTP responses and saved payloads are gzip-compressed; the shell is
 plain HTML. Browser HTTP handling
 decompresses responses before `response.bytes()` and `Pathless.decode` run.
@@ -526,29 +576,40 @@ Compression is unconditional, not negotiated per request.
 
 ### Wire Format
 
-After gzip decompression, a node list is encoded recursively as:
+A flat resource collection is encoded as:
 
 ```text
-unsigned-varint node count
-for each node:
+unsigned-varint resource count
+for each resource:
         unsigned-varint name byte length + UTF-8 name
         unsigned-varint type byte length + UTF-8 MIME type
         unsigned-varint data byte length + raw data
-        child node list (same format)
 ```
 
-Lengths count bytes. Leaves end with zero children. There is no version or
-magic prefix. The Go encoder/decoder are private; use `Input` and `Save` for
-application-level import/export. Trees must contain non-nil, acyclic nodes.
+Encoding and decoding operate on raw bytes; gzip is a separate transport concern.
+Lengths count bytes. There are no child counts or nested records. There is no version or
+magic prefix. Use `fx.NewFx().Encode(entries)` to encode a collection and
+`fx.NewFx().Decode(data)` to decode wire bytes into one ordered resource collection.
+`Encode` accepts multiple collections and concatenates their individual
+encodings, each beginning with its own count. With no arguments it returns empty
+bytes; an empty collection argument emits a zero count. `Decode` returns one `N`,
+reading consecutive counted sequences until all bytes are consumed and
+aggregating their resources in order. Sequence boundaries are not retained in
+the result; empty bytes and empty sequences contribute no resources. Malformed input,
+including an incomplete later collection, returns an error without partial results.
+`Load` fetches a URL and returns the decoded `N` directly; `Input` sources raw content.
+Decoding returns an error for malformed input and copies fields independently of
+the input buffer. Collections passed to `Encode` must contain non-nil resource pointers.
+This replaces the previous recursive format: saved payloads must be regenerated
+and external decoders updated before exchanging the new records.
 
 ### Remote Import Caveat
 
-Go URL input tries gzip decoding on response-body bytes. Go's default HTTP
-transport may already decompress a circuit response marked
-`Content-Encoding: gzip`; those bare wire bytes fail the gzip decoder and
-fall back to a raw resource. To import a saved payload reliably, serve its
-gzip bytes without an HTTP `Content-Encoding` header. Local file input never
-decodes saved payloads automatically.
+`Load` decodes the fetched response-body bytes. Go's default HTTP
+transport automatically decompresses responses marked `Content-Encoding: gzip`.
+Serve raw wire bytes, or mark gzip-compressed responses with that header;
+unmarked gzip bytes fail decoding. `Input` never decodes
+saved payloads automatically.
 
 ## Boundaries
 
@@ -563,7 +624,7 @@ decodes saved payloads automatically.
 - Servers, custom frame side effects, cached object URLs, state maps, and
   observers have no coordinated disposal API. Construction/startup are one-shot.
 - Go reads/decompression have no explicit size limits. Its decoder checks
-  framing, depth, and trailing bytes; the browser decoder assumes valid input
+        framing and trailing bytes; the browser decoder assumes valid input
   and is not suitable for untrusted payloads.
 - Use a modern browser supporting `Response.bytes()`, `ResizeObserver`,
   contextual HTML fragments, CSS nesting, and container query units.
@@ -572,12 +633,13 @@ decodes saved payloads automatically.
 
 | Source                                   | Responsibility                                        |
 | ---------------------------------------- | ----------------------------------------------------- |
-| [pathless.go](pathless.go)               | Public Go constructor and embedded `fx.Fx`.           |
-| [fx/fx.go](fx/fx.go)                     | Content collections, HTML building, circuit payloads. |
-| [fx/input.go](fx/input.go)               | Local/remote input, naming, and sequencing.           |
-| [fx/output.go](fx/output.go)             | `One` and the private wire encoder/decoder.           |
-| [zero/zero.go](zero/zero.go)             | Embedded asset assembly and HTML rendering.           |
-| [one/one.go](one/one.go)                 | Mux construction and server startup.                  |
+| [pathless.go](pathless.go)               | Public Go constructor and embedded `*one.One`.        |
+| [fx/fx.go](fx/fx.go)                     | Resource API and HTTP client construction.            |
+| [fx/input.go](fx/input.go)               | `One`, `N`, flat imports, naming, and sequencing.     |
+| [fx/output.go](fx/output.go)             | Public flat wire encoder/decoder.                     |
+| [zero/zero.go](zero/zero.go)             | Embedded assets and HTML rendering.                    |
+| [one/one.go](one/one.go)                 | Resource API, frame collections, muxes, and startup.   |
+| [one/frame.go](one/frame.go)             | HTML registration and frame/panel encoding.            |
 | [one/zero.go](one/zero.go)               | Shell handler and redirects.                          |
 | [one/fx.go](one/fx.go)                   | Circuit HTTP registration, headers, and CORS.         |
 | [zero/zero.html](zero/zero.html)         | Shell CSS, resource loading, and HTML execution.      |

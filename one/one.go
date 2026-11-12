@@ -1,29 +1,27 @@
 package one
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/timefactoryio/pathless/fx"
+)
 
 type One struct {
+	fx.Fx
 	Pathless *http.ServeMux
 	Circuit  *http.ServeMux
+	frames   fx.N
+	panels   fx.N
 }
 
-func NewOne(origin []byte, circuit map[string][]byte, pathlessURL string) *One {
+func NewOne() *One {
 	o := &One{
+		Fx:       fx.NewFx(),
 		Pathless: http.NewServeMux(),
 		Circuit:  http.NewServeMux(),
+		frames:   fx.N{},
+		panels:   fx.N{},
 	}
-	o.origin(origin)
-	o.circuit(circuit, pathlessURL)
-	return o
-}
 
-func (o *One) Start() {
-	go func() {
-		if err := http.ListenAndServe(":1000", o.Pathless); err != nil {
-			panic(err)
-		}
-	}()
-	if err := http.ListenAndServe(":1001", o.Circuit); err != nil {
-		panic(err)
-	}
+	return o
 }

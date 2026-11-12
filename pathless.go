@@ -2,14 +2,14 @@ package pathless
 
 import (
 	"fmt"
+	"net/http"
 
-	"github.com/timefactoryio/pathless/fx"
 	"github.com/timefactoryio/pathless/one"
 	"github.com/timefactoryio/pathless/zero"
 )
 
 type Pathless struct {
-	fx.Fx
+	*one.One
 	origin      []byte
 	pathlessURL string
 }
@@ -29,12 +29,20 @@ func NewPathless(args ...string) *Pathless {
 		))
 	}
 	return &Pathless{
-		Fx:          fx.NewFx(),
-		origin:      zero.Origin(circuitURL),
+		One:         one.NewOne(),
+		origin:      zero.NewZero(circuitURL).Origin,
 		pathlessURL: pathlessURL,
 	}
 }
 
-func (p *Pathless) Start() {
-	one.NewOne(p.origin, p.Circuit(), p.pathlessURL).Start()
+func (p *Pathless) Start(circuitURL string) {
+	go func() {
+		if err := http.ListenAndServe(":1000", p.Pathless); err != nil {
+			panic(err)
+		}
+	}()
+	if err := http.ListenAndServe(":1001", p.Circuit); err != nil {
+		panic(err)
+	}
+
 }

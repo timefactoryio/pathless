@@ -10,7 +10,7 @@ application contracts.
 | ------------------ | ------------------------------------------------------------------------ |
 | Go `Pathless`      | Embedded `fx.Fx` interface                                               |
 | `zero.Zero`        | Universe bytes, shell origin, private circuit URL and shell mux          |
-| Private `fx`       | Zero reference, frames/panels, routes, circuit mux, HTTP client          |
+| Private `fx`       | **** Zero reference, frames/panels, routes, circuit mux, HTTP client     |
 | Browser `Pathless` | Root, resource/blob cache, decoded frames/panels, universe               |
 | Browser `Universe` | Space records, geometry, bindings, layout/focus, public API registration |
 | Browser `Pointer`  | Active gesture, pointer-event dispatch                                   |
@@ -68,16 +68,16 @@ node, replacing type/data but sharing children. Mutations are not synchronized.
 
 ### Input Helpers
 
-| Helper                        | Role                                                                                                            |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `(*fx).url(source)`           | GET, reject non-2xx, read bytes, try `decode`, otherwise return a raw leaf.                                     |
-| `detectType(path, data)`      | Extension-based MIME resolution, then content sniffing.                                                         |
-| `readDir(path)`               | Read listing, call `processFiles`, apply `sequence`.                                                            |
-| `processFiles(path, entries)` | Recurse into directories, read files, call `stripExtensions`.                                                   |
-| `readFile(path, name)`        | Read bytes and construct a typed leaf with the supplied name.                                                   |
-| `stripExtensions(entries)`    | Count shortened candidates, mutate only unique candidates.                                                      |
-| `sequence(entries)`           | Consume the normalized `sequence` node and order siblings.                                                      |
-| `baseName(source)`            | Extract URL path if applicable, take basename, preserve dot-prefixed names, otherwise drop the final extension. |
+| Helper                              | Role                                                                                                            |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `(*fx).url(source)`                 | GET, reject non-2xx, read bytes, try `decode`, otherwise return a raw leaf.                                     |
+| `detectType(path, data)`            | Extension-based MIME resolution, then content sniffing.                                                         |
+| `(*fx).InputDir(path)`              | Read a directory listing and call `processFiles`; separate from file/URL `Input`.                               |
+| `(*fx).processFiles(path, entries)` | Recurse through `InputDir`, read files, normalize and sequence siblings, then flatten.                          |
+| `readFile(path, name)`              | Read bytes and construct a typed leaf with the supplied name.                                                   |
+| `stripExtensions(entries)`          | Count shortened candidates, mutate only unique candidates.                                                      |
+| `sequence(entries)`                 | Consume the normalized `sequence` node and order siblings.                                                      |
+| `baseName(source)`                  | Extract URL path if applicable, take basename, preserve dot-prefixed names, otherwise drop the final extension. |
 
 `baseName` returns empty for `.` or `/`. Sibling normalization includes
 directories, is local to each directory, and starts from `os.ReadDir` order.
