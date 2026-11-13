@@ -7,8 +7,6 @@ import (
 
 type Fx interface {
 	Input(string) (N, error)
-	InputPayload(string) (N, error)
-	InputDir(string) (N, error)
 	Load(string) (N, error)
 	Encode(...N) []byte
 	Decode([]byte) (N, error)

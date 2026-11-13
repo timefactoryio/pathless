@@ -5,12 +5,10 @@ import (
 	"net/http"
 
 	"github.com/timefactoryio/pathless/one"
-	"github.com/timefactoryio/pathless/zero"
 )
 
 type Pathless struct {
 	*one.One
-	origin      []byte
 	pathlessURL string
 }
 
@@ -29,8 +27,7 @@ func NewPathless(args ...string) *Pathless {
 		))
 	}
 	return &Pathless{
-		One:         one.NewOne(),
-		origin:      zero.NewZero(circuitURL).Origin,
+		One:         one.NewOne(circuitURL),
 		pathlessURL: pathlessURL,
 	}
 }

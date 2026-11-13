@@ -68,49 +68,42 @@ node, replacing type/data but sharing children. Mutations are not synchronized.
 
 ### Input Helpers
 
-The private `dir` helper stores a manifest such as
-`[[null,"index.html"],["assets","logo.svg"],["assets/icons","close.svg"]]`
-in the first resource's data. Each record starts with its directory's
-root-relative, slash-separated path; `null` identifies the root. The remaining
-elements are immediate filenames. The manifest is built directly from
-`fs.WalkDir` entries, then files are loaded in manifest order. Records and file
-resources remain root-first, with files and child directories each visited in
-alphabetical order.
-Empty directories retain a path-only record; an empty root produces `[[null]]`.
-The following file resources keep their extensions and use root-relative names,
-such as `assets/logo.svg`. The legacy `InputDir` pipeline remains separate.
+`Input(source)` dispatches HTTP(S) URLs to `payload`. Local paths are inspected
+with `os.Stat`: directories use `dir`, and other paths use `file`. `Input` wraps
+the single `*One` returned by `file` in an `N`. `Load` fetches through `payload`
+and decodes the response bytes; it does not dispatch local paths.
+
+`dir` groups files and directory headers during `fs.WalkDir`. `normalize` removes
+non-colliding final filename extensions and applies newline-separated ordering
+from normalized `sequence` files. It returns only the root header and ordered
+files, omitting sequence files and child directory headers. The root has its
+basename, empty type, and nil data; files retain MIME types and bytes with
+root-relative, slash-separated names. No manifest is needed.
+
+File symlinks are read; broken links and directory links produce errors.
+A symlink supplied as the root is followed. Failures return nil and an error
+with source context, not partial resources. Routing tests are in
+[fx/input_test.go](fx/input_test.go).
 
 | Helper                              | Role                                                                                                            |
 | ----------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `(*fx).url(source)`                 | GET, reject non-2xx, read bytes, try `decode`, otherwise return a raw leaf.                                     |
-| `detectType(path, data)`            | Extension-based MIME resolution, then content sniffing.                                                         |
-| `(*fx).InputDir(path)`              | Read a directory listing and call `processFiles`; separate from file/URL `Input`.                               |
-| `(*fx).dir(path)`                   | Return a root `dir` resource containing a JSON manifest, followed by recursively loaded files with root-relative names. |
-| `(*fx).processFiles(path, entries)` | Recurse through `InputDir`, read files, normalize and sequence siblings, then flatten.                          |
+| `(*fx).payload(source)`            | GET, reject non-2xx, and return one raw resource without decoding.                                               |
+| `(*fx).dir(path)`                  | Walk a directory and return its root header followed by normalized, ordered files.                              |
+| `(*fx).normalize(groups)`          | Normalize file names and apply per-directory sequencing while omitting child directory headers.                 |
 | `(*fx).file(path)`                  | Read bytes and construct a typed resource using the filename, including its extension.                         |
-| `stripExtensions(entries)`          | Count shortened candidates, mutate only unique candidates.                                                      |
-| `sequence(entries)`                 | Consume the normalized `sequence` node and order siblings.                                                      |
 
-`Input` preserves the filename and extension. `InputURL` preserves the exact
-supplied URL as its name, including host and query, even after redirects.
-Sibling normalization includes
-directories, is local to each directory, and starts from `os.ReadDir` order.
-A direct file input preserves its original filename.
-
-`sequence` trims overall data and individual lines, ignores unknown names,
-and tracks node identity to suppress duplicate listed entries. Unlisted nodes
-follow in their existing order. It triggers on normalized name `sequence`,
-not on a special filesystem extension. A collision that preserves the name
-`sequence.txt` prevents that entry from being consumed under that name.
+Single-file input preserves the filename and extension. URL input preserves the
+exact supplied URL as its name, including host and query, even after redirects.
+Directory input normalizes file names and applies sequencing; MIME detection
+still uses each file's original extension before normalization.
 
 ### Remote Transport Caveat
 
-`url` tries gzip-only `decode` on bytes read from the HTTP response body.
-The standard Go HTTP transport can automatically decompress responses carrying
-`Content-Encoding: gzip`, as Pathless circuit responses do. In that case it
-passes bare wire bytes to `decode`, which rejects them; `url` falls back to
-a raw resource. Direct circuit-to-circuit consumption is therefore not always
-equivalent to fetching a saved gzip artifact served without content decoding.
+`payload` returns response-body bytes without decoding. The standard Go HTTP
+transport can automatically decompress responses carrying `Content-Encoding: gzip`.
+`Load` passes the resulting bytes to `Decode`, which expects raw wire bytes.
+Unmarked gzip artifacts fail decoding; neither `Input` nor `Load` falls back
+from a decoding failure to a different representation.
 
 ### Frame Builder
 

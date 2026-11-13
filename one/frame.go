@@ -3,7 +3,6 @@ package one
 import (
 	"fmt"
 	"mime"
-	"strings"
 
 	"github.com/timefactoryio/pathless/fx"
 )
@@ -21,11 +20,7 @@ func (o *One) Frames() []byte {
 }
 
 func (o *One) html(source string, target *fx.N) error {
-	input := o.Input
-	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
-		input = o.InputURL
-	}
-	entries, err := input(source)
+	entries, err := o.Input(source)
 	if err != nil {
 		return err
 	}

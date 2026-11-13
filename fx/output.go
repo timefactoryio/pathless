@@ -11,33 +11,33 @@ import (
 func (f *fx) Encode(collections ...N) []byte {
 	size := 0
 	maxInt := int(^uint(0) >> 1)
-	for _, ones := range collections {
-		prefix := uvarintSize(uint64(len(ones)))
-		if prefix > maxInt-size {
+	for _, entries := range collections {
+		countSize := uvarintSize(uint64(len(entries)))
+		if countSize > maxInt-size {
 			panic("encode: encoded size overflows int")
 		}
-		size += prefix
-		for _, one := range ones {
-			for _, length := range [...]int{len(one.Name), len(one.Type), len(one.Data)} {
-				prefix := uvarintSize(uint64(length))
-				if length > maxInt-size-prefix {
+		size += countSize
+		for _, entry := range entries {
+			for _, length := range [...]int{len(entry.Name), len(entry.Type), len(entry.Data)} {
+				lengthSize := uvarintSize(uint64(length))
+				if length > maxInt-size-lengthSize {
 					panic("encode: encoded size overflows int")
 				}
-				size += prefix + length
+				size += lengthSize + length
 			}
 		}
 	}
 
 	data := make([]byte, 0, size)
-	for _, ones := range collections {
-		data = binary.AppendUvarint(data, uint64(len(ones)))
-		for _, one := range ones {
-			data = binary.AppendUvarint(data, uint64(len(one.Name)))
-			data = append(data, one.Name...)
-			data = binary.AppendUvarint(data, uint64(len(one.Type)))
-			data = append(data, one.Type...)
-			data = binary.AppendUvarint(data, uint64(len(one.Data)))
-			data = append(data, one.Data...)
+	for _, entries := range collections {
+		data = binary.AppendUvarint(data, uint64(len(entries)))
+		for _, entry := range entries {
+			data = binary.AppendUvarint(data, uint64(len(entry.Name)))
+			data = append(data, entry.Name...)
+			data = binary.AppendUvarint(data, uint64(len(entry.Type)))
+			data = append(data, entry.Type...)
+			data = binary.AppendUvarint(data, uint64(len(entry.Data)))
+			data = append(data, entry.Data...)
 		}
 	}
 	return data
