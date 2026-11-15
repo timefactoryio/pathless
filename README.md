@@ -37,13 +37,14 @@ import (
 
 func main() {
         p := pathless.NewPathless()
-        if err := p.Frame(`<main>Hello</main>`); err != nil {
+        if err := p.Frame("./home.html"); err != nil {
                 log.Fatal(err)
         }
         p.Start()
 }
 ```
 
+Create `home.html` with your HTML content before running the example.
 Open `http://localhost:1000`. The circuit listens on `:1001`. Construction
 renders the shell; `Start` starts both servers and blocks. Register all
 content before calling `Start`, including at least one main frame. The browser
@@ -89,6 +90,9 @@ Exported by `github.com/timefactoryio/pathless/fx`:
 
 ```go
 type Fx interface {
+        Frame(string) error
+        Panel(string) error
+        Frames() []byte
         Input(string) (N, error)
         Load(string) (N, error)
         Encode(...N) []byte
@@ -114,6 +118,9 @@ no servers. Normally use `NewPathless` instead.
 `One` represents one resource: name, MIME type, and bytes. `N` is a flat
 collection of resource pointers. Directory input starts with a root record whose
 type is empty and data is nil; nested files use relative names such as `slides/first`.
+
+`Frame(source)` and `Panel(source)` validate and store HTML entries in their
+respective collections. `Frames()` serializes both collections with `Encode`.
 
 `one.One.Frames()` returns `Encode(frames, panels)`: two consecutive collections, frames
 first and panels second. Each has its own entry count, including zero for an
@@ -188,10 +195,12 @@ Frame(source string) error
 Panel(source string) error
 ```
 
-Registers a local file or raw URL resource from `Input(source)` as a frame
-or panel, in registration order. Directory paths are not accepted.
-These methods belong to `one.One`, which owns the frame and panel collections;
-they are also promoted onto `Pathless`. The `fx` package only sources and encodes resources.
+Registers a local HTML file, directory of HTML files, or raw URL resource as
+frames or panels. Every source is loaded with `Input(source)`; literal HTML is
+not accepted as a source. Resource names, order, and bytes are preserved from
+`Input`, excluding the directory's root metadata record.
+These methods belong to `fx.Fx`, which owns the frame and panel collections;
+they are also promoted onto `Pathless`.
 Every entry's MIME type must be
 `text/html` (parameters such as `charset=utf-8` are allowed); other or malformed
 types return an error without registering any entries from that call.
@@ -205,9 +214,7 @@ if err := p.Panel("./controls.html"); err != nil {
 }
 ```
 
-The builder merges multiple exact, attribute-free `<style>` blocks and merges
-exact `<script>` blocks into scoped blocks at the end. It is not a general
-HTML parser, sanitizer, or module loader. Frame scripts share the shell's
+Registration does not parse, sanitize, or rewrite HTML. Frame scripts share the shell's
 document and origin; only load trusted code.
 
 ### Save
@@ -243,13 +250,16 @@ when registering HTTP handlers.
 Start()
 ```
 
-`Pathless.Start` passes the rendered shell and `Circuit()` snapshot to `one`,
-which registers handlers and serves the shell on `:1000` and circuit on `:1001`.
+`Pathless.Start` registers handlers and serves the shell on `:1000` and circuit
+on `:1001`. It calls `Frames()` once when registering the circuit handler, which
+reuses the gzip-compressed frame and panel payload for every request.
 It blocks and panics on server failure. Call once, after content registration.
 Served bytes are startup snapshots, not live resources.
+The shell response uses `Content-Encoding: gzip` for its precompressed HTML.
 
-The circuit root uses `application/json`; public resources use
-`application/octet-stream`. Both use `Content-Encoding: gzip`.
+The circuit handler uses only `application/octet-stream`, including for
+`OPTIONS` responses. Payload responses use `Content-Encoding: gzip`;
+compression happens once at startup.
 CORS advertises `GET, OPTIONS`, allows the configured shell origin (or `*`
 locally), and answers `OPTIONS` with `204`. Other methods are not rejected.
 CORS is not authentication. `http.ServeMux` root catch-all semantics apply:

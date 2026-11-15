@@ -2,11 +2,27 @@ package fx
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/binary"
 	"fmt"
 	"math/bits"
 	"slices"
 )
+
+func (f *fx) Zip(collections ...N) []byte {
+	var buf bytes.Buffer
+	writer, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	if err != nil {
+		panic(err)
+	}
+	if _, err := writer.Write(f.Encode(collections...)); err != nil {
+		panic(err)
+	}
+	if err := writer.Close(); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
 
 func (f *fx) Encode(collections ...N) []byte {
 	size := 0

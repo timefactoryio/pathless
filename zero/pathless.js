@@ -2,6 +2,7 @@ class Pathless {
 	#cache = new Map();
 	#rendering = null;
 	static #range = new Range();
+	static #decoder = new TextDecoder();
 	static #layouts = ['x', 'y', 'up', 'right', 'down', 'left'];
 
 	constructor() {
@@ -66,15 +67,49 @@ class Pathless {
 		if (!states.has(index)) states.set(index, new Map());
 		return { space, el: el.firstElementChild, state: states.get(index) };
 	}
-	source(path, raw = false) {
+	decode(bytes) {
+		if (!(bytes instanceof Uint8Array))
+			throw new TypeError('decode() requires Uint8Array');
+		const entries = [];
+		let offset = 0;
+		const varint = (shift = 0) => {
+			if (offset >= bytes.length || shift >= 70)
+				throw new Error('decode: invalid varint');
+			const byte = bytes[offset++];
+			const value =
+				(byte & 127) * 2 ** shift +
+				(byte & 128 ? varint(shift + 7) : 0);
+			if (!Number.isSafeInteger(value))
+				throw new Error('decode: varint exceeds safe integer range');
+			return value;
+		};
+		const field = () => {
+			const length = varint();
+			if (length > bytes.length - offset)
+				throw new Error('decode: field exceeds remaining data');
+			const value = bytes.slice(offset, offset + length);
+			offset += length;
+			return value;
+		};
+		while (offset < bytes.length)
+			for (let count = varint(); count > 0; count--)
+				entries.push({
+					name: Pathless.#decoder.decode(field()),
+					type: Pathless.#decoder.decode(field()),
+					data: field(),
+				});
+		return entries;
+	}
+	source(path = '', raw = false) {
 		if (!path) throw new TypeError('source() requires a path');
 		if (!raw && this.#cache.has(path)) return this.#cache.get(path);
 		const request = fetch(`${circuit}/${path}`)
 			.then((response) => {
 				if (!response.ok)
 					throw new Error(`HTTP ${response.status}: ${response.url}`);
-				return response.arrayBuffer();
+				return response.bytes();
 			})
+			.then((bytes) => this.decode(bytes))
 			.catch((error) => {
 				if (!raw) this.#cache.delete(path);
 				throw error;
