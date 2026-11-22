@@ -240,16 +240,14 @@ chaining; it does not automatically sync or await asynchronous frame work.
 
 `Pathless.decode` closes over a byte offset. Its local helpers are:
 
-- `uvarint`: reads continuation-bit integers, coercing to unsigned 32-bit with
-  `>>> 0`.
-- `field`: reads length, advances offset, returns a `subarray` view.
-- `ones`: reads the node count and uses `Array.from` to decode nodes in order,
-  recursively decoding each child list before the next sibling. HTML data
-  becomes strings; other data remains byte views.
+- `field`: reads a 32-bit little-endian byte length with `DataView`,
+  advances the offset, and returns a byte copy.
 
-Unlike the Go decoder, it does not explicitly reject truncation, trailing
-bytes, excessive depth, or oversized varints. It assumes trusted valid wire
-bytes and relies on browser HTTP gzip decompression.
+It reads flat `{ name, type, data }` entries until the payload ends. Names
+and types become strings; data remains bytes. Payloads are assumed valid;
+truncated fields may be silently shortened, while truncated headers throw.
+It relies on browser HTTP gzip decompression. This client-first format
+is not yet compatible with the Go varint codec; see [README.md](README.md#wire-format).
 
 ## Universe Private Components
 

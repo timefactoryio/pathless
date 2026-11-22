@@ -11,14 +11,6 @@ import (
 	"strings"
 )
 
-type One struct {
-	Name string
-	Type string
-	Data []byte
-}
-
-type N []*One
-
 func (f *fx) Input(source string) (N, error) {
 	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
 		return f.payload(source)

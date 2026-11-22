@@ -585,7 +585,27 @@ Compression is unconditional, not negotiated per request.
 
 ### Wire Format
 
-A flat resource collection is encoded as:
+The client-first `Pathless.decode` format is a flat array of resources:
+
+```text
+repeat until end of payload:
+        uint32 little-endian name byte length + UTF-8 name
+        uint32 little-endian type byte length + UTF-8 MIME type
+        uint32 little-endian data byte length + raw data
+```
+
+There is no entry count or separator. Each entry has exactly three fields.
+Empty bytes decode to an empty array. Results are
+`{ name: string, type: string, data: Uint8Array }`; data is copied.
+Payloads are assumed valid; truncated fields may be silently shortened.
+Incomplete length headers still throw. Lengths count bytes, not characters.
+The decoder accepts `Uint8Array` views, including views into larger buffers.
+
+**The Go codec has not yet migrated to this format.** Its varint payloads
+are incompatible with the new client decoder; server encoding must be updated
+before using `source()` with those endpoints.
+
+The existing Go codec encodes a flat resource collection as:
 
 ```text
 unsigned-varint resource count

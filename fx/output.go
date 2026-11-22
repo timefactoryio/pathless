@@ -5,7 +5,6 @@ import (
 	"compress/gzip"
 	"encoding/binary"
 	"fmt"
-	"math/bits"
 	"slices"
 )
 
@@ -22,45 +21,6 @@ func (f *fx) Zip(collections ...N) []byte {
 		panic(err)
 	}
 	return buf.Bytes()
-}
-
-func (f *fx) Encode(collections ...N) []byte {
-	size := 0
-	maxInt := int(^uint(0) >> 1)
-	for _, entries := range collections {
-		countSize := uvarintSize(uint64(len(entries)))
-		if countSize > maxInt-size {
-			panic("encode: encoded size overflows int")
-		}
-		size += countSize
-		for _, entry := range entries {
-			for _, length := range [...]int{len(entry.Name), len(entry.Type), len(entry.Data)} {
-				lengthSize := uvarintSize(uint64(length))
-				if length > maxInt-size-lengthSize {
-					panic("encode: encoded size overflows int")
-				}
-				size += lengthSize + length
-			}
-		}
-	}
-
-	data := make([]byte, 0, size)
-	for _, entries := range collections {
-		data = binary.AppendUvarint(data, uint64(len(entries)))
-		for _, entry := range entries {
-			data = binary.AppendUvarint(data, uint64(len(entry.Name)))
-			data = append(data, entry.Name...)
-			data = binary.AppendUvarint(data, uint64(len(entry.Type)))
-			data = append(data, entry.Type...)
-			data = binary.AppendUvarint(data, uint64(len(entry.Data)))
-			data = append(data, entry.Data...)
-		}
-	}
-	return data
-}
-
-func uvarintSize(value uint64) int {
-	return max(1, (bits.Len64(value)+6)/7)
 }
 
 func (f *fx) Decode(data []byte) (N, error) {

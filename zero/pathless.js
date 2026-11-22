@@ -14,18 +14,60 @@ class Pathless {
 			states: new Map(),
 		}));
 		this.focused = this.spaces[0];
+		this.frames = [];
+		this.panels = [];
 	}
 
 	async init() {
-		const [frames, panels] = await (await fetch(circuit)).json();
-		const fragment = (html) =>
-			Pathless.#range.createContextualFragment(html);
-		this.frames = frames.map(fragment);
-		this.panels = panels.map(fragment);
+		const templates = { frame: this.frames, panel: this.panels };
+		for (const { type, data } of await this.source())
+			templates[type].push(
+				Pathless.#range.createContextualFragment(
+					Pathless.#decoder.decode(data),
+				),
+			);
 		for (const space of this.spaces)
 			space.frames = space === this.spaces[3] ? this.panels : this.frames;
 		this.#mount(this.spaces);
 		return this;
+	}
+
+	decode(bytes) {
+		const view = new DataView(
+			bytes.buffer,
+			bytes.byteOffset,
+			bytes.byteLength,
+		);
+		const entries = [];
+		let offset = 0;
+		const field = () => {
+			const length = view.getUint32(offset, true);
+			offset += 4;
+			return bytes.subarray(offset, (offset += length));
+		};
+		while (offset < bytes.length)
+			entries.push({
+				name: Pathless.#decoder.decode(field()),
+				type: Pathless.#decoder.decode(field()),
+				data: field().slice(),
+			});
+		return entries;
+	}
+	source(path = '') {
+		if (this.#cache.has(path)) return this.#cache.get(path);
+		const request = fetch(path ? `${circuit}/${path}` : circuit)
+			.then((response) => {
+				if (!response.ok)
+					throw new Error(`HTTP ${response.status}: ${response.url}`);
+				return response.bytes();
+			})
+			.then((bytes) => this.decode(bytes))
+			.catch((error) => {
+				this.#cache.delete(path);
+				throw error;
+			});
+		this.#cache.set(path, request);
+		return request;
 	}
 
 	get observable() {
@@ -67,56 +109,7 @@ class Pathless {
 		if (!states.has(index)) states.set(index, new Map());
 		return { space, el: el.firstElementChild, state: states.get(index) };
 	}
-	decode(bytes) {
-		if (!(bytes instanceof Uint8Array))
-			throw new TypeError('decode() requires Uint8Array');
-		const entries = [];
-		let offset = 0;
-		const varint = (shift = 0) => {
-			if (offset >= bytes.length || shift >= 70)
-				throw new Error('decode: invalid varint');
-			const byte = bytes[offset++];
-			const value =
-				(byte & 127) * 2 ** shift +
-				(byte & 128 ? varint(shift + 7) : 0);
-			if (!Number.isSafeInteger(value))
-				throw new Error('decode: varint exceeds safe integer range');
-			return value;
-		};
-		const field = () => {
-			const length = varint();
-			if (length > bytes.length - offset)
-				throw new Error('decode: field exceeds remaining data');
-			const value = bytes.slice(offset, offset + length);
-			offset += length;
-			return value;
-		};
-		while (offset < bytes.length)
-			for (let count = varint(); count > 0; count--)
-				entries.push({
-					name: Pathless.#decoder.decode(field()),
-					type: Pathless.#decoder.decode(field()),
-					data: field(),
-				});
-		return entries;
-	}
-	source(path = '', raw = false) {
-		if (!path) throw new TypeError('source() requires a path');
-		if (!raw && this.#cache.has(path)) return this.#cache.get(path);
-		const request = fetch(`${circuit}/${path}`)
-			.then((response) => {
-				if (!response.ok)
-					throw new Error(`HTTP ${response.status}: ${response.url}`);
-				return response.bytes();
-			})
-			.then((bytes) => this.decode(bytes))
-			.catch((error) => {
-				if (!raw) this.#cache.delete(path);
-				throw error;
-			});
-		if (!raw) this.#cache.set(path, request);
-		return request;
-	}
+
 	one(space = this.focused) {
 		this.focused = space;
 		return this.#layout(this.layout[0] === null ? this.layout[1] : null);

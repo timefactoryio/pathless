@@ -9,15 +9,15 @@ import (
 type One struct {
 	*zero.Zero
 	Pathless *http.ServeMux
-	Circuit  *http.ServeMux
+	Path     *http.ServeMux
 	frames   []byte
 }
 
-func NewOne(pathlessURL, pathUrl string) *One {
+func NewOne(pathless, path string) *One {
 	return &One{
-		Zero:     zero.NewZero(pathlessURL, pathUrl, true),
+		Zero:     zero.NewZero(pathless, path, true),
 		Pathless: http.NewServeMux(),
-		Circuit:  http.NewServeMux(),
+		Path:     http.NewServeMux(),
 		frames:   nil,
 	}
 }
@@ -53,13 +53,13 @@ func (o *One) cors(next http.Handler) http.Handler {
 func (o *One) Start() {
 	o.frames = o.Frames(true)
 	o.Pathless.HandleFunc("/", o.origin)
-	o.Circuit.HandleFunc("/", o.circuit)
+	o.Path.HandleFunc("/", o.circuit)
 	go func() {
 		if err := http.ListenAndServe(":1000", o.Pathless); err != nil {
 			panic(err)
 		}
 	}()
-	if err := http.ListenAndServe(":1001", o.cors(o.Circuit)); err != nil {
+	if err := http.ListenAndServe(":1001", o.cors(o.Path)); err != nil {
 		panic(err)
 	}
 }

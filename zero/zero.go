@@ -24,20 +24,20 @@ var zero = template.Must(template.New("").Parse(origin))
 type Zero struct {
 	fx.Fx
 	Domain   string
-	Circuit  string
+	Path     string
 	Pathless []byte
 }
 
-func NewZero(domain, circuit string, compressed ...bool) *Zero {
+func NewZero(domain, path string, compressed ...bool) *Zero {
 	return &Zero{
-		Pathless: execute(circuit, len(compressed) > 0 && compressed[0]),
-		Circuit:  circuit,
+		Pathless: execute(path, len(compressed) > 0 && compressed[0]),
+		Path:     path,
 		Domain:   domain,
 		Fx:       fx.NewFx(),
 	}
 }
 
-func execute(circuit string, compressed bool) []byte {
+func execute(path string, compressed bool) []byte {
 	var buf bytes.Buffer
 	var writer io.Writer = &buf
 	if compressed {
@@ -47,13 +47,13 @@ func execute(circuit string, compressed bool) []byte {
 			panic(err)
 		}
 	} else {
-		buf.Grow(len(origin) + len(pathless) + len(input) + len(circuit))
+		buf.Grow(len(origin) + len(pathless) + len(input) + len(path))
 	}
 	if err := zero.Execute(writer, struct {
-		CIRCUIT  string
+		PATH     string
 		PATHLESS template.JS
 		INPUT    template.JS
-	}{circuit, pathless, input}); err != nil {
+	}{path, pathless, input}); err != nil {
 		panic(err)
 	}
 	if compressor, ok := writer.(*gzip.Writer); ok {

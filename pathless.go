@@ -11,13 +11,13 @@ type Pathless struct {
 }
 
 func NewPathless(args ...string) *Pathless {
-	pathlessURL := "*"
-	pathUrl := "http://localhost:1001"
+	pathless := "*"
+	path := "http://localhost:1001"
 	switch len(args) {
 	case 0:
 	case 2:
-		pathlessURL = "https://" + args[0]
-		pathUrl = "https://" + args[1]
+		pathless = "https://" + args[0]
+		path = "https://" + args[1]
 	default:
 		panic(fmt.Sprintf(
 			"pathless.NewPathless: expected 0 or 2 arguments, got %d",
@@ -25,6 +25,6 @@ func NewPathless(args ...string) *Pathless {
 		))
 	}
 	return &Pathless{
-		One: one.NewOne(pathlessURL, pathUrl),
+		One: one.NewOne(pathless, path),
 	}
 }
