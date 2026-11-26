@@ -34,7 +34,7 @@ func (f *fx) Load(source string) (N, error) {
 	if err != nil {
 		return nil, err
 	}
-	entries, err := f.Decode(payload[0].Data)
+	entries, err := Decode(payload[0].Data)
 	if err != nil {
 		return nil, fmt.Errorf("decode %q: %w", source, err)
 	}
@@ -51,8 +51,7 @@ func (f *fx) file(path string) (*One, error) {
 		typ = http.DetectContentType(data)
 	}
 	return &One{
-		Name: filepath.Base(path),
-		Type: typ,
+		Meta: map[string]string{"name": filepath.Base(path), "type": typ},
 		Data: data,
 	}, nil
 }
@@ -81,8 +80,7 @@ func (f *fx) payload(source string) (N, error) {
 		typ = http.DetectContentType(data)
 	}
 	return N{{
-		Name: source,
-		Type: typ,
+		Meta: map[string]string{"name": source, "type": typ},
 		Data: data,
 	}}, nil
 }
@@ -101,7 +99,7 @@ func (f *fx) dir(path string) (N, error) {
 				name = filepath.Base(path)
 			}
 			directories[relative] = len(groups)
-			groups = append(groups, []*One{{Name: name}})
+			groups = append(groups, []*One{{Meta: map[string]string{"name": name}}})
 			return nil
 		}
 		if relative == "." {
@@ -111,7 +109,7 @@ func (f *fx) dir(path string) (N, error) {
 		if err != nil {
 			return err
 		}
-		file.Name = relative
+		file.Meta["name"] = relative
 		index := directories[filepath.ToSlash(filepath.Dir(relative))]
 		groups[index] = append(groups[index], file)
 		return nil
@@ -134,10 +132,10 @@ func (f *fx) normalize(groups [][]*One) N {
 	counts := make(map[string]int)
 	for i, group := range groups {
 		if i > 0 {
-			counts[group[0].Name]++
+			counts[group[0].Meta["name"]]++
 		}
 		for _, file := range group[1:] {
-			counts[trim(file.Name)]++
+			counts[trim(file.Meta["name"])]++
 		}
 	}
 
@@ -146,10 +144,10 @@ func (f *fx) normalize(groups [][]*One) N {
 		var sequence *One
 		byName := make(map[string]*One, len(group)-1)
 		for _, file := range group[1:] {
-			if name := trim(file.Name); counts[name] == 1 {
-				file.Name = name
+			if name := trim(file.Meta["name"]); counts[name] == 1 {
+				file.Meta["name"] = name
 			}
-			name := filepath.Base(file.Name)
+			name := filepath.Base(file.Meta["name"])
 			if name == "sequence" {
 				sequence = file
 			} else {
@@ -166,7 +164,7 @@ func (f *fx) normalize(groups [][]*One) N {
 			}
 		}
 		for _, file := range group[1:] {
-			if byName[filepath.Base(file.Name)] != nil {
+			if byName[filepath.Base(file.Meta["name"])] != nil {
 				entries = append(entries, file)
 			}
 		}

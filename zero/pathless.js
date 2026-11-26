@@ -19,13 +19,18 @@ class Pathless {
 	}
 
 	async init() {
-		const templates = { frame: this.frames, panel: this.panels };
-		for (const { type, data } of await this.source())
-			templates[type].push(
+		for (const {
+			meta: { role },
+			data,
+		} of await this.source()) {
+			if (role !== 'frame' && role !== 'panel')
+				throw new Error(`Unknown template role: ${role}`);
+			(role === 'frame' ? this.frames : this.panels).push(
 				Pathless.#range.createContextualFragment(
 					Pathless.#decoder.decode(data),
 				),
 			);
+		}
 		for (const space of this.spaces)
 			space.frames = space === this.spaces[3] ? this.panels : this.frames;
 		this.#mount(this.spaces);
@@ -33,24 +38,36 @@ class Pathless {
 	}
 
 	decode(bytes) {
-		const view = new DataView(
-			bytes.buffer,
-			bytes.byteOffset,
-			bytes.byteLength,
-		);
-		const entries = [];
 		let offset = 0;
+		const uint = () => {
+			let value = 0;
+			for (
+				let shift = 0;
+				shift < 53 && offset < bytes.length;
+				shift += 7
+			) {
+				const byte = bytes[offset++];
+				value += (byte & 127) * 2 ** shift;
+				if (byte < 128 && Number.isSafeInteger(value)) return value;
+			}
+			throw new Error('Invalid payload integer');
+		};
 		const field = () => {
-			const length = view.getUint32(offset, true);
-			offset += 4;
+			const length = uint();
+			if (length > bytes.length - offset)
+				throw new Error('Truncated payload field');
 			return bytes.subarray(offset, (offset += length));
 		};
+		const text = () => Pathless.#decoder.decode(field());
+		const metadata = () => {
+			const meta = Object.create(null);
+			for (let count = uint(); count > 0; count--) meta[text()] = text();
+			return meta;
+		};
+
+		const entries = [];
 		while (offset < bytes.length)
-			entries.push({
-				name: Pathless.#decoder.decode(field()),
-				type: Pathless.#decoder.decode(field()),
-				data: field().slice(),
-			});
+			entries.push({ meta: metadata(), data: field() });
 		return entries;
 	}
 	source(path = '') {
